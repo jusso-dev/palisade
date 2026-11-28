@@ -50,5 +50,10 @@ fuzz_target!(|data: &[u8]| {
             id.signature_valid(),
             sig.issue.is_none() && sig.report.primary.is_some()
         );
+        // The package-level status agrees with the report (#333).
+        assert_eq!(
+            sig.status() == palisade_fileid::package::PackageSignatureStatus::Valid,
+            id.signature_valid()
+        );
     }
 });

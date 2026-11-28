@@ -1831,6 +1831,7 @@ fn package_issue_name(issue: &PackageSignatureIssue) -> String {
         PackageSignatureIssue::NoContentTypes => "no_content_types".to_owned(),
         PackageSignatureIssue::SignerUnreadable => "signer_unreadable".to_owned(),
         PackageSignatureIssue::NotZip64 => "not_zip64".to_owned(),
+        PackageSignatureIssue::DigestInput(e) => format!("digest_input: {e}"),
     }
 }
 

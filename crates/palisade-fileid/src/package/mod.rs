@@ -174,6 +174,67 @@ pub enum PackageSignatureIssue {
     /// (`TRUST_E_BAD_DIGEST`), whatever the digest: such a signature is
     /// never valid here either.
     NotZip64,
+    /// A part the package digest covers could not be read, so there is no
+    /// digest to check the signature against (#333).
+    DigestInput(DigestInputError),
+}
+
+/// Which input of the package digest ([`signed_digest`]) could not be
+/// read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DigestInputError {
+    /// The part is larger than [`MAX_METADATA_SIZE`] uncompressed. These
+    /// parts are not in the block map, so nothing else bounds them. The
+    /// part name, then its size.
+    TooLarge(String, u64),
+    /// The part could not be inflated (its compressed data is broken).
+    Unreadable(String),
+    /// The archive's end records could not be rebuilt for the digest.
+    EndRecords,
+    /// The block map's hash method has no digest here.
+    HashMethod,
+}
+
+impl fmt::Display for DigestInputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooLarge(n, size) => {
+                write!(
+                    f,
+                    "{n} is {size} bytes, over the {MAX_METADATA_SIZE}-byte limit"
+                )
+            }
+            Self::Unreadable(n) => write!(f, "{n} cannot be read"),
+            Self::EndRecords => f.write_str("the end records cannot be rebuilt"),
+            Self::HashMethod => f.write_str("the block map's hash method has no digest"),
+        }
+    }
+}
+
+/// The package-level verdict on a package signature, distinct from the
+/// per-signature [`SignatureStatus`] (#333).
+///
+/// A signature that matches the package digest but fails a package check
+/// (the publisher, the block map, ZIP64) is reported in the shared
+/// Authenticode report as [`SignatureStatus::DigestMismatch`], so every
+/// consumer of that report (trust, validity, policy facts) already treats
+/// it as not covering the file, exactly as a tampered file. This status
+/// says which of the two it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageSignatureStatus {
+    /// Valid: the Authenticode checks and every package check passed.
+    Valid,
+    /// The package was rejected by a package-level check, whatever its
+    /// signatures said.
+    Rejected(PackageSignatureIssue),
+    /// No signature is valid for the package, and the package checks that
+    /// ran did not reject it. The block map's content check runs only for
+    /// a signature that verifies, so it may not have run. The
+    /// per-signature statuses in the report say why (most often
+    /// [`SignatureStatus::DigestMismatch`]: the file changed after
+    /// signing).
+    Invalid,
 }
 
 /// The package signature: the Authenticode report and any package-level
@@ -185,6 +246,18 @@ pub struct PackageSignature {
     /// Why the signature is not valid for this package, beyond the
     /// Authenticode checks.
     pub issue: Option<PackageSignatureIssue>,
+}
+
+impl PackageSignature {
+    /// The package-level verdict ([`PackageSignatureStatus`]).
+    #[must_use]
+    pub fn status(&self) -> PackageSignatureStatus {
+        match (&self.issue, self.report.primary) {
+            (Some(issue), _) => PackageSignatureStatus::Rejected(issue.clone()),
+            (None, Some(_)) => PackageSignatureStatus::Valid,
+            (None, None) => PackageSignatureStatus::Invalid,
+        }
+    }
 }
 
 /// The identity of a package or bundle.
@@ -340,26 +413,41 @@ fn identity_record(
 
 /// The signed digest of `archive` under `alg`: the tagged list described
 /// in the module documentation. `None` when a part it needs is missing or
-/// cannot be read.
+/// cannot be read; [`signed_digest_checked`] says which.
 #[must_use]
 pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<u8>> {
-    let h = alg.hash_algorithm()?;
+    signed_digest_checked(archive, alg).ok().flatten()
+}
+
+/// [`signed_digest`], saying why there is none: `Ok(None)` when a part it
+/// needs (`[Content_Types].xml`, the block map) is missing, `Err` when a
+/// part is present but cannot be read.
+pub fn signed_digest_checked(
+    archive: &Archive<'_>,
+    alg: DigestAlgorithm,
+) -> Result<Option<Vec<u8>>, DigestInputError> {
+    let h = alg.hash_algorithm().ok_or(DigestInputError::HashMethod)?;
     let one = |feed: &mut dyn FnMut(&mut MultiHasher)| -> Option<Vec<u8>> {
         let mut hasher = MultiHasher::new(AlgorithmSet::from(h));
         feed(&mut hasher);
         hasher.finalize().get(h).map(|d| d.as_bytes().to_vec())
     };
-    let member_hash = |name: &str| -> Option<Vec<u8>> {
-        let m = archive.member(name)?;
+    let member_hash = |name: &str| -> Result<Option<Vec<u8>>, DigestInputError> {
+        let Some(m) = archive.member(name) else {
+            return Ok(None);
+        };
         // These members are not in the block map, so nothing else bounds
         // how much they inflate to.
         if m.size > MAX_METADATA_SIZE {
-            return None;
+            return Err(DigestInputError::TooLarge(m.name.clone(), m.size));
         }
         let mut hasher = MultiHasher::new(AlgorithmSet::from(h));
-        archive.stream(m, |c| hasher.update(c)).ok()?;
-        hasher.finalize().get(h).map(|d| d.as_bytes().to_vec())
+        archive
+            .stream(m, |c| hasher.update(c))
+            .map_err(|_| DigestInputError::Unreadable(m.name.clone()))?;
+        Ok(hasher.finalize().get(h).map(|d| d.as_bytes().to_vec()))
     };
+    let end = DigestInputError::EndRecords;
     let signed: Vec<&Member> = archive
         .members
         .iter()
@@ -370,14 +458,18 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
         for m in &signed {
             hasher.update(archive.bytes(m.local_offset, m.end_offset));
         }
-    })?;
+    })
+    .ok_or(DigestInputError::HashMethod)?;
     // AXCD: the central directory without the signature, then end records
     // for it. Local records keep their offsets (the signature is last).
     let cd_offset: u64 = signed.last().map_or(0, |m| m.end_offset);
-    let cd_size = signed.iter().try_fold(0_u64, |n, m| {
-        n.checked_add(u64::try_from(archive.central_bytes(m).len()).ok()?)
-    })?;
-    let count = u64::try_from(signed.len()).ok()?;
+    let cd_size = signed
+        .iter()
+        .try_fold(0_u64, |n, m| {
+            n.checked_add(u64::try_from(archive.central_bytes(m).len()).ok()?)
+        })
+        .ok_or_else(|| end.clone())?;
+    let count = u64::try_from(signed.len()).map_err(|_| end.clone())?;
     let mut tail = Vec::new();
     if archive.zip64 {
         tail.extend_from_slice(&0x0606_4b50_u32.to_le_bytes());
@@ -421,8 +513,8 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
             u16::try_from(count).ok()
         }
     };
-    tail.extend_from_slice(&n16(field16(8))?.to_le_bytes());
-    tail.extend_from_slice(&n16(field16(10))?.to_le_bytes());
+    tail.extend_from_slice(&n16(field16(8)).ok_or_else(|| end.clone())?.to_le_bytes());
+    tail.extend_from_slice(&n16(field16(10)).ok_or_else(|| end.clone())?.to_le_bytes());
     let n32 = |orig: Option<u32>, v: u64| -> Option<u32> {
         if orig? == u32::MAX {
             Some(u32::MAX)
@@ -430,17 +522,30 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
             u32::try_from(v).ok()
         }
     };
-    tail.extend_from_slice(&n32(field32(12), cd_size)?.to_le_bytes());
-    tail.extend_from_slice(&n32(field32(16), cd_offset)?.to_le_bytes());
+    tail.extend_from_slice(
+        &n32(field32(12), cd_size)
+            .ok_or_else(|| end.clone())?
+            .to_le_bytes(),
+    );
+    tail.extend_from_slice(
+        &n32(field32(16), cd_offset)
+            .ok_or_else(|| end.clone())?
+            .to_le_bytes(),
+    );
     tail.extend_from_slice(&0_u16.to_le_bytes());
     let axcd = one(&mut |hasher| {
         for m in &signed {
             hasher.update(archive.central_bytes(m));
         }
         hasher.update(&tail);
-    })?;
-    let axct = member_hash(CONTENT_TYPES)?;
-    let axbm = member_hash(BLOCK_MAP)?;
+    })
+    .ok_or(DigestInputError::HashMethod)?;
+    let Some(axct) = member_hash(CONTENT_TYPES)? else {
+        return Ok(None);
+    };
+    let Some(axbm) = member_hash(BLOCK_MAP)? else {
+        return Ok(None);
+    };
     let mut out = b"APPX".to_vec();
     for (tag, hash) in [
         (b"AXPC", axpc),
@@ -452,10 +557,13 @@ pub fn signed_digest(archive: &Archive<'_>, alg: DigestAlgorithm) -> Option<Vec<
         out.extend_from_slice(&hash);
     }
     if archive.member(CODE_INTEGRITY).is_some() {
+        let Some(axci) = member_hash(CODE_INTEGRITY)? else {
+            return Ok(None);
+        };
         out.extend_from_slice(b"AXCI");
-        out.extend_from_slice(&member_hash(CODE_INTEGRITY)?);
+        out.extend_from_slice(&axci);
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<PackageSignature> {
@@ -516,10 +624,15 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
     // The package digest uses the block map's hash method; a signature
     // under another digest does not match. It is computed once, however
     // many signatures the file carries.
-    let digest = blockmap
+    let digest_result = blockmap
         .as_ref()
         .ok()
-        .and_then(|m| signed_digest(archive, m.hash).map(|d| (m.hash, d)));
+        .map(|m| signed_digest_checked(archive, m.hash).map(|d| d.map(|d| (m.hash, d))));
+    let digest_error = match &digest_result {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
+    };
+    let digest = digest_result.and_then(Result::ok).flatten();
     let expected = |alg: DigestAlgorithm| -> Option<Vec<u8>> {
         digest
             .as_ref()
@@ -534,6 +647,11 @@ fn verify_signature(archive: &Archive<'_>, id: &PackageIdentity) -> Option<Packa
     );
     if archive.member(CONTENT_TYPES).is_none() {
         return fail(report, PackageSignatureIssue::NoContentTypes);
+    }
+    // A digest input that is present but unreadable: say which, rather
+    // than leave only "digest unavailable" on the signature.
+    if let Some(e) = digest_error {
+        return fail(report, PackageSignatureIssue::DigestInput(e));
     }
     let map = match blockmap {
         Ok(m) => m,
