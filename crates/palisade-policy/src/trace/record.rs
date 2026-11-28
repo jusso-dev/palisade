@@ -55,6 +55,8 @@ pub enum RuleStage {
     Annotation,
     /// A `trust_source` rule: a grant if the object is allowed.
     TrustSource,
+    /// Stage 5: a post-allow attribute rule (#329).
+    Attribute,
 }
 
 impl RuleStage {
@@ -63,6 +65,12 @@ impl RuleStage {
     pub(crate) const fn of(set: &RuleSet, rule: &Rule) -> Option<Self> {
         if set.mandatory {
             return Some(Self::MandatoryDeny);
+        }
+        if rule.attribute {
+            return match rule.action {
+                Action::Deny(_) | Action::Audit {} => Some(Self::Attribute),
+                _ => None,
+            };
         }
         Some(match rule.action {
             Action::Ignore {} => Self::Exclusion,

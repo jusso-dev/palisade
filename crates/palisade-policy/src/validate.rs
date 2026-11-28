@@ -269,6 +269,9 @@ pub enum ErrorCode {
     /// file or folder, or a registry key outside `HKLM` (#33, #329). It can
     /// only narrow the rule, and a user can change it. A warning.
     UserControlledContext,
+    /// An `attribute` rule does not deny or audit, is in a mandatory rule
+    /// set, or is also a catch-all (#329).
+    InvalidAttributeRule,
 }
 
 impl ErrorCode {
@@ -355,6 +358,7 @@ impl ErrorCode {
             Self::PermitAllUnconfirmed => "permit_all_unconfirmed",
             Self::CatchAllMissing => "catch_all_missing",
             Self::UserControlledContext => "user_controlled_context",
+            Self::InvalidAttributeRule => "invalid_attribute_rule",
         }
     }
 
@@ -901,7 +905,9 @@ impl Validator {
         // needs an identity, as an allow does (#34). A catch-all is the one
         // rule that needs none (#33): it is a floor that only decides when
         // no other rule did, and its own checks are in `catch_all`.
-        if depth <= MAX_TREE_DEPTH && !rule.catch_all {
+        // A post-allow attribute rule only takes away an allow (#329), so it
+        // needs no identity either.
+        if depth <= MAX_TREE_DEPTH && !rule.catch_all && !rule.attribute {
             // The analysis is structural: it does not decide whether the
             // criteria on a path can all hold at once, so the messages name
             // a path through the tree, not a way the rule is known to match.

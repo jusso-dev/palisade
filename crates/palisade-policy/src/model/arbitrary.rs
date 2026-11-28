@@ -400,6 +400,7 @@ fn rule(kind: RuleSetKind, mandatory: bool) -> impl Strategy<Value = Rule> {
                 object_types: types.into_iter().collect(),
                 match_,
                 catch_all: false,
+                attribute: false,
                 effects,
                 order,
                 priority,

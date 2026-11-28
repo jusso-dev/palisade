@@ -585,6 +585,7 @@ pub const KEYS: &[Key] = &[
     k(534, "exists"),
     k(535, "not_exists"),
     k(536, "value_name"),
+    k(537, "attribute"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

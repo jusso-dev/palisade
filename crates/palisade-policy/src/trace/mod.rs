@@ -355,7 +355,7 @@ pub enum StageName {
     SessionOverride,
     /// 4: the precedence model.
     Policy,
-    /// 5: post-allow attribute rules (#33; not yet present).
+    /// 5: post-allow attribute rules (#33, #329).
     Attribute,
     /// 6: the unknown-application policy (#39), whose default is the
     /// implicit deny.
@@ -907,6 +907,7 @@ impl<'p> Tracer<'p> {
             RuleStage::Policy,
             RuleStage::Annotation,
             RuleStage::TrustSource,
+            RuleStage::Attribute,
         ] {
             let start = clock.map(NanoClock::now_ns);
             for (i, r) in self.rules.iter().enumerate() {
@@ -1501,6 +1502,7 @@ fn stages(
         (Some(_), Some(r)) => Some(match r.stage {
             RuleStage::MandatoryDeny => StageName::MandatoryDeny,
             RuleStage::Exclusion => StageName::Exclusion,
+            RuleStage::Attribute => StageName::Attribute,
             _ => StageName::Policy,
         }),
         // A pinned Palisade image is allowed right after stage 1 (#39).
@@ -1525,9 +1527,11 @@ fn stages(
             let outcome = match position {
                 None => StageOutcome::Skipped,
                 Some(p) if i == p => StageOutcome::Decided,
-                // Attribute rules do not exist yet (#33), and a session
-                // stage only runs with a session.
+                // Attribute rules only run after an allow (#329), and a
+                // session stage only runs with a session.
                 Some(p) if i < p => match name {
+                    // Stage 5 is only reached by an allow, which is a
+                    // later stage only when stage 6 decided: never.
                     StageName::Attribute => StageOutcome::Skipped,
                     // Lockdown suspends every session (#36).
                     StageName::SessionOverride if state.session.is_none() || state.lockdown => {
@@ -1549,6 +1553,10 @@ fn stages(
                 StageName::Policy => (
                     n(RuleStage::Policy),
                     durations.get(&RuleStage::Policy).copied(),
+                ),
+                StageName::Attribute => (
+                    n(RuleStage::Attribute),
+                    durations.get(&RuleStage::Attribute).copied(),
                 ),
                 _ => (0, None),
             };

@@ -931,7 +931,10 @@ fn stage_timing_uses_the_given_clock() {
     );
     for s in &t.stages {
         match s.name {
-            StageName::MandatoryDeny | StageName::Exclusion | StageName::Policy => {
+            StageName::MandatoryDeny
+            | StageName::Exclusion
+            | StageName::Policy
+            | StageName::Attribute => {
                 assert_eq!(s.duration_ns, Some(10));
             }
             _ => assert_eq!(s.duration_ns, None),

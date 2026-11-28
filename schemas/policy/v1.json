@@ -3092,6 +3092,10 @@
           ],
           "description": "The rule is absent before this instant (#40)."
         },
+        "attribute": {
+          "description": "A post-allow attribute rule (#33, #35, #329): stage 5. It is\nevaluated only for an object stage 4 allowed, and only narrows that:\na `deny` blocks the object, and an `audit` annotates it. It needs no\nidentity anchor, because it can only take away an allow, such as\n\"PowerShell is allowed, but not with an encoded command\". Only\n`deny` and `audit`, never in a mandatory rule set, never a\ncatch-all. Unset means `false`.",
+          "type": "boolean"
+        },
         "catch_all": {
           "description": "A catch-all rule (#33, #35, #329): the default of its rule set, which\ndecides only when no other rule of stage 4 matched, under every\nprecedence model. It is the only rule that may have no identity\nanchor, and the only one whose `match` may be an empty `all`, which\nmatches every object. At most one per rule set; its name starts\nwith `Default` or contains `Catch-all`; it allows, denies or audits;\nand it is never in a mandatory rule set. Unset means `false`.",
           "type": "boolean"

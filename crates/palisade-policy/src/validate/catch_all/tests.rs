@@ -290,3 +290,70 @@ fn the_new_codes_have_stable_names() {
     assert_eq!(ErrorCode::CatchAllMissing.severity(), Severity::Warning);
     assert_eq!(ErrorCode::InvalidCatchAll.severity(), Severity::Error);
 }
+
+#[test]
+fn an_attribute_rule_only_narrows() {
+    let context = json!({"criterion": {"field": "user.is_admin", "operator": "is_false"}});
+    // A deny or an audit with context alone: no identity anchor needed.
+    for action in [json!({"type": "deny"}), json!({"type": "audit"})] {
+        let d = doc(
+            json!({}),
+            vec![rule(
+                1,
+                json!({"attribute": true, "match": context, "action": action}),
+            )],
+            vec![],
+        );
+        assert_eq!(findings(d), []);
+    }
+    // Under first_match an attribute rule needs no order.
+    let d = doc(
+        json!({"precedence_model": "first_match"}),
+        vec![
+            rule(1, json!({"attribute": true, "match": context})),
+            catch_all(2, "Default deny", json!({"type": "deny"})),
+        ],
+        vec![],
+    );
+    let mut d = d;
+    d.rule_sets[0].rules[0].order = None;
+    assert_eq!(findings(d), []);
+    // Not an allow, not in a mandatory set, not a catch-all.
+    let d = doc(
+        json!({}),
+        vec![rule(
+            1,
+            json!({"attribute": true, "action": {"type": "allow"}}),
+        )],
+        vec![],
+    );
+    assert_eq!(
+        findings(d),
+        [error(
+            ErrorCode::InvalidAttributeRule,
+            "/rule_sets/0/rules/0/action"
+        )]
+    );
+    let d = doc(json!({}), vec![], vec![rule(1, json!({"attribute": true}))]);
+    assert_eq!(
+        findings(d),
+        [error(
+            ErrorCode::InvalidAttributeRule,
+            "/rule_sets/1/rules/0/attribute"
+        )]
+    );
+    let mut both = catch_all(1, "Default deny", json!({"type": "deny"}));
+    both["attribute"] = true.into();
+    let d = doc(json!({}), vec![both], vec![]);
+    assert_eq!(
+        findings(d),
+        [error(
+            ErrorCode::InvalidAttributeRule,
+            "/rule_sets/0/rules/0/attribute"
+        )]
+    );
+    assert_eq!(
+        ErrorCode::InvalidAttributeRule.as_str(),
+        "invalid_attribute_rule"
+    );
+}
