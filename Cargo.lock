@@ -1325,6 +1325,7 @@ dependencies = [
  "palisade-policy",
  "palisade-proto",
  "serde",
+ "serde_json",
  "sha2",
  "tokio",
  "toml",

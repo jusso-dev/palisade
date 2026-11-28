@@ -68,6 +68,18 @@ Implement `Subsystem`, give it a stable `name`, choose its `criticality` and lis
 
 Still to come, tracked on #59: identity resolution and audit evaluation of each image (they need the hash cache and policy cache, #61), image-hijack detection, masquerade signals (#55), directory group resolution, the file provider, the NT kernel logger fallback, and the Windows integration and stress tests.
 
+## Event-log ingestion (#58)
+
+`eventlog` turns the OS code integrity, legacy rule-collection and PowerShell logs into canonical events. Every step that reads record text is portable and fuzzed (target `eventlog_records`):
+
+- `eventlog::decode` reads rendered event XML (`EvtRenderEventXml`) with the bounded XML reader from `palisade_fileid::package::xml`, which refuses DTDs, undefined entities and oversized input. It produces a `palisade_proto::mapping::Record`, with field names normalised to the mapping files' form (`SHA256 Flat Hash` becomes `SHA256FlatHash`). A record without a parseable event ID or time, or with a repeated field, is an error.
+- `eventlog::correlate` holds each 3076/3077 (and each script host's 8028/8029) until its `TotalSignatureCount` signature records (3089, 8038) with the same activity ID arrive, or for 2 s. It then releases the group, marked incomplete if signatures are missing. Before correlation, a token bucket (2,000 records/s) bounds audit storms. Every drop is counted: rate-limited records, orphan and excess signatures, and groups evicted early.
+- `eventlog::ingest` maps groups through the shipped mapping files and adds the process key, parent, grandparent and command line from the #59 process tree when the tree knew that process at the record's time. It keeps every value the OS log supplied, and emits into an `EventSink`, with an `EnvelopeSource` standing in for the event pipeline (#63).
+- `eventlog::inventory` keeps the latest 3099 activation of each OS-native policy (ID, name, GUID, hash, option bits with names) for health (#67).
+- `eventlog::CHANNEL_SUFFIXES` lists the channels by name suffix, marking which ones are optional (MSI and Script is absent on Server Core).
+
+Still to come, tracked on #58: the `EvtSubscribe` subscription with bookmarks persisted in the agent local store (ADR 0007), the first-start backfill, channel name resolution, the verbose channel and channel-size management, and the periodic policy store query.
+
 ## Platform layer
 
 The agent reads the OS only through the `palisade_core::platform` traits (#29), so its logic can be

@@ -4,6 +4,7 @@
 # here.
 #
 #   cargo +nightly fuzz run kernel_records      # from crates/palisade-agent
+#   cargo +nightly fuzz run eventlog_records
 [package]
 name = "palisade-agent-fuzz"
 version = "0.0.0"
@@ -20,10 +21,18 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4.13"
 palisade-agent = { path = ".." }
 palisade-core = { path = "../../palisade-core" }
+palisade-proto = { path = "../../palisade-proto" }
 
 [[bin]]
 name = "kernel_records"
 path = "fuzz_targets/kernel_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "eventlog_records"
+path = "fuzz_targets/eventlog_records.rs"
 test = false
 doc = false
 bench = false
