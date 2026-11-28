@@ -835,9 +835,9 @@ criteria = "safe-to-run"
 notes = "Bumped by #308 (Dependabot cargo-minor-and-patch group), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.quick-xml]]
-version = "0.41.0"
+version = "0.42.0"
 criteria = "safe-to-deploy"
-notes = "Added by #45 (palisade-fileid: parsing the RT_MANIFEST resource). The crate says #![forbid(unsafe_code)], has no build script or proc-macro, and with default features off depends only on memchr. 0.41.0 is the first version without RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Used without DTD support: entities other than the five predefined ones are rejected. Audit, or import an audit, before bumping."
+notes = "Added by #45 (palisade-fileid: parsing the RT_MANIFEST resource), bumped to 0.42.0 by #310 (the reader now works on str, not bytes). The crate says #![forbid(unsafe_code)], has no build script or proc-macro, and with default features off depends only on memchr; all still true in 0.42.0. 0.41.0 is the first version without RUSTSEC-2026-0194 and RUSTSEC-2026-0195. Used without DTD support: entities other than the five predefined ones are rejected. Audit, or import an audit, before bumping."
 
 [[exemptions.quote]]
 version = "1.0.47"
