@@ -7,6 +7,14 @@
 //! command's own module, as before, so its rules and their tests stay in
 //! one place. `src/help.rs` snapshots the rendered help of every command.
 
+// The doc comments here are also clap's help text, which shows placeholders
+// as `<commit>` and `<dir>`. Escaping them for rustdoc would put the escapes
+// into `--help`, so rustdoc's HTML check is turned off for this module only.
+#![allow(
+    rustdoc::invalid_html_tags,
+    reason = "doc comments are clap help text with <placeholder> arguments"
+)]
+
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
