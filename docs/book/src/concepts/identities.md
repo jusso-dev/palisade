@@ -10,6 +10,7 @@ Specified in [#31](https://github.com/jusso-dev/palisade/issues/31) (identity cr
 | Hash (compatibility) | `hash.sha1`, `hash.md5`, `hash.authenticode_sha1`, page hashes | weak alone ([ADR 0008](../../../adr/0008-cryptographic-algorithms.md)) |
 | Publisher | `signer.publisher` (CN, O or full DN) | medium |
 | Certificate | `signer.leaf_thumbprint`, `signer.tbs_hash` | strong: names one certificate (a TBS hash above the leaf names a CA, so it is weak in an allow) |
+| Key | `signer.spki_sha256` | strong at `position: leaf`: names the signing key, in every certificate issued for it (a key above the leaf is a CA's, so it is weak in an allow) |
 | Certificate authority | `signer.issuer`, `signer.pca`, `signer.root_thumbprint`, `signer.eku`, SHA-1 thumbprints | weak alone: a CA vouches for every file it signs |
 | Path | `path.full`, `path.directory`, `path.file_name`, `path.extension` | medium, and only where users cannot write |
 | Metadata | `meta.original_filename`, `meta.product_name`, `meta.file_version`, ... | weak: easy to copy into another file |
@@ -26,10 +27,18 @@ version (ISM-1471: use publisher *and* product names). The `publisher_product` p
 criterion only trusts signatures that are valid, valid with an expired but timestamped
 certificate, or catalog-signed; a criterion's `signer` options can accept other statuses, require
 a timestamp after a date or a minimum key size, reject algorithms, or pick the signature's source
-and index. To block a stolen certificate, deny its `signer.tbs_hash`. That blocks one
+and index. To block one stolen certificate, deny its `signer.tbs_hash`. That blocks that
 certificate only: the hashed data includes the serial number and the validity period, so a
-certificate reissued with the same key has a new TBS hash and needs its own rule. No criterion
-yet names a key across all the certificates that carry it. **Path rules** are the easiest to write and
+certificate reissued with the same key has a new TBS hash. To block a stolen **key**, deny its
+`signer.spki_sha256` (the SHA-256 of the certificate's DER `SubjectPublicKeyInfo`) with
+`position: leaf`: it is the same in every certificate issued for the key, so the deny still
+applies after a reissue. Use the TBS hash when one certificate is the problem (a mis-issued
+certificate, say, whose key is still trusted elsewhere), and the key hash when the private key
+is. As an allow, a leaf key hash trusts whoever holds the key whatever certificate they present
+next, as long as the chain is still valid; a key above the leaf belongs to a certificate
+authority, which vouches for everything it signs, so validation warns about it as weak. As
+with every signer criterion, a revoked or otherwise untrusted signature does not take part by
+default, and an unknown key hash never makes a rule match. **Path rules** are the easiest to write and
 the easiest to get wrong.
 
 A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:

@@ -549,6 +549,7 @@ pub const KEYS: &[Key] = &[
     k(498, "put_policy"),
     k(499, "put_libraries"),
     k(500, "put_sources"),
+    k(501, "signer.spki_sha256"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

@@ -1176,12 +1176,17 @@
         },
         {
           "const": "signer.tbs_hash",
-          "description": "The hash of a chain certificate's `tbsCertificate`, under the\ncertificate's own signature digest (40, 64, 96 or 128 hex digits).\nIt identifies that one certificate: the `tbsCertificate` includes\nthe serial number and the validity period (RFC 5280), so a\ncertificate reissued with the same key has another TBS hash, and\neach issue needs its own rule. No criterion yet names a key across\nthe certificates that carry it. `signer.position` says which\ncertificate. A 40-digit (SHA-1) value is compatibility only\n(ADR 0008).",
+          "description": "The hash of a chain certificate's `tbsCertificate`, under the\ncertificate's own signature digest (40, 64, 96 or 128 hex digits).\nIt identifies that one certificate: the `tbsCertificate` includes\nthe serial number and the validity period (RFC 5280), so a\ncertificate reissued with the same key has another TBS hash, and\neach issue needs its own rule; `signer.spki_sha256` names the key\nacross every certificate that carries it. `signer.position` says\nwhich certificate. A 40-digit (SHA-1) value is compatibility only\n(ADR 0008).",
           "type": "string"
         },
         {
           "const": "signer.eku",
           "description": "The extended key usages of the leaf certificate, as dotted OIDs,\nsuch as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the\nextension has none.",
+          "type": "string"
+        },
+        {
+          "const": "signer.spki_sha256",
+          "description": "The SHA-256 of a chain certificate's DER `SubjectPublicKeyInfo`: its\npublic key (#318). Unlike the TBS hash it stays the same when a\ncertificate is reissued for the same key, so a deny on a stolen\nkey's hash also blocks every reissue. `signer.position` says which\ncertificate. A key above the leaf belongs to a certificate\nauthority, which vouches for everything it signs.",
           "type": "string"
         }
       ]
@@ -3504,7 +3509,7 @@
               "type": "null"
             }
           ],
-          "description": "Only for `signer.tbs_hash`: where in the chain the certificate must\nbe. Unset means `any`."
+          "description": "Only for `signer.tbs_hash` and `signer.spki_sha256`: where in the\nchain the certificate must be. Unset means `any`."
         },
         "signature_index": {
           "description": "Only the signature at this index, counted from 0 among the\nsignatures of `source`: 0 is the primary embedded signature, 1 the\nfirst nested one. Unset means any signature.",
@@ -3620,7 +3625,7 @@
       ]
     },
     "TbsPosition": {
-      "description": "Where the certificate of a `signer.tbs_hash` test must be (#31).",
+      "description": "Where the certificate of a `signer.tbs_hash` or `signer.spki_sha256`\ntest must be (#31, #318).",
       "oneOf": [
         {
           "const": "leaf",

@@ -241,6 +241,14 @@ pub struct SignerDetails {
     pub intermediate_tbs_hashes: Option<Vec<String>>,
     /// The TBS hash of the root certificate.
     pub root_tbs_hash: Option<String>,
+    /// The SHA-256 of the leaf certificate's DER `SubjectPublicKeyInfo`
+    /// (#318): its public key, the same in every certificate issued for it.
+    pub leaf_spki_sha256: Option<String>,
+    /// The key hashes of every certificate between the leaf and the root.
+    /// `Some(vec![])` means the leaf was issued by the root.
+    pub intermediate_spki_sha256: Option<Vec<String>>,
+    /// The key hash of the root certificate.
+    pub root_spki_sha256: Option<String>,
     /// The leaf certificate's extended key usages, as dotted OIDs.
     /// `Some(vec![])` when the extension is absent.
     pub eku: Option<Vec<String>>,

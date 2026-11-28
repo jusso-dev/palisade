@@ -435,3 +435,99 @@ fn traces_show_the_selected_value() {
         ]
     );
 }
+
+#[test]
+fn a_key_hash_deny_follows_a_reissued_certificate() {
+    // #318: a stolen leaf key is denied by its key hash. The CA reissues a
+    // certificate for the same key (new serial, validity, TBS hash and
+    // thumbprint): the key-hash deny still blocks it, and a TBS-hash deny
+    // on the old certificate does not.
+    let key = "5".repeat(64);
+    let leaf = || SignerOptions {
+        position: Some(TbsPosition::Leaf),
+        ..SignerOptions::default()
+    };
+    let policy_denying = |deny: Match| {
+        PolicyBuilder::new()
+            .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(
+                1,
+                all(vec![publisher("Example Software Ltd"), hash('a')]),
+            )))
+            .rule_set(RuleSetBuilder::blocklist(2).rule(RuleBuilder::deny(2, deny)))
+            .validate()
+    };
+    let by_key = policy_denying(signer_crit(
+        Field::SignerSpkiSha256,
+        Operator::Equals,
+        &[&key.to_ascii_uppercase()],
+        leaf(),
+    ));
+    let by_tbs = policy_denying(signer_crit(
+        Field::SignerTbsHash,
+        Operator::Equals,
+        &[TBS],
+        leaf(),
+    ));
+    let mut sig = SignerFact::new(SignerStatus::Valid, SignatureSource::Embedded);
+    sig.publisher = Some("Example Software Ltd".into());
+    sig.details.leaf_tbs_hash = Some(TBS.into());
+    sig.details.leaf_spki_sha256 = Some(key.clone());
+    let mut f = facts().sha256('a').build();
+    f.signers = Some(vec![sig.clone()]);
+    assert_eq!(decide_facts(&by_key, &f), Outcome::Blocked);
+    assert_eq!(decide_facts(&by_tbs, &f), Outcome::Blocked);
+    sig.details.leaf_tbs_hash = Some("9".repeat(64));
+    f.signers = Some(vec![sig.clone()]);
+    assert_eq!(decide_facts(&by_key, &f), Outcome::Blocked);
+    assert_eq!(decide_facts(&by_tbs, &f), Outcome::Allowed);
+    // A revoked signature never takes part, so it cannot satisfy an allow
+    // on its key.
+    let allow_key = allow_policy(signer_crit(
+        Field::SignerSpkiSha256,
+        Operator::Equals,
+        &[&key],
+        leaf(),
+    ))
+    .validate();
+    sig.status = SignerStatus::Revoked;
+    f.signers = Some(vec![sig.clone()]);
+    assert_ne!(decide_facts(&allow_key, &f), Outcome::Allowed);
+    sig.status = SignerStatus::Valid;
+    f.signers = Some(vec![sig.clone()]);
+    assert_eq!(decide_facts(&allow_key, &f), Outcome::Allowed);
+    // An unknown key hash never lets the allow match.
+    sig.details.leaf_spki_sha256 = None;
+    f.signers = Some(vec![sig]);
+    assert_ne!(decide_facts(&allow_key, &f), Outcome::Allowed);
+}
+
+#[test]
+fn a_key_hash_above_the_leaf_is_weak_in_an_allow() {
+    let key = |position| {
+        signer_crit(
+            Field::SignerSpkiSha256,
+            Operator::Equals,
+            &[&"5".repeat(64)],
+            SignerOptions {
+                position,
+                ..SignerOptions::default()
+            },
+        )
+    };
+    // The leaf's key names whoever holds it: a sound identity.
+    assert!(findings(allow_policy(key(Some(TbsPosition::Leaf)))).is_empty());
+    // A CA's key vouches for everything the CA signs.
+    for position in [
+        None,
+        Some(TbsPosition::Any),
+        Some(TbsPosition::Intermediate),
+        Some(TbsPosition::Root),
+    ] {
+        assert_eq!(
+            findings(allow_policy(key(position))),
+            [(ErrorCode::WeakIdentity, Severity::Warning, RULE.to_owned())],
+            "{position:?}"
+        );
+        assert!(findings(deny_policy(key(position))).is_empty());
+    }
+}

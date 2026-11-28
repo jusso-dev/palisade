@@ -23,7 +23,7 @@ Appears at: `/rule_sets/rules/match/all/all/criterion/signer`, `/rule_sets/rules
 | `countersigned` | boolean | no |  |  | 1.0.0 | The signature must carry an RFC 3161 timestamp that verifies. Unset means `false`: no requirement. |
 | `disallowed_algorithms` | array of [`DigestAlgorithm`](types.md#digestalgorithm) | no |  | at most 6 items | 1.0.0 | The signature must use none of these digest algorithms, in the file digest, the signer information or any certificate of its chain. |
 | `min_key_bits` | integer | no |  | 1 to 16384; format `uint32` | 1.0.0 | Every key in the signature's chain must be at least this strong, in RSA-equivalent bits (see `crate::facts::KeyFact::rsa_equivalent_bits`). |
-| `position` | [`TbsPosition`](types.md#tbsposition) | no |  |  | 1.0.0 | Only for `signer.tbs_hash`: where in the chain the certificate must be. Unset means `any`. |
+| `position` | [`TbsPosition`](types.md#tbsposition) | no |  |  | 1.0.0 | Only for `signer.tbs_hash` and `signer.spki_sha256`: where in the chain the certificate must be. Unset means `any`. |
 | `signature_index` | integer | no |  | 0 to 63; format `uint8` | 1.0.0 | Only the signature at this index, counted from 0 among the signatures of `source`: 0 is the primary embedded signature, 1 the first nested one. Unset means any signature. |
 | `signed_after` | string | no |  | 1 to 64 characters | 1.0.0 | A trusted timestamp must show that the signature was made at or after this instant: an RFC 3339 time with an offset, such as `2024-01-01T00:00:00Z`. A signature with no trusted timestamp is unknown. |
 | `source` | [`SignerSource`](types.md#signersource) | no |  |  | 1.0.0 | Where the signature must come from. Unset means `any`. |

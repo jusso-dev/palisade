@@ -26,6 +26,9 @@
 //! - `signer.tbs_hash` compares the TBS hash of the leaf, the
 //!   intermediates, the root, or any of them (`position`, default `any`).
 //!   Digests are 40, 64, 96 or 128 hex digits, compared in either case.
+//! - `signer.spki_sha256` compares the SHA-256 of a certificate's public
+//!   key at the same positions (#318). The TBS hash names one certificate;
+//!   the key hash names every certificate issued for the key.
 //! - `signer.eku` holds the leaf's extended key usages as a set of OIDs,
 //!   compared arc by arc, so `1.3.6.01` equals `1.3.6.1`.
 //! - `signed_after` needs a trusted timestamp at or after the instant; the
@@ -177,10 +180,13 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<(&'static str, CompileErrorK
             CompileErrorKind::OptionNotApplicable("signer.component", "`signer.publisher`"),
         ));
     }
-    if o.position.is_some() && c.field != Field::SignerTbsHash {
+    if o.position.is_some() && !c.field.has_position() {
         out.push((
             "signer/position",
-            CompileErrorKind::OptionNotApplicable("signer.position", "`signer.tbs_hash`"),
+            CompileErrorKind::OptionNotApplicable(
+                "signer.position",
+                "`signer.tbs_hash` and `signer.spki_sha256`",
+            ),
         ));
     }
     match o.accept_status.as_deref() {
@@ -333,6 +339,7 @@ impl CompiledCriterion {
             Field::SignerRootThumbprint => d.root_thumbprint_sha256.as_deref(),
             Field::SignerRootThumbprintSha1 => d.root_thumbprint_sha1.as_deref(),
             Field::SignerTbsHash => return self.tbs_test(d, notes),
+            Field::SignerSpkiSha256 => return self.spki_test(d, notes),
             Field::SignerEku => return self.eku_test(d, notes),
             _ => return malformed(notes),
         };
@@ -357,6 +364,31 @@ impl CompiledCriterion {
         let root = |one: &mut dyn FnMut(Option<&str>) -> Tri| one(d.root_tbs_hash.as_deref());
         let intermediate =
             |one: &mut dyn FnMut(Option<&str>) -> Tri| match &d.intermediate_tbs_hashes {
+                Some(list) => list
+                    .iter()
+                    .fold(Tri::NoMatch, |acc, h| acc.or(one(Some(h)))),
+                None => one(None),
+            };
+        match self.signer.position {
+            TbsPosition::Leaf => leaf(&mut one),
+            TbsPosition::Root => root(&mut one),
+            TbsPosition::Intermediate => intermediate(&mut one),
+            TbsPosition::Any => leaf(&mut one).or(intermediate(&mut one)).or(root(&mut one)),
+        }
+    }
+
+    /// The key hash at the criterion's position: any certificate there
+    /// that matches makes the signature match, and a missing or malformed
+    /// key hash there is unknown, never a match (#318).
+    fn spki_test(&self, d: &SignerDetails, notes: &mut Notes) -> Tri {
+        let mut one = |fact: Option<&String>| match fact {
+            Some(f) => self.eval_value(f, notes),
+            None => missing(notes),
+        };
+        let leaf = |one: &mut dyn FnMut(Option<&String>) -> Tri| one(d.leaf_spki_sha256.as_ref());
+        let root = |one: &mut dyn FnMut(Option<&String>) -> Tri| one(d.root_spki_sha256.as_ref());
+        let intermediate =
+            |one: &mut dyn FnMut(Option<&String>) -> Tri| match &d.intermediate_spki_sha256 {
                 Some(list) => list
                     .iter()
                     .fold(Tri::NoMatch, |acc, h| acc.or(one(Some(h)))),
@@ -409,7 +441,7 @@ impl CompiledCriterion {
 }
 
 /// Which part of a signature a signer criterion reads: the publisher's
-/// subject component and the TBS hash's position. Other fields read one
+/// subject component and the TBS or key hash's position. Other fields read one
 /// fact, and have the default selector.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Selector {
@@ -429,7 +461,7 @@ impl Selector {
                 .unwrap_or_default(),
             position: o
                 .and_then(|o| o.position)
-                .filter(|_| c.field == Field::SignerTbsHash)
+                .filter(|_| c.field.has_position())
                 .unwrap_or_default(),
         }
     }
@@ -474,6 +506,21 @@ pub(crate) fn observed(field: Field, sel: Selector, s: &SignerFact) -> Option<St
                         .iter()
                         .chain(mid)
                         .chain(d.root_tbs_hash.iter())
+                        .collect(),
+                ),
+            }
+        }
+        Field::SignerSpkiSha256 => {
+            let mid = d.intermediate_spki_sha256.iter().flatten();
+            match sel.position {
+                TbsPosition::Leaf => one(&d.leaf_spki_sha256),
+                TbsPosition::Root => one(&d.root_spki_sha256),
+                TbsPosition::Intermediate => joined(mid.collect()),
+                TbsPosition::Any => joined(
+                    d.leaf_spki_sha256
+                        .iter()
+                        .chain(mid)
+                        .chain(d.root_spki_sha256.iter())
                         .collect(),
                 ),
             }

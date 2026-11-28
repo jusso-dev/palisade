@@ -21,6 +21,9 @@ static NO_CONTEXT: EvaluationContext = EvaluationContext::EMPTY;
 const LEAF_TBS: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const MID_TBS: &str = "2222222222222222222222222222222222222222";
 const ROOT_TBS: &str = "33333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333";
+const LEAF_KEY: &str = "4444444444444444444444444444444444444444444444444444444444444444";
+const MID_KEY: &str = "5555555555555555555555555555555555555555555555555555555555555555";
+const ROOT_KEY: &str = "6666666666666666666666666666666666666666666666666666666666666666";
 const LEAF_SHA1: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ROOT_SHA256: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_SHA1: &str = "cccccccccccccccccccccccccccccccccccccccc";
@@ -44,6 +47,9 @@ fn full() -> SignerFact {
             leaf_tbs_hash: Some(LEAF_TBS.to_owned()),
             intermediate_tbs_hashes: Some(vec![MID_TBS.to_owned()]),
             root_tbs_hash: Some(ROOT_TBS.to_owned()),
+            leaf_spki_sha256: Some(LEAF_KEY.to_owned()),
+            intermediate_spki_sha256: Some(vec![MID_KEY.to_owned()]),
+            root_spki_sha256: Some(ROOT_KEY.to_owned()),
             eku: Some(vec![CODE_SIGNING.to_owned()]),
             timestamp: Some(JAN_2024 + 86_400),
             countersigned: Some(true),
@@ -331,6 +337,100 @@ fn tbs_hash_positions() {
 }
 
 #[test]
+fn spki_hash_positions() {
+    let at = |position, value: &str| {
+        crit(
+            Field::SignerSpkiSha256,
+            Operator::Equals,
+            &[value],
+            SignerOptions { position, ..opts() },
+        )
+    };
+    three_ways(
+        &at(Some(TbsPosition::Leaf), LEAF_KEY),
+        |s| s.details.leaf_spki_sha256 = Some(ROOT_KEY.into()),
+        |s| s.details.leaf_spki_sha256 = None,
+    );
+    three_ways(
+        &at(
+            Some(TbsPosition::Intermediate),
+            &MID_KEY.to_ascii_uppercase(),
+        ),
+        |s| s.details.intermediate_spki_sha256 = Some(vec![]),
+        |s| s.details.intermediate_spki_sha256 = None,
+    );
+    three_ways(
+        &at(Some(TbsPosition::Root), ROOT_KEY),
+        |s| s.details.root_spki_sha256 = Some(LEAF_KEY.into()),
+        |s| s.details.root_spki_sha256 = None,
+    );
+    // A key at another position does not match.
+    assert_eq!(
+        eval(&at(Some(TbsPosition::Leaf), ROOT_KEY), vec![full()]),
+        NoMatch
+    );
+    // `any` (the default) finds each, and is unknown while any position
+    // that could hold it is unknown.
+    for value in [LEAF_KEY, MID_KEY, ROOT_KEY] {
+        assert_eq!(eval(&at(None, value), vec![full()]), Match, "{value}");
+    }
+    let mut partial = full();
+    partial.details.root_spki_sha256 = None;
+    assert_eq!(eval(&at(None, MID_KEY), vec![partial.clone()]), Match);
+    assert_eq!(eval(&at(None, &"7".repeat(64)), vec![partial]), Unknown);
+    assert_eq!(eval(&at(None, &"7".repeat(64)), vec![full()]), NoMatch);
+    // A malformed key hash is unknown, never a match, at any position.
+    for bad in ["abc", "z".repeat(64).as_str(), &"4".repeat(40)] {
+        let mut odd = full();
+        odd.details.leaf_spki_sha256 = Some(bad.to_owned());
+        assert_eq!(
+            eval(&at(Some(TbsPosition::Leaf), LEAF_KEY), vec![odd.clone()]),
+            Unknown
+        );
+        odd.details.intermediate_spki_sha256 = Some(vec![bad.to_owned()]);
+        assert_eq!(
+            eval(&at(Some(TbsPosition::Intermediate), MID_KEY), vec![odd]),
+            Unknown
+        );
+    }
+    // Values are SHA-256 only: 64 hex digits, optionally after `0x`.
+    assert_eq!(
+        eval(&at(None, &format!("0x{LEAF_KEY}")), vec![full()]),
+        Match
+    );
+    for bad in ["abc", &"1".repeat(40), &"1".repeat(96)] {
+        assert!(matches!(
+            CompiledCriterion::compile(&at(None, bad)).unwrap_err()[0].kind,
+            CompileErrorKind::InvalidValue(_)
+        ));
+    }
+}
+
+#[test]
+fn a_key_hash_follows_a_reissued_certificate() {
+    // The CA reissues the stolen key's certificate: new serial and
+    // validity, so a new TBS hash and thumbprint, but the same key (#318).
+    let mut reissued = full();
+    reissued.details.leaf_tbs_hash = Some("9".repeat(64));
+    reissued.leaf_thumbprint_sha256 = Some("8".repeat(64));
+    let leaf = SignerOptions {
+        position: Some(TbsPosition::Leaf),
+        ..opts()
+    };
+    let key = crit(
+        Field::SignerSpkiSha256,
+        Operator::Equals,
+        &[LEAF_KEY],
+        leaf.clone(),
+    );
+    let tbs = crit(Field::SignerTbsHash, Operator::Equals, &[LEAF_TBS], leaf);
+    assert_eq!(eval(&key, vec![full()]), Match);
+    assert_eq!(eval(&tbs, vec![full()]), Match);
+    assert_eq!(eval(&key, vec![reissued.clone()]), Match);
+    assert_eq!(eval(&tbs, vec![reissued]), NoMatch);
+}
+
+#[test]
 fn eku_sets() {
     let c = crit(
         Field::SignerEku,
@@ -482,6 +582,34 @@ fn observations_follow_the_selectors() {
     assert_eq!(
         observed(Field::SignerTbsHash, sel(Field::SignerTbsHash, opts())),
         Some(format!("{LEAF_TBS}, {MID_TBS}, {ROOT_TBS}"))
+    );
+    let key = |position| {
+        sel(
+            Field::SignerSpkiSha256,
+            SignerOptions {
+                position: Some(position),
+                ..opts()
+            },
+        )
+    };
+    assert_eq!(
+        observed(Field::SignerSpkiSha256, key(TbsPosition::Leaf)).as_deref(),
+        Some(LEAF_KEY)
+    );
+    assert_eq!(
+        observed(Field::SignerSpkiSha256, key(TbsPosition::Root)).as_deref(),
+        Some(ROOT_KEY)
+    );
+    assert_eq!(
+        observed(Field::SignerSpkiSha256, key(TbsPosition::Intermediate)).as_deref(),
+        Some(MID_KEY)
+    );
+    assert_eq!(
+        observed(
+            Field::SignerSpkiSha256,
+            sel(Field::SignerSpkiSha256, opts())
+        ),
+        Some(format!("{LEAF_KEY}, {MID_KEY}, {ROOT_KEY}"))
     );
     assert_eq!(
         observed(Field::SignerPublisher, of(SubjectComponent::Cn)).as_deref(),
@@ -828,6 +956,12 @@ fn absent_facts_never_match() {
             &[CODE_SIGNING],
             all.clone(),
         ),
+        crit(
+            Field::SignerSpkiSha256,
+            Operator::Equals,
+            &[LEAF_KEY],
+            all.clone(),
+        ),
     ];
     for c in &cases {
         let compiled = compile(c);
@@ -883,6 +1017,7 @@ fn strength_and_compatibility() {
     use Strength::{Medium, Strong, Weak};
     for (field, strength) in [
         (Field::SignerTbsHash, Strong),
+        (Field::SignerSpkiSha256, Strong),
         (Field::SignerLeafThumbprint, Strong),
         (Field::SignerPublisher, Medium),
         (Field::SignerLeafThumbprintSha1, Weak),
