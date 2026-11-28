@@ -1820,3 +1820,267 @@ proptest! {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Renewal, expiry alerts, rotation plans and adoption
+// ---------------------------------------------------------------------------
+
+const HOUR: i64 = 60 * MINUTE;
+
+fn window(days: i64) -> Validity {
+    Validity::new(now(), plus(now(), days * DAY)).unwrap()
+}
+
+#[test]
+fn renewal_is_due_at_two_thirds_of_the_lifetime_without_jitter() {
+    let p = RenewalPolicy::default();
+    // 90 days: 2/3 is day 60.
+    assert_eq!(p.renewal_time(window(90), 0), plus(now(), 60 * DAY));
+    // A 10-minute certificate (the acceptance test lifetime).
+    let ten = Validity::new(now(), plus(now(), 10 * MINUTE)).unwrap();
+    assert_eq!(p.renewal_time(ten, 0), plus(now(), 400 * SECOND));
+    // A zero-length window renews at once.
+    let zero = Validity::new(now(), now()).unwrap();
+    assert_eq!(p.renewal_time(zero, u32::MAX), now());
+}
+
+#[test]
+fn jitter_only_brings_renewal_forward_by_at_most_a_tenth() {
+    let p = RenewalPolicy::DEFAULT;
+    let v = window(90);
+    let latest = p.renewal_time(v, 0);
+    let earliest = p.renewal_time(v, u32::MAX);
+    // 10% of 90 days is 9 days; u32::MAX / 2^32 is just under 1.
+    assert!(earliest < latest);
+    assert!(earliest > plus(now(), 51 * DAY));
+    assert!(earliest < plus(now(), 51 * DAY + SECOND));
+    let half = p.renewal_time(v, 1 << 31);
+    assert_eq!(half, plus(now(), 60 * DAY - 9 * DAY / 2));
+}
+
+#[test]
+fn renewal_time_saturates_at_the_end_of_the_timestamp_range() {
+    let v = Validity::new(Timestamp::MIN, Timestamp::MAX).unwrap();
+    let at = RenewalPolicy::DEFAULT.renewal_time(v, u32::MAX);
+    assert!(at > Timestamp::MIN && at < Timestamp::MAX);
+}
+
+#[test]
+fn retry_backs_off_exponentially_to_six_hours() {
+    let p = RenewalPolicy::DEFAULT;
+    assert_eq!(p.retry_delay(0), Duration::ZERO);
+    assert_eq!(p.retry_delay(1), Duration::from_secs(60));
+    assert_eq!(p.retry_delay(2), Duration::from_secs(120));
+    assert_eq!(p.retry_delay(9), Duration::from_secs(60 * 256));
+    assert_eq!(p.retry_delay(10), Duration::from_secs(6 * 3600));
+    assert_eq!(p.retry_delay(u32::MAX), Duration::from_secs(6 * 3600));
+}
+
+#[test]
+fn renewal_policy_refuses_bad_back_off() {
+    let m = Duration::from_secs(60);
+    assert_eq!(
+        RenewalPolicy::new(Duration::ZERO, m, m),
+        Err(LifecycleError::BadBackoff)
+    );
+    assert_eq!(
+        RenewalPolicy::new(m * 2, m, m),
+        Err(LifecycleError::BadBackoff)
+    );
+    let p = RenewalPolicy::new(m, m, m).unwrap();
+    assert_eq!(p.retry_delay(5), m);
+    assert!(!LifecycleError::BadBackoff.to_string().is_empty());
+}
+
+#[test]
+fn renewal_status_waits_renews_alerts_and_expires() {
+    let p = RenewalPolicy::DEFAULT;
+    let v = window(30);
+    let renew_at = p.renewal_time(v, 0); // day 20
+    assert_eq!(
+        p.status(v, renew_at, plus(renew_at, -1), 0),
+        RenewalStatus::Wait
+    );
+    assert_eq!(p.status(v, renew_at, renew_at, 0), RenewalStatus::Due);
+    // Failing with more than 7 days left: still only due.
+    assert_eq!(p.status(v, renew_at, renew_at, 3), RenewalStatus::Due);
+    // Exactly 7 days left is not yet below the window.
+    let seven_left = plus(v.not_after(), -7 * DAY);
+    assert_eq!(p.status(v, renew_at, seven_left, 3), RenewalStatus::Due);
+    let under = plus(seven_left, 1);
+    assert_eq!(p.status(v, renew_at, under, 3), RenewalStatus::Alert);
+    // Not failing: no alert however close.
+    assert_eq!(p.status(v, renew_at, under, 0), RenewalStatus::Due);
+    assert_eq!(
+        p.status(v, renew_at, v.not_after(), 1),
+        RenewalStatus::Alert
+    );
+    assert_eq!(
+        p.status(v, renew_at, plus(v.not_after(), 1), 0),
+        RenewalStatus::Expired
+    );
+}
+
+/// A 10-minute certificate renewed by a simulated device, with renewal
+/// failing for a while: it always holds a valid certificate (#224
+/// acceptance criterion, at the library level).
+#[test]
+fn ten_minute_certificates_renew_without_a_gap() {
+    let p = RenewalPolicy::new(
+        Duration::from_secs(5),
+        Duration::from_secs(30),
+        Duration::from_secs(120),
+    )
+    .unwrap();
+    let lifetime = 10 * MINUTE;
+    let mut cert = Validity::new(now(), plus(now(), lifetime)).unwrap();
+    let mut jitter: u32 = 0x9e37_79b9;
+    let mut renew_at = p.renewal_time(cert, jitter);
+    let mut failures = 0u32;
+    let mut t = now();
+    let mut renewals = 0;
+    while t < plus(now(), 3 * HOUR) {
+        assert!(cert.contains(t), "no valid certificate at {t}");
+        match p.status(cert, renew_at, t, failures) {
+            RenewalStatus::Wait => t = renew_at,
+            RenewalStatus::Due | RenewalStatus::Alert => {
+                // The CA is down for the first two attempts of every third
+                // renewal.
+                if renewals % 3 == 0 && failures < 2 {
+                    failures += 1;
+                    let delay = micros_of(p.retry_delay(failures));
+                    t = plus(t, delay);
+                } else {
+                    cert = Validity::new(t, plus(t, lifetime)).unwrap();
+                    jitter = jitter.wrapping_mul(0x0101_0101).wrapping_add(7);
+                    renew_at = p.renewal_time(cert, jitter);
+                    failures = 0;
+                    renewals += 1;
+                }
+            }
+            RenewalStatus::Expired => panic!("certificate expired at {t}"),
+        }
+    }
+    assert!(renewals > 25);
+}
+
+fn micros_of(d: Duration) -> i64 {
+    i64::try_from(d.as_micros()).unwrap()
+}
+
+#[test]
+fn expiry_alerts_fire_at_30_14_5_and_1_days() {
+    let a = ExpiryAlerts::default();
+    let end = plus(now(), 100 * DAY);
+    let at = |days_left: i64| a.alert(end, plus(end, -days_left * DAY));
+    assert_eq!(at(31), ExpiryAlert::None);
+    assert_eq!(
+        at(30),
+        ExpiryAlert::Within(Duration::from_secs(30 * 86_400))
+    );
+    assert_eq!(
+        at(15),
+        ExpiryAlert::Within(Duration::from_secs(30 * 86_400))
+    );
+    assert_eq!(
+        at(14),
+        ExpiryAlert::Within(Duration::from_secs(14 * 86_400))
+    );
+    assert_eq!(at(5), ExpiryAlert::Within(Duration::from_secs(5 * 86_400)));
+    assert_eq!(at(1), ExpiryAlert::Within(Duration::from_secs(86_400)));
+    assert_eq!(at(0), ExpiryAlert::Within(Duration::from_secs(86_400)));
+    assert_eq!(a.alert(end, plus(end, 1)), ExpiryAlert::Expired);
+    assert_eq!(a.thresholds().len(), 4);
+}
+
+#[test]
+fn expiry_alert_thresholds_are_configurable_but_never_empty() {
+    let h = Duration::from_secs(3600);
+    let a = ExpiryAlerts::new(&[h, h * 48]).unwrap();
+    assert_eq!(a.thresholds(), &[h * 48, h]);
+    for bad in [
+        &[][..],
+        &[h, h][..],
+        &[Duration::ZERO][..],
+        &[h; ExpiryAlerts::MAX_THRESHOLDS + 1][..],
+    ] {
+        assert_eq!(ExpiryAlerts::new(bad), Err(LifecycleError::BadThresholds));
+    }
+    let many: Vec<Duration> = (1..=16).map(|i| h * i).collect();
+    assert!(ExpiryAlerts::new(&many).is_ok());
+}
+
+#[test]
+fn server_tls_rotation_needs_fourteen_days_of_staging() {
+    let switch = plus(now(), 14 * DAY);
+    assert_eq!(
+        RotationPlan::server_tls(plus(now(), 1), switch, switch),
+        Err(LifecycleError::LeadTooShort)
+    );
+    let plan = RotationPlan::server_tls(now(), switch, plus(switch, 7 * DAY)).unwrap();
+    assert_eq!(plan.phase(plus(now(), -1)), RotationPhase::Planned);
+    assert_eq!(plan.phase(now()), RotationPhase::Staged);
+    assert_eq!(plan.phase(plus(switch, -1)), RotationPhase::Staged);
+    assert_eq!(plan.phase(switch), RotationPhase::Overlap);
+    assert_eq!(plan.phase(plus(switch, 7 * DAY)), RotationPhase::Complete);
+    assert_eq!(
+        RotationPlan::server_tls(now(), switch, plus(switch, -1)),
+        Err(LifecycleError::OverlapTooShort)
+    );
+    assert_eq!(plan.staged_at(), now());
+    assert_eq!(plan.switch_at(), switch);
+    assert_eq!(plan.retire_at(), plus(switch, 7 * DAY));
+}
+
+#[test]
+fn issuing_ca_overlap_covers_the_longest_certificate_plus_grace() {
+    let lifetime = Duration::from_secs(90 * 86_400);
+    let grace = Duration::from_secs(7 * 86_400);
+    let plan = RotationPlan::issuing_ca(now(), now(), lifetime, grace).unwrap();
+    assert_eq!(plan.retire_at(), plus(now(), 97 * DAY));
+    assert_eq!(plan.phase(now()), RotationPhase::Overlap);
+    assert_eq!(
+        RotationPlan::issuing_ca(plus(now(), 1), now(), lifetime, grace),
+        Err(LifecycleError::LeadTooShort)
+    );
+    // A certificate issued by the old CA just before the switch is still
+    // inside the overlap when it expires.
+    let last_old = Validity::new(plus(now(), -1), plus(now(), 90 * DAY - 1)).unwrap();
+    assert!(last_old.not_after() < plan.retire_at());
+    // A saturating overlap clamps to the end of time rather than wrapping.
+    let forever = RotationPlan::issuing_ca(now(), now(), Duration::MAX, grace).unwrap();
+    assert_eq!(forever.retire_at(), Timestamp::MAX);
+}
+
+#[test]
+fn unlock_token_keys_stay_accepted_for_the_longest_token() {
+    let plan = RotationPlan::unlock_token(now(), Duration::from_secs(8 * 3600));
+    assert_eq!(plan.phase(now()), RotationPhase::Overlap);
+    assert_eq!(
+        plan.phase(plus(now(), 8 * HOUR - 1)),
+        RotationPhase::Overlap
+    );
+    assert_eq!(plan.phase(plus(now(), 8 * HOUR)), RotationPhase::Complete);
+}
+
+#[test]
+fn rotation_errors_have_messages() {
+    for e in [
+        LifecycleError::BadBackoff,
+        LifecycleError::BadThresholds,
+        LifecycleError::LeadTooShort,
+        LifecycleError::OverlapTooShort,
+    ] {
+        assert!(!e.to_string().is_empty());
+    }
+}
+
+#[test]
+fn adoption_counts_silent_devices_as_not_adopted() {
+    let a = Adoption::measure(5, [Some(5), Some(6), None, Some(4)]);
+    assert_eq!((a.target(), a.adopted(), a.total()), (5, 2, 4));
+    assert!(!a.complete());
+    let done = Adoption::measure(5, [Some(5), Some(7)]);
+    assert!(done.complete());
+    assert!(Adoption::measure(5, []).complete());
+}

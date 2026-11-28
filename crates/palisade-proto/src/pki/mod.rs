@@ -12,6 +12,8 @@
 //! - [`trust_set`]: the signed trust-set manifest, its canonical encoding,
 //!   and the agent's acceptance rule.
 //! - [`signer`]: the [`Signer`] interface and an in-memory software back end.
+//! - [`lifecycle`]: renewal, expiry-alert and rotation-overlap schedules,
+//!   and trust-version adoption.
 //! - [`time`]: validity windows with clock-skew tolerance, and the clock.
 //!
 //! Every signature covers a [`Domain`] prefix followed by the payload, so a
@@ -23,6 +25,7 @@
 
 pub(crate) mod crypto;
 pub mod key;
+pub mod lifecycle;
 pub mod signer;
 pub mod time;
 pub mod trust_set;
@@ -35,6 +38,10 @@ use std::fmt;
 pub use key::{
     CertificateBinding, KeyAlgorithm, KeyBackend, KeyError, KeyPurpose, KeyRecord, KeyStatus,
     KeyType, Kid, PublicKey, SignatureAlgorithm, spki_sha256,
+};
+pub use lifecycle::{
+    Adoption, ExpiryAlert, ExpiryAlerts, LifecycleError, RenewalPolicy, RenewalStatus,
+    RotationPhase, RotationPlan,
 };
 pub use signer::{Signature, Signer, SignerError, SoftwareSigner};
 pub use time::{Clock, FixedClock, SkewTolerance, SystemClock, TimeError, Validity};
