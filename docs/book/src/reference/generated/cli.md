@@ -16,6 +16,7 @@ Commands:
   check-config  Validate the configuration, the TLS files and the certificate names, then print the effective configuration (secrets redacted)
   version       Print the version
   migrate       Manage the database schema. Uses the `[database.migration]` login (the schema owner) for `up`, and either login for the others
+  dev-server    Development only: generate a throwaway CA and TLS files in DIR, then serve enrolment (admin listener) and check-in (agent listener) on loopback with an in-memory store. Prints the registration code and the CA pin for the agent. Nothing survives a restart (#223, #334)
   help          Print this message or the help of the given subcommand(s)
 
 Options:

@@ -5,8 +5,9 @@ The central management server: policy distribution, approvals, inventory and eve
 **Status:** process skeleton with a database foundation. The binary starts, loads and validates
 its configuration, serves TLS on separate admin, agent and metrics listeners, answers liveness and
 readiness probes, and shuts down gracefully. It connects to Postgres, applies its embedded
-migrations, and isolates tenants with row-level security (see [Database](#database)). It has no
-agent or API functionality yet. Work is tracked in
+migrations, and isolates tenants with row-level security (see [Database](#database)). It serves
+device enrolment and check-in (see [Enrolment](#enrolment-and-check-in)); the rest of the agent and
+API functionality is still to come. Work is tracked in
 [#126](https://github.com/jusso-dev/palisade/issues/126) and
 [#127](https://github.com/jusso-dev/palisade/issues/127) (epic
 [#10](https://github.com/jusso-dev/palisade/issues/10)).
@@ -20,6 +21,7 @@ palisade-server migrate up      --config <PATH> # apply pending migrations, then
 palisade-server migrate status  --config <PATH> # applied vs embedded migrations, as JSON
 palisade-server migrate verify  --config <PATH> # checksums and row-level security checks
 palisade-server version
+palisade-server dev-server <DIR> [--admin-port 8443] [--agent-port 8444]   # development only
 ```
 
 `--config` can also come from `PALISADE_CONFIG`. Exit codes: `0` success (including a
@@ -365,3 +367,14 @@ None yet.
 ## Stability
 
 Unstable and not published. Anything may change.
+
+## Enrolment and check-in
+
+Devices enrol and check in through the routes in `src/enrol` ([#223](https://github.com/jusso-dev/palisade/issues/223), [#62](https://github.com/jusso-dev/palisade/issues/62)), with the messages in `palisade_proto::comms` in their JSON encoding (ADR 0015's fallback; gRPC is still to come).
+
+- `POST /v1/enrol`, on the **admin** listener (no client certificate). The order of checks is: the per-source rate limit (10 a minute), the device key's proof of possession over the bytes received, the request's age (5 minutes) and nonce (replay), the per-code rate limit (100 an hour), and then the registration code. The code must be known by its peppered hash, not revoked, not expired, have uses left, come from an allowed source network, and use a hardware key if the code requires one. A device ID (UUIDv7) is assigned only after every check passes. The device certificate is then issued for the request's key: 30 days, `clientAuth` only, with the device and tenant URNs. Refusals are logged as `enrol.rejected.{code,source,ratelimit,hardware_key,replay}` and answered with a problem document whose `code` member the agent acts on. The registration code is never echoed or logged.
+- `POST /v1/checkin`, `GET /v1/policy` and `GET /v1/trust`, on the **agent** listener (mTLS). The handshake checks the chain to the issuing CA. Each request's certificate serial and key hash must also be the current certificate of an enrolled device that is not revoked, so a revocation takes effect at the next request with no CRL delay. The tenant and group come from the device record, never from the request (ADR 0016). Policy and trust sets are served as the signed envelopes the agent verifies itself.
+
+State is behind the `EnrolStore` trait. Today the only store is `MemoryStore`, which keeps everything in memory. The Postgres tables (`registration_code`, `device`, `device_certificate` with RLS) are still to come under [#127](https://github.com/jusso-dev/palisade/issues/127), as is loading a production issuing CA from the ceremony (#15, #224). So `serve` does not mount these routes yet.
+
+`dev-server` is the development path for the fake agent ([#334](https://github.com/jusso-dev/palisade/issues/334)). It generates a throwaway CA, writes the TLS files and a `server.toml` into `<DIR>`, and serves enrolment and check-in on loopback. It prints a registration code and the CA pin (`sha256/<hex>` of the root key) to give the agent. The root certificate is written to `<DIR>/root.crt`.

@@ -10,7 +10,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tracing::level_filters::LevelFilter;
 
-use crate::config::{self, Config, DatabaseSettings, ENV_CONFIG, Loaded};
+use crate::config::{self, Config, DatabaseSettings, ENV_CONFIG, ListenerKind, Loaded};
 use crate::db::{self, DbError, SchemaVerdict};
 use crate::health::ClockHealth;
 use crate::server::{self, Server, ShutdownOutcome};
@@ -50,6 +50,20 @@ enum Command {
         #[command(subcommand)]
         action: MigrateAction,
     },
+    /// Development only: generate a throwaway CA and TLS files in DIR, then
+    /// serve enrolment (admin listener) and check-in (agent listener) on
+    /// loopback with an in-memory store. Prints the registration code and
+    /// the CA pin for the agent. Nothing survives a restart (#223, #334).
+    DevServer {
+        /// Where to write the TLS files and the server configuration.
+        dir: PathBuf,
+        /// The admin listener port (enrolment).
+        #[arg(long, default_value_t = 8443)]
+        admin_port: u16,
+        /// The agent listener port (check-in).
+        #[arg(long, default_value_t = 8444)]
+        agent_port: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -76,6 +90,11 @@ pub fn run() -> ExitCode {
         Command::CheckConfig => check_config(cli.config.as_deref()),
         Command::Serve => serve(cli.config.as_deref()),
         Command::Migrate { action } => migrate(cli.config.as_deref(), action),
+        Command::DevServer {
+            dir,
+            admin_port,
+            agent_port,
+        } => dev_server(&dir, admin_port, agent_port),
     }
 }
 
@@ -174,6 +193,87 @@ fn serve(path: Option<&Path>) -> ExitCode {
         }
     };
     runtime.block_on(serve_async(config))
+}
+
+fn dev_server(dir: &Path, admin_port: u16, agent_port: u16) -> ExitCode {
+    use crate::enrol::{EnrolSettings, dev::DevServer};
+    use palisade_proto::events::DnsName;
+    if let Err(e) = telemetry::init_json(LevelFilter::INFO) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    let Ok(localhost) = "localhost".parse::<DnsName>() else {
+        return ExitCode::FAILURE;
+    };
+    let dev = match DevServer::create(
+        dir,
+        &[localhost],
+        EnrolSettings {
+            checkin_url: Some(format!("https://localhost:{agent_port}")),
+            ..EnrolSettings::default()
+        },
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let toml = format!(
+        "# Written by `palisade-server dev-server`. Development only.\n\
+         [tls]\ncert_file = {:?}\nkey_file = {:?}\n\
+         [listen.admin]\nbind = \"127.0.0.1\"\nport = {admin_port}\npublic_url = \"https://localhost:{admin_port}\"\n\
+         [listen.agent]\nbind = \"127.0.0.1\"\nport = {agent_port}\npublic_url = \"https://localhost:{agent_port}\"\nclient_ca_file = {:?}\n",
+        dev.cert_file.display().to_string(),
+        dev.key_file.display().to_string(),
+        dev.agent_ca_file.display().to_string(),
+    );
+    let path = dir.join("server.toml");
+    if let Err(e) = std::fs::write(&path, toml) {
+        eprintln!("error: cannot write {}: {e}", path.display());
+        return ExitCode::FAILURE;
+    }
+    let config = match config::load(&path, &[]) {
+        Ok(l) => l.config,
+        Err(e) => return report_plain(&e.0),
+    };
+    // The code is printed once, to the terminal that started the server,
+    // never logged.
+    println!("palisade dev server (development only; nothing persists)");
+    println!("  enrol at:  https://localhost:{admin_port}");
+    println!("  code:      {}", dev.code.expose());
+    println!("  CA pin:    {}", dev.ca_pin);
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("palisade-server")
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("error: cannot start the async runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async move {
+        let prepared = match server::prepare(&config, &[]) {
+            Ok(p) => p,
+            Err(errors) => return report_logged(&errors),
+        };
+        let mut signals = match Signals::new() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(error = %e, "cannot listen for shutdown signals");
+                return ExitCode::FAILURE;
+            }
+        };
+        let running = Server::new(config, prepared)
+            .with_routes(ListenerKind::Admin, dev.service.admin_routes())
+            .with_routes(ListenerKind::Agent, dev.service.agent_routes())
+            .start();
+        signals.next().await;
+        running.shutdown().await;
+        ExitCode::SUCCESS
+    })
 }
 
 fn report_logged(errors: &[String]) -> ExitCode {

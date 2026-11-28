@@ -683,9 +683,21 @@ async fn serve_connection(
     // settings exchange that hyper does not time.
     let started = Arc::new(AtomicBool::new(false));
     let seen = started.clone();
+    // The client certificate the handshake verified, if any (the agent
+    // listener requires one). Handlers check it against the device records
+    // (#223).
+    let client_cert = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(<[_]>::first)
+        .map(|c| http::ClientCert(Arc::from(c.as_ref())));
     let service = ctx.router.clone().map_request(move |mut req: Request<_>| {
         seen.store(true, Ordering::Relaxed);
         req.extensions_mut().insert(Peer(peer));
+        if let Some(cert) = &client_cert {
+            req.extensions_mut().insert(cert.clone());
+        }
         req
     });
     let conn = builder.serve_connection(TokioIo::new(tls), TowerToHyperService::new(service));

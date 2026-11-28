@@ -61,6 +61,12 @@ pub struct RequestId(pub String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Peer(pub SocketAddr);
 
+/// The leaf certificate the client presented, DER, after the handshake
+/// verified its chain. Inserted by the listener on connections that sent
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCert(pub Arc<[u8]>);
+
 /// State shared by the handlers of one listener.
 #[derive(Debug, Clone)]
 pub struct AppState {
