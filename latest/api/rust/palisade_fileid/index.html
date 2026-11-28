@@ -670,6 +670,11 @@ names another publisher than its signer is <code>invalid</code>. It is <code>uns
 only when a catalog lookup ran and can prove a miss; a format whose
 signatures are not read, and a script or installer no catalog lists, is
 <code>unverified</code>.</li>
+<li>The deep tier also tags content (<code>content_tags</code>, #44, with the
+<code>content-rules</code> feature). The trust tier of a file on disk records the
+OS trust-verification API’s verdict next to this crate’s
+(<code>os_cross_check</code>, Windows with <code>os-trust</code>): a diagnostic that no
+verdict reads (ADR 0018).</li>
 <li><code>hashes.msi_normalised_sha256</code> (Medium) and
 <code>hashes.script_normalised_sha256</code> (Weak) are the tolerant identities of
 #53 and #52, for explicit opt-in rules only.</li>
