@@ -3,8 +3,9 @@
 //! a file, so no input may panic. A document that reads must write back to
 //! JSON that reads as the same document, and a document that validates must
 //! compile and decide objects with and without facts. The migrating reader
-//! (#330) reads the same input, and agrees with the strict reader on every
-//! document of the current version.
+//! (#330) and the lenient reader read the same input, and agree with the
+//! strict reader on every document of the current version. The lenient
+//! reader never sets aside a rule that allows or denies.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -12,15 +13,33 @@ use palisade_core::path::VolumeMap;
 use palisade_policy::context::EvaluationContext;
 use palisade_policy::decision::TraceId;
 use palisade_policy::evaluate::{Evaluator, Subject};
-use palisade_policy::migrate;
 use palisade_policy::facts::{ObjectFacts, PathFact, PathVariable, PathVariables};
-use palisade_policy::model::{Field, ObjectType, PolicyDocument};
+use palisade_policy::lenient::{self, IgnoredKind};
+use palisade_policy::migrate;
+use palisade_policy::model::{ActionKind, Field, ObjectType, PolicyDocument};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(data) else {
         return;
     };
     let migrated = migrate::read_json(text);
+    let lax = lenient::read_json(text);
+    if let Ok(l) = &lax {
+        for i in &l.ignored {
+            assert!(matches!(
+                i.kind,
+                IgnoredKind::GovernanceField
+                    | IgnoredKind::Rule(
+                        ActionKind::Audit
+                            | ActionKind::Defer
+                            | ActionKind::TrustSource
+                            | ActionKind::Ignore
+                    )
+            ));
+        }
+        let written = l.document.to_json_pretty().unwrap();
+        assert_eq!(PolicyDocument::from_json(&written).unwrap(), l.document);
+    }
     let Ok(doc) = PolicyDocument::from_json(text) else {
         // A document of an older major only reads through a migration, and
         // the result must read again as itself.
@@ -32,6 +51,9 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     assert_eq!(migrated.unwrap().document, doc);
+    let lax = lax.unwrap();
+    assert!(lax.ignored.is_empty());
+    assert_eq!(lax.document, doc);
     let written = doc.to_json_pretty().unwrap();
     assert_eq!(PolicyDocument::from_json(&written).unwrap(), doc);
     if let Ok(validated) = doc.validate() {
@@ -49,7 +71,7 @@ fuzz_target!(|data: &[u8]| {
             .with_path(
                 PathFact::new(r"C:\Program Files\Example\app.exe", &VolumeMap::new())
                     .with_user_writable(false)
-                .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
+                    .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
             )
             .with_signers(Vec::new());
         for facts in [ObjectFacts::new(), known] {

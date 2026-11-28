@@ -10,7 +10,8 @@
 //! field types, and returns the [`ValidatedPolicy`](crate::validate::ValidatedPolicy)
 //! that later stages accept.
 //!
-//! All structs reject unknown fields (strict mode). Enums are `snake_case`
+//! All structs reject unknown fields (strict mode); [`crate::lenient`]
+//! reads newer minor versions. Enums are `snake_case`
 //! strings.
 
 pub mod action;
@@ -628,7 +629,9 @@ impl PolicyDocument {
     /// The schema version is checked first, so a document from another major
     /// version gets a version error rather than a confusing field error.
     /// Unknown fields are rejected, including fields from a newer minor
-    /// version (a lenient reader is future work in #30).
+    /// version. This is the mode for authoring. An agent that receives a
+    /// newer minor reads it with [`crate::lenient::read_json`], which skips
+    /// only what can never relax a decision.
     ///
     /// # Errors
     ///
