@@ -1480,3 +1480,101 @@ fn a_stream_has_no_mark_of_the_web_of_its_own() {
     let host_id = identify(&host, Tiers::ALL, &ctx).unwrap();
     assert_eq!(host_id.fs.motw, Field::Computed(None));
 }
+
+/// The rule facts the policy bridge reads (#318, #328): each chain
+/// certificate's key hash, names, EKUs and key, the whole chain on the
+/// trusted signer, the RFC 3161 and expiry facts per signature, and the
+/// `LegalCopyright` string.
+#[test]
+fn rule_facts_for_the_policy_bridge() {
+    use palisade_fileid::authenticode::{CertSummary, DigestAlgorithm, KeyAlgorithm};
+    let contexts = Contexts::new();
+    let id = identify_bytes(
+        &generated("signed-tool.exe"),
+        Some("extool.exe"),
+        Tiers::ALL,
+        &contexts.get("trusted"),
+    );
+    let signer = id.trusted_signer().unwrap();
+    let sig = &id.signatures.computed().unwrap()[0];
+    let chain = sig.chain.as_ref().unwrap();
+    // The full chain, leaf first, ending at the root the record names.
+    assert_eq!(chain.certs.len(), 2);
+    assert!(chain.complete);
+    assert_eq!(chain.certs.first(), signer.leaf.as_ref());
+    assert_eq!(chain.certs.last(), signer.root.as_ref());
+    let leaf = signer.leaf.as_ref().unwrap();
+    let root = CertSummary::from_der(&corpus_ca()).unwrap();
+    assert_eq!(signer.root.as_ref().unwrap().spki_sha256, root.spki_sha256);
+    assert_eq!(leaf.spki_sha256.len(), 64);
+    assert_ne!(leaf.spki_sha256, root.spki_sha256);
+    assert_eq!(leaf.subject_cn.as_deref(), Some("Palisade Corpus Vendor"));
+    assert_eq!(leaf.subject_o.as_deref(), Some("Palisade Tests"));
+    assert_eq!(leaf.issuer_cn.as_deref(), Some("Palisade Corpus Root"));
+    assert_eq!(
+        leaf.subject_rfc4514.as_deref(),
+        Some("CN=Palisade Corpus Vendor,O=Palisade Tests")
+    );
+    assert_eq!(
+        leaf.extended_key_usage.as_deref(),
+        Some(&["1.3.6.1.5.5.7.3.3".to_owned()][..])
+    );
+    assert_eq!(leaf.key_alg, KeyAlgorithm::Rsa);
+    assert!(leaf.key_bits.is_some_and(|b| b >= 2048));
+    assert_eq!(leaf.signature_digest, Some(DigestAlgorithm::Sha256));
+    // The embedded signature: no timestamp, in date.
+    assert_eq!(sig.rfc3161_timestamp, Some(false));
+    assert_eq!(sig.expired_now, Some(false));
+    // Judged after the leaf expired, the same signature is expired now.
+    let mut late = contexts.get("trusted");
+    late.now = leaf.not_after + 1;
+    let late_id = identify_bytes(
+        &generated("signed-tool.exe"),
+        Some("extool.exe"),
+        Tiers::ALL,
+        &late,
+    );
+    let late_sig = &late_id.signatures.computed().unwrap()[0];
+    assert_eq!(late_sig.expired_now, Some(true));
+    // A catalog match carries its signer's chain too.
+    let cat = identify_bytes(
+        &corpus_files()["plain"],
+        Some("plain.exe"),
+        Tiers::ALL,
+        &contexts.get("trusted"),
+    );
+    let cat_signer = cat.trusted_signer().unwrap();
+    assert_eq!(
+        cat_signer.source,
+        palisade_fileid::identity::TrustSource::Catalog
+    );
+    let m = &cat.catalog_matches.computed().unwrap()[0];
+    assert!(m.signer_chain_complete);
+    assert_eq!(m.signer_chain.first(), cat_signer.leaf.as_ref());
+    assert_eq!(m.signer_chain.last(), cat_signer.root.as_ref());
+    assert_eq!(m.signer_chain.first(), m.signer.as_ref());
+    // The version resource's copyright, read like the other strings; the
+    // corpus tool has none.
+    let spec = common::VersionSpec {
+        fixed: None,
+        tables: vec![("040904B0", common::all_standard_strings())],
+        translations: vec![(0x0409, 0x04b0)],
+    };
+    let with = identify_bytes(
+        &common::with_version(&spec).build(),
+        Some("extool.exe"),
+        Tiers::ALL,
+        &contexts.get("default"),
+    );
+    assert_eq!(
+        with.version().unwrap().legal_copyright.as_deref(),
+        Some("(c) Example Org")
+    );
+    let tool = identify_bytes(
+        &corpus_files()["tool"],
+        Some("extool.exe"),
+        Tiers::ALL,
+        &contexts.get("default"),
+    );
+    assert_eq!(tool.version().unwrap().legal_copyright, None);
+}
