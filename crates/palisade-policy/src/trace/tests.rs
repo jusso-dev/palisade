@@ -290,7 +290,8 @@ fn explained(name: &str, t: &Trace) {
 }
 
 // Snapshot cases: allow, deny, mandatory deny, unknown, scope-rejected
-// (empty until #38), inactive, path-ACL-unsafe, override session.
+// (with the scope tests below), inactive, path-ACL-unsafe, override
+// session.
 
 #[test]
 fn allow_is_explained() {
@@ -1038,6 +1039,7 @@ fn explain_messages_all_have_english_templates() {
         "overridden",
         "inactive",
         "scope-rejected",
+        "scope-rejected-schedule",
         "inactive-not-yet",
         "inactive-expired",
         "tray-with-reason",
@@ -2671,6 +2673,54 @@ fn rules_out_of_scope_are_listed_as_rejected_and_nowhere_else() {
     let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
     assert!(t.scope_rejections.is_empty());
     assert_eq!(t.decisive.as_ref().unwrap().name, "Admins only");
+}
+
+/// The scope-rejected snapshot (#41 test plan): the administrators-only
+/// allow matched a standard user's object, and its scope took it out.
+#[test]
+fn a_scope_rejection_is_snapshotted() {
+    let p = scoped_policy(serde_json::json!({
+        "principals": {"include": [{"sid": IT_ADMINS}]}
+    }));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.process_token = Some(
+        crate::scope::Token::new()
+            .with_user(Some("S-1-5-21-1000-2000-3000-1001"), None)
+            .with_groups([("S-1-5-32-545", false)]),
+    );
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    assert_eq!(t.scope_rejections.len(), 1);
+    snapshot("scope-rejected", &t);
+    explained("scope-rejected", &t);
+}
+
+/// A rule outside its schedule is a scope rejection with dimension
+/// `schedule`, not an inactive match, and the explanation says "outside
+/// its schedule" (see [`ScopeRejection`]).
+#[test]
+fn a_rule_outside_its_schedule_is_a_scope_rejection_not_inactive() {
+    // Mondays 09:00 to 17:00 UTC; the time is Monday 00:00 UTC, before it.
+    let p = scoped_policy(serde_json::json!({
+        "schedule": {"timezone_basis": "utc", "windows": [{"days": ["mon"], "start": "09:00", "end": "17:00"}]}
+    }));
+    let mut o = object('a', "Other Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.scope.time = Some(crate::scope::TrustedTime {
+        unix_secs: 1_789_948_800,
+        trusted: true,
+    });
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Standard);
+    assert!(t.inactive_matches.is_empty(), "{:?}", t.inactive_matches);
+    assert_eq!(t.scope_rejections.len(), 1);
+    assert_eq!(t.scope_rejections[0].dimension, Some("schedule"));
+    let doc = explain(&t, Verbosity::Detailed);
+    let c = Catalog::english();
+    assert!(
+        doc.paragraphs
+            .iter()
+            .any(|m| m.id == "scope-rejected-schedule"
+                && c.format(m).contains("outside its schedule")),
+        "{doc:?}"
+    );
 }
 
 #[test]

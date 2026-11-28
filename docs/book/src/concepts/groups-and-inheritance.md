@@ -23,6 +23,11 @@ provenance of every rule and setting and a content hash. The engine only ever ev
 effective policy, so everything in [Rules](rules-and-conditions.md) and
 [Precedence](precedence.md) applies unchanged.
 
+That provenance carries into explanations: a decision trace names the groups the deciding rule
+came from (which node contributed its rule set, through which policy, library or template) and
+the node that suppressed it, if one did, and the effective view of a device shows the same for
+every rule. Group names follow the trace's redaction settings.
+
 Rule scoping by user, group, device, time, network and session is specified in
 [#38](https://github.com/jusso-dev/palisade/issues/38).
 

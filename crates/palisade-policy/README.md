@@ -163,7 +163,7 @@ A device's effective policy is built from layers, outermost first: the global no
 
 | Field | Contents | Level |
 |---|---|---|
-| `trace_schema_version` | `1.0.0` | all |
+| `trace_schema_version` | `1.1.0` (1.1 added the hierarchy steps of `inheritance[]`) | all |
 | `trace_id`, `policy_id`, `policy_revision`, `bundle_hash` | identity; `bundle_hash` is supplied by the caller (#43) | all |
 | `effective_mode`, `decisive`, `decision` | the mode, the deciding rule, and the decision exactly as the evaluator made it | all |
 | `mode_resolution[]` | each step of #36 that applied (lockdown, device mode, mandatory deny, disconnected, type mode, control level, rule set and rule overrides, session), the effective mode and what it did to the outcome | standard |
@@ -171,10 +171,10 @@ A device's effective policy is built from layers, outermost first: the global no
 | `matched[]` | every rule that matched: stage, action, specificity tier, `order`, `priority`, and its role (`decided`, `overridden`, `annotation`, `granted`) | standard |
 | `decisive.criteria[]` | the deciding rule's criteria, each with its tri-state result, the result it needed (`no_match` under `not`), and its notes | standard |
 | `inactive_matches[]` | disabled rules that would have matched | standard |
-| `scope_rejections[]` | rules whose match tree matched but whose scopes (#38) took them out: the rule, the level (`policy`, `rule_set`, `rule`) and, when one decided alone, the dimension | standard |
+| `scope_rejections[]` | rules whose match tree matched but whose scopes (#38) took them out: the rule, the level (`policy`, `rule_set`, `rule`) and, when one decided alone, the dimension. A rule outside its schedule is here, with dimension `schedule` (a schedule is a scope dimension, judged with the others), not in `inactive_matches[]`, and the explanation says "outside its schedule" | standard |
 | `unknown_facts[]` | each missing or untrusted fact, why, and its effect on the rules it left unknown (an allow did not apply, a deny did not apply, a deny failed closed) | standard |
 | `warnings[]` | `path_acl_unsafe`, `short_name_unresolved`, `signature_relaxed` (#256), `scope_stale` and `clock_untrusted` from scopes (#38), and `condition_timeout` and `user_controlled_context` once their sources exist (#33) | standard |
-| `inheritance[]` | the deciding rule's provenance: policy, rule set, rule. The group steps that `hierarchy::EffectivePolicy` records (#37) are a follow-up under #41 | standard |
+| `inheritance[]` | the deciding rule's provenance, outermost first. With `Tracer::with_groups` (a `trace::groups::GroupProvenance` built from the device's `hierarchy::EffectivePolicy`, #37): each hierarchy node that contributed its rule set (`global`, `tenant`, `group`, `dynamic_group`, `template` or `device`, with `via` and, for a template, `template_for`), and the node that suppressed it (`outcome: suppressed`) or tried to (`suppression_overridden`). Then the policy, rule set and rule. Names pass the trace's redactor and are cut like other values; IDs are always written. At most 32 steps | standard |
 | `allow_suggestion` | for a block or a would-block, a draft allow rule from the strongest identity available (hash, then publisher with product and version, then publisher, then a path users cannot write), with caveats if a mandatory or ordinary deny also matched. The engine never applies it: it is handed to approvals and recommendations (#5, #11) | standard |
 | `near_misses[]` | rules whose identity anchor matched but which did not apply, ranked by matched criteria (at most 10), each with its failing criteria: pointer, field, operator, expected and observed values | full |
 | `facts_used[]` | every fact the evaluated criteria read | full |
@@ -193,7 +193,7 @@ A device's effective policy is built from layers, outermost first: the global no
 
 **Policy-as-code tests.** `trace::policy_test` reads a `tests:` file (`given` facts, `expect` an outcome, enforce-mode outcome, reason code, mode or deciding rule) and runs it through the simulator. The report has `exit_code` (non-zero on failure) and `junit()`. The examples in [`docs/examples/simulation/`](../../docs/examples/simulation/) run in CI (`tests/simulation.rs`). The `pal policy test` command is #15.
 
-**Effective view.** `trace::effective::effective_view(policy, state, clock)` lists what a device enforces: every rule with its provenance and whether it is active (a disabled rule, a rule outside its activity window at `clock` as the evaluator judges it, with `expired` or `not_yet_active`, or every rule on a disabled device, is not), the settings with their source, the mode of every object type, the session, lockdown and the protection status.
+**Effective view.** `trace::effective::effective_view(policy, state, clock)` lists what a device enforces: every rule with its provenance and whether it is active (a disabled rule, a rule outside its activity window at `clock` as the evaluator judges it, with `expired` or `not_yet_active`, or every rule on a disabled device, is not), the settings with their source, the mode of every object type, the session, lockdown and the protection status. `effective_view_with_groups` adds each rule's group provenance, as in a trace, and reports a rule a node suppressed as `suppressed` rather than `disabled`.
 
 ## Performance
 

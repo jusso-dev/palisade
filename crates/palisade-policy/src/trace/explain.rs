@@ -201,9 +201,15 @@ pub fn explain(trace: &Trace, verbosity: Verbosity) -> ExplainDoc {
         }
     }
     for s in &trace.scope_rejections {
-        let m = Message::new("scope-rejected")
-            .arg("rule", named(&s.name, &s.rule))
-            .arg("level", s.level.replace('_', " "));
+        // A schedule is a scope dimension (see `ScopeRejection`), but
+        // "outside its schedule" says it more plainly.
+        let m = if s.dimension == Some("schedule") {
+            Message::new("scope-rejected-schedule")
+        } else {
+            Message::new("scope-rejected")
+        }
+        .arg("rule", named(&s.name, &s.rule))
+        .arg("level", s.level.replace('_', " "));
         doc.paragraphs.push(match s.dimension {
             Some(d) => m.arg("dimension", d),
             None => m.arg("dimension", "scope"),
@@ -742,6 +748,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     (
         "scope-rejected",
         "Rule { $rule } matched this file, but its { $level } scope does not cover this case ({ $dimension }), so it did not apply.",
+    ),
+    (
+        "scope-rejected-schedule",
+        "Rule { $rule } matched this file, but it is outside its schedule (its { $level } scope), so it did not apply.",
     ),
     (
         "inactive-not-yet",

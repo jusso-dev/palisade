@@ -1,0 +1,193 @@
+{
+  "trace_schema_version": "1.1.0",
+  "trace_id": "41414141414141414141414141414141",
+  "level": "standard",
+  "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+  "policy_revision": 7,
+  "bundle_hash": null,
+  "object_type": "executable",
+  "effective_mode": "enforce",
+  "mode_resolution": [
+    {
+      "kind": "device_mode",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "device mode enforce"
+    },
+    {
+      "kind": "effective",
+      "applied": true,
+      "mode": "enforce",
+      "detail": ""
+    },
+    {
+      "kind": "applied",
+      "applied": false,
+      "mode": "enforce",
+      "detail": "blocked; no rule allows it, and the mode enforces"
+    }
+  ],
+  "precedence_model": "deny_wins",
+  "stages": [
+    {
+      "name": "mandatory_deny",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "exclusion",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "session_override",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "policy",
+      "outcome": "passed",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "attribute",
+      "outcome": "skipped",
+      "candidates": 0,
+      "duration_ns": null
+    },
+    {
+      "name": "unknown",
+      "outcome": "decided",
+      "candidates": 0,
+      "duration_ns": null
+    }
+  ],
+  "decisive": null,
+  "matched": [],
+  "near_misses": [],
+  "inactive_matches": [],
+  "scope_rejections": [
+    {
+      "rule": {
+        "rule_id": "01936b2e-0001-7b3d-9f21-0a1b2c3d4e61",
+        "display_id": "R-000001",
+        "rule_set_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d0001",
+        "policy_id": "01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e5f",
+        "policy_revision": 7
+      },
+      "name": "Admins only",
+      "level": "rule",
+      "dimension": "principals"
+    }
+  ],
+  "unknown_facts": [],
+  "facts_used": [],
+  "warnings": [],
+  "inheritance": [],
+  "allow_suggestion": {
+    "action": "allow",
+    "object_types": [
+      "executable"
+    ],
+    "identity": "hash",
+    "match": {
+      "criterion": {
+        "field": "hash.sha256",
+        "operator": "equals",
+        "values": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      }
+    },
+    "caveats": []
+  },
+  "omitted": {
+    "matched": 0,
+    "near_misses": 0,
+    "inactive_matches": 0,
+    "scope_rejections": 0
+  },
+  "decision": {
+    "outcome": "blocked",
+    "would_have_been": "blocked",
+    "action": "deny",
+    "matched_rule": null,
+    "overridden": [],
+    "annotations": [],
+    "mode": "enforce",
+    "learning_candidate": false,
+    "directives": {
+      "containment": null,
+      "elevation": null,
+      "trust_sources": [],
+      "kill_running": false,
+      "request": null,
+      "window_close": null,
+      "prompt": null
+    },
+    "effects": {
+      "log": "always",
+      "upload": "immediate",
+      "notify": "default",
+      "notification_text": null,
+      "help_url": null,
+      "severity": "medium",
+      "tags": [],
+      "suppress_duplicates_secs": 600
+    },
+    "reason_code": "implicit_deny_unknown",
+    "scope_notes": [],
+    "unknown": {
+      "resolved": "block",
+      "applied": "block",
+      "fallback": null,
+      "entries": [
+        {
+          "kind": "default",
+          "key": "default",
+          "level": "block"
+        }
+      ],
+      "locations": [],
+      "origins": [],
+      "unknown_locations": [
+        "user_profile",
+        "temp",
+        "program_files",
+        "windows",
+        "other_fixed",
+        "removable",
+        "network",
+        "optical"
+      ],
+      "unknown_origins": [
+        "internet",
+        "email_attachment",
+        "removable_copy",
+        "network_share",
+        "trusted_source",
+        "preexisting",
+        "unknown"
+      ],
+      "missing_facts": [
+        "volume_kind",
+        "windir",
+        "program_files",
+        "user_profile",
+        "app_data",
+        "local_app_data",
+        "public",
+        "temp",
+        "origin"
+      ]
+    },
+    "trace_id": "41414141414141414141414141414141",
+    "overridden_omitted": 0,
+    "annotations_omitted": 0,
+    "trust_sources_omitted": 0
+  }
+}

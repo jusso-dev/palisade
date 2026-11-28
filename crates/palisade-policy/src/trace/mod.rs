@@ -60,6 +60,7 @@
 
 pub mod effective;
 mod explain;
+pub mod groups;
 mod modes;
 pub mod policy_test;
 pub mod privacy;
@@ -95,7 +96,10 @@ use record::{RuleResult, TracedRule};
 
 /// The version of the trace JSON. The major version changes when a field
 /// is removed or changes meaning; the minor version when one is added.
-pub const TRACE_SCHEMA_VERSION: &str = "1.0.0";
+///
+/// 1.1.0 added the hierarchy steps of [`Trace::inheritance`] (each step's
+/// `via`, `outcome` and `template_for`) and `omitted.inheritance`.
+pub const TRACE_SCHEMA_VERSION: &str = "1.1.0";
 
 /// The limits that bound a trace.
 pub mod limits {
@@ -109,6 +113,11 @@ pub mod limits {
     pub const MAX_INACTIVE: usize = 16;
     /// The most scope rejections listed.
     pub const MAX_SCOPE_REJECTIONS: usize = 16;
+    /// The most steps of the deciding rule's provenance: the hierarchy
+    /// nodes it came from (#37) and the policy, rule set and rule. A
+    /// hierarchy is at most 8 groups deep, so 32 steps hold every layer
+    /// and its template.
+    pub const MAX_INHERITANCE: usize = 32;
     /// The most rules named by one unknown fact or one warning.
     pub const MAX_RULES_PER_ENTRY: usize = 10;
     /// The most entries of each list of the decision, in the trace's JSON.
@@ -118,7 +127,9 @@ pub mod limits {
     pub const MAX_TRACE_BYTES: usize = 1024 * 1024;
 }
 
-use limits::{MAX_FAILING, MAX_INACTIVE, MAX_MATCHED, MAX_NEAR_MISSES, MAX_RULES_PER_ENTRY};
+use limits::{
+    MAX_FAILING, MAX_INACTIVE, MAX_INHERITANCE, MAX_MATCHED, MAX_NEAR_MISSES, MAX_RULES_PER_ENTRY,
+};
 
 /// How much a trace records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -321,6 +332,15 @@ pub struct Omitted {
     pub inactive_matches: u32,
     /// Scope rejections past [`limits::MAX_INACTIVE`].
     pub scope_rejections: u32,
+    /// Provenance steps past [`limits::MAX_INHERITANCE`]. Written only
+    /// when some were left out.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub inheritance: u32,
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+const fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// A pipeline stage (#35).
@@ -512,6 +532,18 @@ pub struct InactiveMatch {
 }
 
 /// A rule whose tree matched but whose scope excluded the subject (#38).
+///
+/// A rule outside its schedule is one of these, with dimension `schedule`,
+/// not an [`InactiveMatch`]. #41 lists "out-of-schedule" among the inactive
+/// reasons, but a schedule is part of a rule's scope, next to who and
+/// where (#38), and is judged with it: a scope's dimensions combine with
+/// `combine` and `negate` and are three-valued, so an untrusted or
+/// unknown time narrows an allow and widens a deny like any other unknown
+/// scope fact. The activity window (`activates_at`, `expires_at`, #40) is a
+/// property of the rule itself, and the clock rules for it are different
+/// (the floor and the anchor). Listing one rule in both places would count
+/// it twice, so a schedule stays a scope dimension, and the explanation
+/// says "outside its schedule".
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ScopeRejection {
     /// The rule.
@@ -590,14 +622,48 @@ pub struct Warning {
 }
 
 /// One level of where a rule comes from.
+///
+/// With group provenance ([`groups::GroupProvenance`]), the steps of the
+/// hierarchy nodes go first, outermost node first: `node` is the node's
+/// kind, and `via`, `outcome` and `template_for` say how it took part.
+/// The policy, rule set and rule steps follow, without those fields.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct InheritanceStep {
-    /// `policy`, `rule_set` or `rule`.
+    /// `global`, `tenant`, `group`, `dynamic_group`, `template` or `device`
+    /// for a hierarchy node (#37), then `policy`, `rule_set` or `rule`.
     pub node: &'static str,
     /// Its ID.
     pub id: String,
-    /// Its name.
+    /// Its name, redacted and cut as the privacy settings say.
     pub name: String,
+    /// For a hierarchy node: how it contributed the rule set, such as
+    /// `policy <id> (slot 0)` or `library <id> v3`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+    /// For a hierarchy node: `contributed`, `suppressed` (it disabled the
+    /// rule with `suppress_inherited`) or `suppression_overridden` (it
+    /// tried, but it or a nearer layer contributes the rule set too).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<&'static str>,
+    /// For a template's layer: the node that links to the template.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_for: Option<String>,
+}
+
+impl InheritanceStep {
+    /// A step of the policy document itself: `policy`, `rule_set` or
+    /// `rule`, with its name redacted and cut as `privacy` says.
+    #[must_use]
+    pub fn document(node: &'static str, id: String, name: &str, privacy: &Privacy) -> Self {
+        Self {
+            node,
+            id,
+            name: privacy.text(name).0,
+            via: None,
+            outcome: None,
+            template_for: None,
+        }
+    }
 }
 
 /// How firmly a [`RuleDraft`] identifies the object.
@@ -642,6 +708,7 @@ pub struct Tracer<'p> {
     policy: &'p Policy,
     rules: Vec<TracedRule<'p>>,
     by_id: BTreeMap<RuleId, usize>,
+    groups: Option<groups::GroupProvenance>,
 }
 
 impl<'p> Tracer<'p> {
@@ -692,7 +759,17 @@ impl<'p> Tracer<'p> {
             policy,
             rules,
             by_id,
+            groups: None,
         })
+    }
+
+    /// The same tracer, naming the hierarchy nodes each rule came from
+    /// (#37) in [`Trace::inheritance`]. Build `groups` from the effective
+    /// policy the tracer's policy is ([`groups::GroupProvenance::new`]).
+    #[must_use]
+    pub fn with_groups(mut self, groups: groups::GroupProvenance) -> Self {
+        self.groups = Some(groups);
+        self
     }
 
     /// The same tracer, with Palisade's own images pinned in its evaluator
@@ -1096,26 +1173,27 @@ impl<'p> Tracer<'p> {
             trace.mode_resolution = modes::disabled_steps(state);
         }
 
-        // Provenance of the deciding rule within the policy document. The
-        // group steps of #37's effective policy are a follow-up under #41.
+        // Provenance of the deciding rule: the hierarchy nodes it came
+        // from, if the tracer has them (#37), then the policy document.
         if let Some(r) = decider {
-            trace.inheritance = vec![
-                InheritanceStep {
-                    node: "policy",
-                    id: self.policy.id.to_string(),
-                    name: clip(&self.policy.name).0,
-                },
-                InheritanceStep {
-                    node: "rule_set",
-                    id: r.set.id.to_string(),
-                    name: clip(&r.set.name).0,
-                },
-                InheritanceStep {
-                    node: "rule",
-                    id: r.rule.id.to_string(),
-                    name: clip(&r.rule.name).0,
-                },
-            ];
+            let mut steps = self
+                .groups
+                .as_ref()
+                .map(|g| g.steps(r.set.id, r.rule.id, privacy))
+                .unwrap_or_default();
+            steps.extend([
+                InheritanceStep::document(
+                    "policy",
+                    self.policy.id.to_string(),
+                    &self.policy.name,
+                    privacy,
+                ),
+                InheritanceStep::document("rule_set", r.set.id.to_string(), &r.set.name, privacy),
+                InheritanceStep::document("rule", r.rule.id.to_string(), &r.rule.name, privacy),
+            ]);
+            trace.omitted.inheritance = count(steps.len().saturating_sub(MAX_INHERITANCE));
+            steps.truncate(MAX_INHERITANCE);
+            trace.inheritance = steps;
         }
 
         // A draft allow for a block or a would-block, a prompt included.
