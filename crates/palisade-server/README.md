@@ -72,6 +72,9 @@ as warnings and ignored, so variables meant for other Palisade components do not
 | `database.auto_migrate` | on if `[database.migration]` is set | Apply pending migrations at start |
 | `database.migration.user` | none | The **migration** role, which owns the schema |
 | `database.migration.password_file` | none | A secret file holding its password |
+| `clock.ntp_servers` | none | NTP servers for the clock health check, as `host`, `host:port`, `IPv4[:port]` or `[IPv6][:port]`, at most 8. In an environment variable, comma-separated. Empty: the clock is not checked and `serve` warns |
+| `clock.max_offset_ms` | `1000` | Largest offset from NTP before health reports `clock_offset`, 1 to 3600000 |
+| `clock.check_interval_secs` | `64` | 16 to 86400 |
 
 `<name>` is `admin` (console, REST API, SSO callbacks), `agent` (agent traffic) or `metrics`
 (probes with full detail, and later the metrics exposition). `admin` and `agent` are required.
@@ -185,8 +188,16 @@ Every listener serves:
 | `database_down` | `[database]` is configured and the runtime role cannot reach it (also before the first check) | 503 |
 | `database_schema:<verdict>` | The schema is `behind` (pending migrations), `newer` than this binary, or `damaged` | 503 |
 | `database_role_unsafe` | The runtime role, or any role it is a member of, is a superuser, has `BYPASSRLS`, or owns or can create objects in the schema; or it is not in `palisade_runtime` | 503 |
+| `clock_offset` | The system clock is further from NTP than `clock.max_offset_ms` (1 s by default) | 200, status `degraded` |
+| `clock_unknown` | `clock.ntp_servers` is set but no server gave a valid reply (also before the first check) | 200, status `degraded` |
 
-The database is checked every 5 seconds. Job-runner readiness joins this list with #126.
+The database is checked every 5 seconds. The clock is checked every `clock.check_interval_secs`
+over SNTP: the servers are tried in order and the first valid reply decides (#224, ISM-0988).
+Replies are checked strictly (`palisade_proto::sntp`; fuzzed as `sntp_reply`), and a change
+between synced, skewed and unknown is logged once. The check only reports; keeping the clock
+right is the operating system's time service's job. A bad clock degrades the status but leaves
+the server ready, because failing readiness would strand every agent for a problem a restart
+cannot fix. Job-runner readiness joins this list with #126.
 
 ## Database
 
@@ -319,7 +330,7 @@ Tracked in [#126](https://github.com/jusso-dev/palisade/issues/126) unless noted
 `create-admin`, `backup` and `restore` subcommands (also
 [#138](https://github.com/jusso-dev/palisade/issues/138)); `/version` with git SHA and schema
 version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
-the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
+the metrics exposition and OTLP; runtime log-level changes; the job runner
 and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
 partitioning ([#127](https://github.com/jusso-dev/palisade/issues/127) and the issues that own
 each table), the audit log ([#132](https://github.com/jusso-dev/palisade/issues/132)), enrolment and device certificate

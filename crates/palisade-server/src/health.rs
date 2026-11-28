@@ -17,6 +17,8 @@
 //! | `database_down` | `[database]` is configured and the last check could not reach it as the runtime role | 503 |
 //! | `database_schema:<verdict>` | The schema is `behind` (pending migrations), `newer` than this binary, or `damaged` (checksum mismatch or a failed migration) | 503 |
 //! | `database_role_unsafe` | The runtime login could bypass row-level security (superuser, `BYPASSRLS`, owns schema objects) | 503 |
+//! | `clock_offset` | `clock.ntp_servers` is set and the clock is further from NTP than `clock.max_offset_ms` (1 s by default) | 200, status `degraded` |
+//! | `clock_unknown` | `clock.ntp_servers` is set and no server gave a valid reply (also before the first check) | 200, status `degraded` |
 //!
 //! Job runner readiness joins this list with the job runner work in #126.
 
@@ -54,12 +56,33 @@ pub enum DatabaseHealth {
     RoleUnsafe,
 }
 
+/// The clock, as the last check measured it ([`crate::clock`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockHealth {
+    /// Not measured: no NTP server gave a valid reply, or no check yet.
+    Unknown,
+    /// Within the allowed offset.
+    Synced {
+        /// The offset in microseconds, positive when the local clock is
+        /// behind.
+        offset_micros: i64,
+    },
+    /// Further off than allowed.
+    Skewed {
+        /// The offset in microseconds, positive when the local clock is
+        /// behind.
+        offset_micros: i64,
+    },
+}
+
 #[derive(Debug, Default)]
 struct Inner {
     listeners: BTreeMap<ListenerKind, ListenerHealth>,
     shutting_down: bool,
     /// `None` when no database is configured.
     database: Option<DatabaseHealth>,
+    /// `None` when the clock is not checked.
+    clock: Option<ClockHealth>,
 }
 
 /// Shared, thread-safe health state.
@@ -97,6 +120,7 @@ impl Health {
                 listeners,
                 shutting_down: false,
                 database: None,
+                clock: None,
             }),
         }
     }
@@ -126,6 +150,17 @@ impl Health {
     /// The recorded database state, or `None` if no database is configured.
     pub fn database(&self) -> Option<DatabaseHealth> {
         self.lock().database
+    }
+
+    /// Records the clock state. Once set, the clock counts towards the
+    /// status (never towards readiness).
+    pub fn set_clock(&self, state: ClockHealth) {
+        self.lock().clock = Some(state);
+    }
+
+    /// The recorded clock state, or `None` if the clock is not checked.
+    pub fn clock(&self) -> Option<ClockHealth> {
+        self.lock().clock
     }
 
     /// Marks the start of shutdown. Readiness fails from now on.
@@ -166,6 +201,17 @@ impl Health {
             Some(DatabaseHealth::RoleUnsafe) => {
                 ready = false;
                 indicators.push("database_role_unsafe".to_owned());
+            }
+        }
+        match inner.clock {
+            None | Some(ClockHealth::Synced { .. }) => {}
+            Some(ClockHealth::Skewed { .. }) => {
+                degraded = true;
+                indicators.push("clock_offset".to_owned());
+            }
+            Some(ClockHealth::Unknown) => {
+                degraded = true;
+                indicators.push("clock_unknown".to_owned());
             }
         }
         let status = if inner.shutting_down {
@@ -250,6 +296,34 @@ mod tests {
             assert_eq!(r.body["indicators"], json!([indicator]));
         }
         h.set_database(DatabaseHealth::Up);
+        assert_eq!(
+            h.readiness().body,
+            json!({ "status": "ready", "indicators": [] })
+        );
+    }
+
+    #[test]
+    fn clock_states_degrade_but_stay_ready() {
+        let h = Health::new([ListenerKind::Admin]);
+        h.set_listener(ListenerKind::Admin, ListenerHealth::default());
+        assert_eq!(h.clock(), None);
+        for (state, indicator) in [
+            (
+                ClockHealth::Skewed {
+                    offset_micros: 1_000_001,
+                },
+                "clock_offset",
+            ),
+            (ClockHealth::Unknown, "clock_unknown"),
+        ] {
+            h.set_clock(state);
+            assert_eq!(h.clock(), Some(state));
+            let r = h.readiness();
+            assert!(r.ready, "{indicator}");
+            assert_eq!(r.body["status"], "degraded");
+            assert_eq!(r.body["indicators"], json!([indicator]));
+        }
+        h.set_clock(ClockHealth::Synced { offset_micros: -3 });
         assert_eq!(
             h.readiness().body,
             json!({ "status": "ready", "indicators": [] })

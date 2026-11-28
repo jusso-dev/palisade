@@ -88,3 +88,13 @@ auto_migrate = true
 [database.migration]
 user = "palisade_owner"
 password_file = "secrets/db-owner.password"
+
+# Clock health check (#224, ISM-0988): compares the system clock with NTP
+# over SNTP and reports `clock_offset` in readiness when it is further off
+# than `max_offset_ms`, or `clock_unknown` when no server answers. It only
+# reports; the operating system's time service keeps the clock right.
+# Leave `ntp_servers` out to disable the check (serve then warns).
+[clock]
+ntp_servers = ["pool.ntp.org"]
+max_offset_ms = 1000
+check_interval_secs = 64

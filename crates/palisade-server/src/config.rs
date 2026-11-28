@@ -27,6 +27,15 @@ const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const MAX_BODY_LIMIT: u64 = 1024 * 1024 * 1024;
 const MAX_REQUEST_TIMEOUT_SECS: u64 = 3600;
 const MAX_GRACE_SECS: u64 = 3600;
+/// The clock health check (#224): the default largest offset from NTP
+/// before the server warns, and the default and bounds of the interval.
+const DEFAULT_MAX_CLOCK_OFFSET_MS: u64 = 1000;
+const MAX_CLOCK_OFFSET_MS: u64 = 3_600_000;
+const DEFAULT_CLOCK_INTERVAL_SECS: u64 = 64;
+const MIN_CLOCK_INTERVAL_SECS: u64 = 16;
+const MAX_CLOCK_INTERVAL_SECS: u64 = 86_400;
+/// The most NTP servers the clock check queries.
+const MAX_NTP_SERVERS: usize = 8;
 const MAX_CONNECTIONS: u32 = 1_000_000;
 /// Longest accepted interface name. Windows friendly names can be long.
 const MAX_INTERFACE_NAME: usize = 256;
@@ -50,6 +59,15 @@ struct RawConfig {
     shutdown: RawShutdown,
     log: RawLog,
     database: Option<RawDatabase>,
+    clock: RawClock,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawClock {
+    ntp_servers: Option<Vec<String>>,
+    max_offset_ms: Option<u64>,
+    check_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -378,6 +396,22 @@ pub struct Config {
     pub log_level: LevelFilter,
     /// The database, when configured.
     pub database: Option<DatabaseSettings>,
+    /// The clock health check.
+    pub clock: ClockSettings,
+}
+
+/// The clock health check (#224, ISM-0988): which NTP servers to compare
+/// the system clock with, and how far off it may be before health warns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClockSettings {
+    /// NTP servers as `host` or `host:port` (port 123 by default). Empty
+    /// means the clock is not checked, which health reports as
+    /// `clock_unchecked`.
+    pub ntp_servers: Vec<String>,
+    /// The largest offset that does not warn.
+    pub max_offset: Duration,
+    /// How often to check.
+    pub interval: Duration,
 }
 
 /// A loaded configuration plus non-fatal findings.
@@ -519,6 +553,23 @@ fn apply_env(
             set_env_int(&mut raw.shutdown.grace_secs, name, value, errors);
         }
         ["LOG", "LEVEL"] => raw.log.level = text(),
+        ["CLOCK", "NTP_SERVERS"] => {
+            // A comma-separated list; an empty value clears it.
+            raw.clock.ntp_servers = Some(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            );
+        }
+        ["CLOCK", "MAX_OFFSET_MS"] => {
+            set_env_int(&mut raw.clock.max_offset_ms, name, value, errors);
+        }
+        ["CLOCK", "CHECK_INTERVAL_SECS"] => {
+            set_env_int(&mut raw.clock.check_interval_secs, name, value, errors);
+        }
         ["DATABASE", "MIGRATION", key] => {
             if !matches!(*key, "USER" | "PASSWORD_FILE") {
                 warnings.push(format!("ignoring unknown environment variable {name}"));
@@ -698,6 +749,8 @@ fn validate(
         }
     };
 
+    let clock = validate_clock(raw.clock, errors);
+
     let start = errors.len();
     let database = raw
         .database
@@ -711,8 +764,85 @@ fn validate(
         shutdown_grace: Duration::from_secs(grace_secs),
         log_level: log_level?,
         database,
+        clock: clock?,
     };
     database_ok.then_some(config)
+}
+
+fn validate_clock(raw: RawClock, errors: &mut Vec<String>) -> Option<ClockSettings> {
+    let start = errors.len();
+    let ntp_servers = raw.ntp_servers.unwrap_or_default();
+    if ntp_servers.len() > MAX_NTP_SERVERS {
+        errors.push(format!(
+            "clock.ntp_servers: at most {MAX_NTP_SERVERS} servers, got {}",
+            ntp_servers.len()
+        ));
+    }
+    for server in &ntp_servers {
+        if !valid_ntp_server(server) {
+            errors.push(format!(
+                "clock.ntp_servers: `{server}` is not a host name or IP address, with an optional `:port`"
+            ));
+        }
+    }
+    let max_offset_ms = raw.max_offset_ms.unwrap_or(DEFAULT_MAX_CLOCK_OFFSET_MS);
+    if max_offset_ms == 0 || max_offset_ms > MAX_CLOCK_OFFSET_MS {
+        errors.push(format!(
+            "clock.max_offset_ms: must be 1 to {MAX_CLOCK_OFFSET_MS}, got {max_offset_ms}"
+        ));
+    }
+    let interval = raw
+        .check_interval_secs
+        .unwrap_or(DEFAULT_CLOCK_INTERVAL_SECS);
+    if !(MIN_CLOCK_INTERVAL_SECS..=MAX_CLOCK_INTERVAL_SECS).contains(&interval) {
+        errors.push(format!(
+            "clock.check_interval_secs: must be {MIN_CLOCK_INTERVAL_SECS} to {MAX_CLOCK_INTERVAL_SECS}, got {interval}"
+        ));
+    }
+    (errors.len() == start).then(|| ClockSettings {
+        ntp_servers,
+        max_offset: Duration::from_millis(max_offset_ms),
+        interval: Duration::from_secs(interval),
+    })
+}
+
+/// `host`, `host:port`, an IPv4 address with an optional port, or an IPv6
+/// address in brackets with an optional port. The port is 1 to 65535.
+fn valid_ntp_server(server: &str) -> bool {
+    let (host, port) = if let Some(rest) = server.strip_prefix('[') {
+        let Some((ip, after)) = rest.split_once(']') else {
+            return false;
+        };
+        if ip.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        match after.strip_prefix(':') {
+            Some(port) => (None, Some(port)),
+            None if after.is_empty() => (None, None),
+            None => return false,
+        }
+    } else {
+        match server.rsplit_once(':') {
+            Some((host, port)) => (Some(host), Some(port)),
+            None => (Some(server), None),
+        }
+    };
+    let port_ok = port.is_none_or(|p| p.parse::<u16>().is_ok_and(|p| p != 0));
+    let host_ok = host.is_none_or(|h| {
+        h.parse::<std::net::Ipv4Addr>().is_ok()
+            || (!h.is_empty()
+                && h.len() <= 253
+                && h.split('.').all(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && label
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                }))
+    });
+    port_ok && host_ok
 }
 
 fn validate_database(
@@ -1185,6 +1315,11 @@ impl Config {
             "shutdown": { "grace_secs": self.shutdown_grace.as_secs() },
             "log": { "level": self.log_level.to_string().to_lowercase() },
             "database": self.database.as_ref().map(DatabaseSettings::effective_json),
+            "clock": {
+                "ntp_servers": self.clock.ntp_servers,
+                "max_offset_ms": self.clock.max_offset.as_millis(),
+                "check_interval_secs": self.clock.interval.as_secs(),
+            },
         })
     }
 }
@@ -1257,6 +1392,80 @@ mod tests {
             Ok(_) => panic!("expected a config error"),
             Err(e) => e.0,
         }
+    }
+
+    #[test]
+    fn clock_defaults_and_overrides() {
+        let c = load_ok(MINIMAL, &[]).config;
+        assert!(c.clock.ntp_servers.is_empty());
+        assert_eq!(c.clock.max_offset, Duration::from_secs(1));
+        assert_eq!(c.clock.interval, Duration::from_secs(64));
+        let text = format!(
+            "{MINIMAL}\n[clock]\nntp_servers = [\"time.example.org\", \"192.0.2.1:1123\", \"[2001:db8::1]\", \"[2001:db8::2]:123\"]\nmax_offset_ms = 250\ncheck_interval_secs = 16\n"
+        );
+        let c = load_ok(&text, &[]).config;
+        assert_eq!(c.clock.ntp_servers.len(), 4);
+        assert_eq!(c.clock.max_offset, Duration::from_millis(250));
+        assert_eq!(c.clock.interval, Duration::from_secs(16));
+        let json = c.effective_json();
+        assert_eq!(json["clock"]["max_offset_ms"], 250);
+        assert_eq!(json["clock"]["check_interval_secs"], 16);
+        assert_eq!(json["clock"]["ntp_servers"][0], "time.example.org");
+        let c = load_ok(
+            MINIMAL,
+            &[
+                (
+                    "PALISADE_CLOCK__NTP_SERVERS",
+                    " a.example.org , b.example.org,",
+                ),
+                ("PALISADE_CLOCK__MAX_OFFSET_MS", "2000"),
+                ("PALISADE_CLOCK__CHECK_INTERVAL_SECS", "600"),
+            ],
+        )
+        .config;
+        assert_eq!(c.clock.ntp_servers, ["a.example.org", "b.example.org"]);
+        assert_eq!(c.clock.max_offset, Duration::from_secs(2));
+        assert_eq!(c.clock.interval, Duration::from_secs(600));
+        // An empty value clears the list.
+        let c = load_ok(&text, &[("PALISADE_CLOCK__NTP_SERVERS", "")]).config;
+        assert!(c.clock.ntp_servers.is_empty());
+    }
+
+    #[test]
+    fn clock_errors() {
+        let bad = |extra: &str| load_err(&format!("{MINIMAL}\n[clock]\n{extra}\n"), &[]);
+        for (extra, want) in [
+            ("max_offset_ms = 0", "clock.max_offset_ms"),
+            ("max_offset_ms = 3600001", "clock.max_offset_ms"),
+            ("check_interval_secs = 15", "clock.check_interval_secs"),
+            ("check_interval_secs = 86401", "clock.check_interval_secs"),
+            ("ntp_servers = [\"\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"a:0\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"a:70000\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"-a.example\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"a..b\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"a b\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"[::1\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"[nope]\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"[::1]x\"]", "clock.ntp_servers"),
+            ("ntp_servers = [\"2001:db8::1\"]", "clock.ntp_servers"),
+            (
+                "ntp_servers = [\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]",
+                "at most 8",
+            ),
+            ("unknown = 1", "unknown"),
+        ] {
+            let errors = bad(extra);
+            assert!(
+                errors.iter().any(|e| e.contains(want)),
+                "{extra}: {errors:?}"
+            );
+        }
+        let errors = load_err(MINIMAL, &[("PALISADE_CLOCK__MAX_OFFSET_MS", "soon")]);
+        assert!(
+            errors[0].contains("PALISADE_CLOCK__MAX_OFFSET_MS"),
+            "{errors:?}"
+        );
     }
 
     fn listener(c: &Config, kind: ListenerKind) -> &ListenerSettings {

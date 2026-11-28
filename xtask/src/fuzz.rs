@@ -129,6 +129,10 @@ const TRUST_SET_SEEDS: Seed = Seed {
     test: "trust_set",
     name: "write_trust_set_fuzz_seeds",
 };
+const SNTP_SEEDS: Seed = Seed {
+    test: "sntp",
+    name: "write_sntp_fuzz_seeds",
+};
 const POLICY_ENVELOPE_SEEDS: Seed = Seed {
     test: "policy_envelope",
     name: "write_policy_envelope_fuzz_seeds",
@@ -257,6 +261,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "policy_envelope_decode",
                 dict: None,
                 seeds: &[POLICY_ENVELOPE_SEEDS],
+            },
+            Target {
+                name: "sntp_reply",
+                dict: None,
+                seeds: &[SNTP_SEEDS],
             },
         ],
     },

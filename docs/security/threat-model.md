@@ -1339,7 +1339,8 @@ least one reviewer other than the author. The review is recorded in the [Changel
 5. **Hypervisor-enforced code integrity** is recommended where hardware supports it. It reduces
    R-02 but is not required.
 6. **Time:** endpoints and the server use a reliable time source. The server keeps its offset
-   under 1 s (#224).
+   under 1 s (#224); its clock health check (`clock.ntp_servers`) reports `clock_offset` in
+   readiness when it is not.
 7. **TLS inspection** is bypassed for the agent endpoints. Palisade never disables verification to
    work with an inspecting proxy ([ADR 0005](../adr/0005-agent-server-protocol.md)).
 8. **The server is run by trusted operators** on a hardened host or container (#229), with the
