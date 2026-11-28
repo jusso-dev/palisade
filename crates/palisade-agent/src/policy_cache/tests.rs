@@ -1515,3 +1515,88 @@ async fn the_subsystem_reverifies_on_its_interval() {
     assert_eq!(subsystem::REVERIFY_INTERVAL.as_secs(), 15 * 60);
     handle.shutdown(std::time::Duration::from_secs(1)).await;
 }
+
+// ---------------------------------------------------------------------------
+// At rest (#326)
+// ---------------------------------------------------------------------------
+
+/// A protector shared between caches, as DPAPI is between restarts.
+#[derive(Debug, Clone)]
+struct SharedProtector(Arc<MemoryProtector>);
+
+impl Protector for SharedProtector {
+    fn protect(&self, d: &[u8], p: &[u8]) -> io::Result<Vec<u8>> {
+        self.0.protect(d, p)
+    }
+    fn unprotect(&self, d: &[u8], p: &[u8]) -> io::Result<Vec<u8>> {
+        self.0.unprotect(d, p)
+    }
+}
+
+fn sealed_cache(dir: &Path, protector: &SharedProtector) -> PolicyCache {
+    let sealer = Arc::new(Sealer::open(dir.join("policy"), Box::new(protector.clone())).unwrap());
+    let records = ProtectedRecordStore::new(
+        vec![
+            Box::new(FileSlot::new(dir.join("record/1")).unwrap()),
+            Box::new(FileSlot::new(dir.join("record/2")).unwrap()),
+        ],
+        Box::new(protector.clone()),
+    );
+    PolicyCache::new(CacheSetup {
+        store: PolicyStore::open(dir.join("policy"))
+            .unwrap()
+            .sealed(sealer),
+        ..setup(dir, Box::new(records), EffectiveMode::ENFORCE)
+    })
+}
+
+#[test]
+fn a_sealed_cache_activates_restarts_and_falls_back_like_a_plain_one() {
+    let dir = TempDir::new("at-rest");
+    let protector = SharedProtector(Arc::new(MemoryProtector::new().unwrap()));
+    let c = sealed_cache(dir.path(), &protector);
+    assert_eq!(c.load_startup(ts(T0)).load, Load::FirstInstall);
+    c.activate(&signed(1), ts(T0)).unwrap();
+    c.activate(&signed(2), ts(T0)).unwrap();
+    // Nothing on disk is the plaintext envelope.
+    let raw = fs::read(dir.path().join("policy/active")).unwrap();
+    assert!(palisade_proto::policy_bundle::at_rest::looks_sealed(&raw));
+    assert_ne!(raw, signed(2));
+    assert_eq!(c.reverify(ts(T0)), Reverified::Intact);
+
+    // A restart opens and verifies it.
+    let again = sealed_cache(dir.path(), &protector);
+    let report = again.load_startup(ts(T0));
+    assert!(report.findings.is_empty(), "{:?}", report.findings);
+    assert_eq!(version(&again), 2);
+
+    // A damaged sealed `active` is unreadable: `previous` loads.
+    let mut bad = raw.clone();
+    let mid = bad.len() / 2;
+    bad[mid] ^= 1;
+    fs::write(dir.path().join("policy/active"), &bad).unwrap();
+    let again = sealed_cache(dir.path(), &protector);
+    let report = again.load_startup(ts(T0));
+    assert!(report.findings.contains(&Finding::Rejected {
+        file: CacheFile::Active,
+        reason: Rejection::Unreadable
+    }));
+    assert_eq!(version(&again), 1);
+
+    // A protector that cannot open the keyring or the record copies (the
+    // disk moved to another machine): nothing is trusted, and the record
+    // copies read as corrupt, so it reports rollback suspicion and runs the
+    // emergency policy, never first-install.
+    let other = SharedProtector(Arc::new(MemoryProtector::new().unwrap()));
+    let moved = sealed_cache(dir.path(), &other);
+    let report = moved.load_startup(ts(T0));
+    assert_eq!(report.load, Load::Emergency, "{report:?}");
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| matches!(f, Finding::RollbackSuspected(_))),
+        "{:?}",
+        report.findings
+    );
+}

@@ -5,6 +5,7 @@
 #
 #   cargo +nightly fuzz run trust_set_decode        # from crates/palisade-proto
 #   cargo +nightly fuzz run policy_envelope_decode
+#   cargo +nightly fuzz run policy_at_rest_open
 [package]
 name = "palisade-proto-fuzz"
 version = "0.0.0"
@@ -39,6 +40,13 @@ bench = false
 [[bin]]
 name = "sntp_reply"
 path = "fuzz_targets/sntp_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_at_rest_open"
+path = "fuzz_targets/policy_at_rest_open.rs"
 test = false
 doc = false
 bench = false

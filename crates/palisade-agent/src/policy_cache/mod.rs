@@ -40,6 +40,7 @@
 
 pub mod builtin;
 pub mod events;
+pub mod protect;
 pub mod store;
 mod subsystem;
 pub mod verify;
@@ -71,7 +72,10 @@ use palisade_proto::{
 
 pub use builtin::{AgentFacts, Builtin, Enforcement, SelfPin};
 pub use events::{BoundedSink, Detail, PolicyEvent, PolicyEventSink, Tamper};
-pub use store::{FileRecordStore, PolicyStore, RecordStore};
+pub use protect::{MemoryProtector, Protector};
+pub use store::{
+    FileRecordStore, FileSlot, PolicyStore, ProtectedRecordStore, RecordSlot, RecordStore, Sealer,
+};
 pub use subsystem::{PolicyCacheSubsystem, REVERIFY_INTERVAL, STATUS_INTERVAL, health_of};
 pub use verify::{EnvelopeVerifier, Examination, SharedTrust, SignedEnvelopes};
 

@@ -33,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod at_rest;
 pub mod envelope;
 pub mod record;
 pub mod select;

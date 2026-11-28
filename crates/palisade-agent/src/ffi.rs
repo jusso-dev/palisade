@@ -1,6 +1,7 @@
 //! Thin, safe wrappers over the Windows process, token, session and
-//! local-group calls the agent's platform backends need (#29), and the
-//! durable rename of the policy cache (#61). This is the
+//! local-group calls the agent's platform backends need (#29), the
+//! durable rename of the policy cache (#61), and machine-scope DPAPI for
+//! the policy cache's keys and anti-rollback record (#326). This is the
 //! one place in the agent where those calls are made, so every `unsafe`
 //! block is here, each with a `// SAFETY:` comment (ADR 0011).
 //!
@@ -26,8 +27,8 @@ use windows_sys::Wdk::System::Threading::{
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, FILETIME,
-    HANDLE, NTSTATUS, STATUS_ACCESS_DENIED, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
-    STATUS_INFO_LENGTH_MISMATCH, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    HANDLE, HLOCAL, LocalFree, NTSTATUS, STATUS_ACCESS_DENIED, STATUS_BUFFER_OVERFLOW,
+    STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetBestRoute2, GetIfEntry2, MIB_IF_ROW2, MIB_IPFORWARD_ROW2,
@@ -39,6 +40,10 @@ use windows_sys::Win32::NetworkManagement::NetManagement::{
 use windows_sys::Win32::Networking::WinSock::{
     AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN, SOCKADDR_IN6,
     SOCKADDR_INET,
+};
+use windows_sys::Win32::Security::Cryptography::{
+    CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
+    CryptUnprotectData,
 };
 use windows_sys::Win32::Security::{
     GetLengthSid, GetTokenInformation, LookupAccountNameW, LookupAccountSidW, SID_NAME_USE,
@@ -777,9 +782,128 @@ pub(crate) fn replace_file_durably(from: &std::path::Path, to: &std::path::Path)
     }
 }
 
+// ---------------------------------------------------------------------------
+// DPAPI
+// ---------------------------------------------------------------------------
+
+/// The largest blob [`dpapi_protect`] and [`dpapi_unprotect`] take: 1 MiB.
+/// The policy cache protects only keys and records, far below it.
+const MAX_DPAPI_BYTES: usize = 1 << 20;
+
+/// A blob over `data`, for input. `None` if it is over the limit.
+fn blob_in(data: &[u8]) -> Option<CRYPT_INTEGER_BLOB> {
+    if data.len() > MAX_DPAPI_BYTES {
+        return None;
+    }
+    Some(CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(data.len()).ok()?,
+        // DPAPI only reads input blobs; the pointer is `*mut` in the API.
+        pbData: data.as_ptr().cast_mut(),
+    })
+}
+
+/// Copies an output blob the OS allocated into a `Vec`, then frees it.
+fn take_blob(out: CRYPT_INTEGER_BLOB) -> io::Result<Vec<u8>> {
+    if out.pbData.is_null() {
+        return Err(io::Error::other("DPAPI returned no data"));
+    }
+    let len = usize::try_from(out.cbData).unwrap_or(usize::MAX);
+    let copy = if len > MAX_DPAPI_BYTES {
+        Err(io::Error::other("DPAPI returned an oversized blob"))
+    } else {
+        // SAFETY: on success DPAPI returns `cbData` readable bytes at
+        // `pbData`, which stay valid until `LocalFree` below.
+        Ok(unsafe { std::slice::from_raw_parts(out.pbData, len) }.to_vec())
+    };
+    // SAFETY: `pbData` was allocated by DPAPI with `LocalAlloc` and is
+    // freed exactly once, here, after the copy.
+    let _ = unsafe { LocalFree(out.pbData.cast::<core::ffi::c_void>() as HLOCAL) };
+    copy
+}
+
+/// Protects `data` with machine-scope DPAPI (`CRYPTPROTECT_LOCAL_MACHINE`),
+/// bound to `entropy`, with no UI. Any process on this machine running as
+/// an account that can read the result can unprotect it, so the result
+/// must itself be kept in SYSTEM-only storage (#220).
+pub(crate) fn dpapi_protect(data: &[u8], entropy: &[u8]) -> io::Result<Vec<u8>> {
+    let too_big = || io::Error::new(io::ErrorKind::InvalidInput, "DPAPI input over 1 MiB");
+    let input = blob_in(data).ok_or_else(too_big)?;
+    let entropy = blob_in(entropy).ok_or_else(too_big)?;
+    let mut out = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: core::ptr::null_mut(),
+    };
+    // SAFETY: `input` and `entropy` point at live slices of the stated
+    // length for the call, which only reads them. The description, the
+    // reserved pointer and the prompt are null, which the API allows.
+    // `out` is a valid place for the OS to write the new blob.
+    let ok = unsafe {
+        CryptProtectData(
+            &raw const input,
+            core::ptr::null(),
+            &raw const entropy,
+            core::ptr::null(),
+            core::ptr::null(),
+            CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN,
+            &raw mut out,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    take_blob(out)
+}
+
+/// Unprotects a blob from [`dpapi_protect`] with the same `entropy`. A blob
+/// that was changed, made with other entropy, or on another machine fails.
+pub(crate) fn dpapi_unprotect(data: &[u8], entropy: &[u8]) -> io::Result<Vec<u8>> {
+    let too_big = || io::Error::new(io::ErrorKind::InvalidInput, "DPAPI input over 1 MiB");
+    let input = blob_in(data).ok_or_else(too_big)?;
+    let entropy = blob_in(entropy).ok_or_else(too_big)?;
+    let mut out = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: core::ptr::null_mut(),
+    };
+    // SAFETY: as in `dpapi_protect`; the description out-pointer is null,
+    // so the OS allocates no description.
+    let ok = unsafe {
+        CryptUnprotectData(
+            &raw const input,
+            core::ptr::null_mut(),
+            &raw const entropy,
+            core::ptr::null(),
+            core::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &raw mut out,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    take_blob(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dpapi_round_trips_and_binds_the_entropy() {
+        let sealed = dpapi_protect(b"key material", b"entropy").unwrap();
+        assert_ne!(sealed, b"key material");
+        assert_eq!(
+            dpapi_unprotect(&sealed, b"entropy").unwrap(),
+            b"key material"
+        );
+        assert!(dpapi_unprotect(&sealed, b"other").is_err());
+        let mut bad = sealed.clone();
+        let last = bad.len() - 1;
+        bad[last] ^= 1;
+        assert!(dpapi_unprotect(&bad, b"entropy").is_err());
+        let big = vec![0_u8; MAX_DPAPI_BYTES + 1];
+        assert!(dpapi_protect(&big, b"").is_err());
+        assert!(dpapi_unprotect(&big, b"").is_err());
+    }
 
     #[test]
     fn replace_file_durably_replaces_the_target() {
