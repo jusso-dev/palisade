@@ -217,6 +217,56 @@ pub fn policy(size: Size, model: PrecedenceModel) -> ValidatedPolicy {
     }
 }
 
+/// The reference policy compiled into bundle bytes (#43), as an agent
+/// receives it, with no library sets.
+///
+/// # Panics
+///
+/// If it does not compile, which a test checks.
+#[must_use]
+pub fn bundle(size: Size, model: PrecedenceModel) -> Vec<u8> {
+    use crate::bundle::{BundleLimits, Header, Source, SourceRevisions, Target, TargetScope};
+    let policy = policy(size, model);
+    let catalogue = match crate::library::Catalogue::new(Vec::new()) {
+        Ok(c) => c,
+        Err(e) => panic!("an empty catalogue: {e:?}"),
+    };
+    let id = |n: u8| {
+        let mut b = [0u8; 16];
+        b[6] = 0x70;
+        b[8] = 0x80;
+        b[15] = n;
+        palisade_core::Uuid7::from_bytes(b)
+    };
+    let (Some(tenant), Some(group)) = (id(1), id(2)) else {
+        panic!("not UUIDv7s");
+    };
+    let p = &policy.document().policy;
+    let source = Source {
+        policy: &policy,
+        catalogue: &catalogue,
+        from: crate::library::Visibility::Global,
+        sources: SourceRevisions {
+            policies: vec![(p.id, p.revision)],
+            libraries: Vec::new(),
+        },
+        facts: crate::analysis::Facts::default(),
+        admin: None,
+    };
+    let header = Header::new(
+        Target {
+            tenant,
+            scope: TargetScope::Group(group),
+        },
+        1,
+        1_764_201_600_000_000,
+    );
+    match crate::bundle::compile(&source, header, &BundleLimits::DEFAULT) {
+        Ok(c) => c.bytes,
+        Err(e) => panic!("the reference policy does not compile into a bundle: {e}"),
+    }
+}
+
 /// The SHA-256 the mandatory deny blocks.
 pub const MANDATORY: &str = "dead00000000000000000000000000000000000000000000000000000000beef";
 

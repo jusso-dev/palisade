@@ -27,6 +27,7 @@ use std::time::Instant;
 use hdrhistogram::Histogram;
 use serde::Deserialize;
 
+use palisade_policy::bundle::{self, BundleLimits};
 use palisade_policy::decision::TraceId;
 use palisade_policy::demand::FactSet;
 use palisade_policy::engine::{Engine, EngineConfig, FileIdentity, Outcome, Request, SystemClock};
@@ -282,6 +283,49 @@ fn loading_the_reference_policy_is_within_budget() {
     if enforce() {
         let limit = u128::from(b.budget.load_reference_policy.max_ms);
         assert!(ms <= limit, "load {ms} ms > {limit} ms");
+    }
+}
+
+/// The agent's path (#43): bundle bytes with 100,000 hash rules to a
+/// policy ready to decide, in one step, within the same budget.
+#[test]
+fn loading_the_reference_bundle_is_within_budget() {
+    let b = budgets();
+    let bytes = reference::bundle(Size::Reference, PrecedenceModel::DenyWins);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
+    let start = Instant::now();
+    let loaded = bundle::load(&bytes, &BundleLimits::DEFAULT, None).unwrap();
+    let ms = start.elapsed().as_millis();
+    eprintln!(
+        "load_reference_bundle: {ms} ms for {} bytes (decode, validate, compile and index)",
+        bytes.len()
+    );
+    // It decides as the policy it was compiled from.
+    let engine = Engine::from_loaded(loaded, EngineConfig::default());
+    let policy = engine.snapshot();
+    let state = DeviceState::of(&policy.policy().document().policy);
+    let variables = PathVariables::new();
+    let context = reference::context();
+    for case in Case::ALL {
+        let facts = case.facts(7, Size::Reference);
+        let subject = Subject {
+            object_type: ObjectType::Executable,
+            facts: &facts,
+            variables: &variables,
+            context: &context,
+        };
+        let d = policy
+            .evaluator()
+            .evaluate_in(&subject, &state, TraceId([0; 16]))
+            .unwrap();
+        assert_eq!(d.outcome(), case.expected(), "{case:?}");
+    }
+    if enforce() {
+        let limit = u128::from(b.budget.load_reference_policy.max_ms);
+        assert!(ms <= limit, "bundle load {ms} ms > {limit} ms");
     }
 }
 

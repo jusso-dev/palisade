@@ -506,8 +506,19 @@ fn hex_is_lowercase_and_64_digits() {
     );
 }
 
+/// `default` cases, or `PROPTEST_CASES` to run fewer locally.
+fn cases(default: u32) -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default);
+    ProptestConfig::with_cases(cases)
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+    // #327: the round trip is the bundle's central property, so CI runs
+    // 10,000 cases.
+    #![proptest_config(cases(10_000))]
 
     /// encode → decode → encode is byte-identical for every valid policy.
     #[test]
@@ -518,6 +529,10 @@ proptest! {
         prop_assert_eq!(decoded.to_bytes().unwrap(), bytes);
         prop_assert_eq!(decoded, bundle);
     }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Shuffling rule sets, rules, assignments and profiles never changes
     /// the bytes.
