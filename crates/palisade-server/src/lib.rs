@@ -5,6 +5,7 @@ pub mod cli;
 pub mod clock;
 pub mod config;
 pub mod db;
+pub mod enrol;
 pub mod health;
 pub mod http;
 pub mod net;

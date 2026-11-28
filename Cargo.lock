@@ -1472,9 +1472,11 @@ name = "palisade-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "clap",
  "hyper-util",
  "if-addrs",
+ "palisade-fileid",
  "palisade-proto",
  "ring",
  "rustls",
