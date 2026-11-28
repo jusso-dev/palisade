@@ -33,6 +33,14 @@ pub const MAX_WORKER_THREADS: usize = 64;
 pub const MAX_BLOCKING_THREADS: usize = 256;
 /// The default worker count is `min(DEFAULT_WORKER_CAP, cores)`.
 pub const DEFAULT_WORKER_CAP: usize = 4;
+/// Default number of log files kept.
+pub const DEFAULT_LOG_FILES: usize = 10;
+/// Default size limit of one log file, in MiB.
+pub const DEFAULT_LOG_FILE_MIB: u64 = 10;
+/// Upper bound for `log.files`.
+pub const MAX_LOG_FILES: usize = 100;
+/// Upper bound for `log.file_size_mib`.
+pub const MAX_LOG_FILE_MIB: u64 = 1024;
 /// Default size of the blocking pool used for file I/O and hashing. The
 /// CPU and I/O budgets that refine it are #65.
 pub const DEFAULT_BLOCKING_THREADS: usize = 8;
@@ -110,6 +118,31 @@ impl RuntimeConfig {
     }
 }
 
+/// Log file rotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogFiles {
+    /// How many files are kept, the current one included.
+    pub files: usize,
+    /// The size limit of one file, in MiB.
+    pub file_size_mib: u64,
+}
+
+impl Default for LogFiles {
+    fn default() -> Self {
+        Self {
+            files: DEFAULT_LOG_FILES,
+            file_size_mib: DEFAULT_LOG_FILE_MIB,
+        }
+    }
+}
+
+impl LogFiles {
+    /// The size limit of one file, in bytes.
+    pub fn max_bytes(&self) -> u64 {
+        self.file_size_mib.saturating_mul(1024 * 1024)
+    }
+}
+
 /// The effective agent configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AgentConfig {
@@ -121,6 +154,8 @@ pub struct AgentConfig {
     pub runtime: RuntimeConfig,
     /// Log level.
     pub log_level: LogLevel,
+    /// Log file rotation.
+    pub log_files: LogFiles,
 }
 
 /// The file layer. Every field is optional and overrides the default.
@@ -144,6 +179,8 @@ struct FileRuntime {
 #[serde(deny_unknown_fields)]
 struct FileLog {
     level: Option<LogLevel>,
+    files: Option<usize>,
+    file_size_mib: Option<u64>,
 }
 
 impl AgentConfig {
@@ -166,8 +203,16 @@ impl AgentConfig {
                 config.runtime.max_blocking_threads = v;
             }
         }
-        if let Some(level) = file.log.and_then(|l| l.level) {
-            config.log_level = level;
+        if let Some(log) = file.log {
+            if let Some(level) = log.level {
+                config.log_level = level;
+            }
+            if let Some(v) = log.files {
+                config.log_files.files = v;
+            }
+            if let Some(v) = log.file_size_mib {
+                config.log_files.file_size_mib = v;
+            }
         }
         config.validate()?;
         Ok(config)
@@ -182,6 +227,12 @@ impl AgentConfig {
             "runtime.max_blocking_threads",
             self.runtime.max_blocking_threads,
             MAX_BLOCKING_THREADS,
+        )?;
+        check_range("log.files", self.log_files.files, MAX_LOG_FILES)?;
+        check_range(
+            "log.file_size_mib",
+            usize::try_from(self.log_files.file_size_mib).unwrap_or(usize::MAX),
+            usize::try_from(MAX_LOG_FILE_MIB).unwrap_or(usize::MAX),
         )
     }
 }
@@ -204,6 +255,14 @@ pub struct LoadedConfig {
     pub config: AgentConfig,
     /// The file it was read from, or `None` for built-in defaults only.
     pub source: Option<PathBuf>,
+}
+
+/// The log directory on Windows: `%ProgramData%\Palisade\logs`, created
+/// and ACLed by the installer. `None` on other OSes, where the agent logs to
+/// standard error only. The same rules for `ProgramData` apply as for
+/// [`default_path`].
+pub fn log_dir() -> Result<Option<PathBuf>, ConfigError> {
+    Ok(default_path()?.and_then(|p| p.parent().map(|dir| dir.join("logs"))))
 }
 
 /// The install-time configuration path on Windows:
@@ -391,6 +450,8 @@ mod tests {
         assert_eq!(config.fail_mode, FailMode::FailOpen);
         assert_eq!(config.safe_mode_behaviour, SafeModeBehaviour::AuditOnly);
         assert_eq!(config.log_level, LogLevel::Info);
+        assert_eq!(config.log_files.files, 10);
+        assert_eq!(config.log_files.max_bytes(), 10 * 1024 * 1024);
         assert_eq!(config.runtime.worker_threads, None);
         assert_eq!(
             config.runtime.max_blocking_threads,
@@ -409,6 +470,8 @@ mod tests {
             max_blocking_threads = 16
             [log]
             level = "debug"
+            files = 3
+            file_size_mib = 1
             "#,
         )
         .unwrap();
@@ -417,6 +480,14 @@ mod tests {
         assert_eq!(config.runtime.worker_threads, Some(2));
         assert_eq!(config.runtime.max_blocking_threads, 16);
         assert_eq!(config.log_level, LogLevel::Debug);
+        assert_eq!(
+            config.log_files,
+            LogFiles {
+                files: 3,
+                file_size_mib: 1
+            }
+        );
+        assert_eq!(config.log_files.max_bytes(), 1024 * 1024);
     }
 
     #[test]
@@ -463,6 +534,10 @@ mod tests {
                 "[runtime]\nmax_blocking_threads = 257",
                 "runtime.max_blocking_threads",
             ),
+            ("[log]\nfiles = 0", "log.files"),
+            ("[log]\nfiles = 101", "log.files"),
+            ("[log]\nfile_size_mib = 0", "log.file_size_mib"),
+            ("[log]\nfile_size_mib = 1025", "log.file_size_mib"),
         ] {
             let err = AgentConfig::from_toml(source).unwrap_err();
             assert!(
@@ -562,6 +637,7 @@ mod tests {
     #[test]
     fn no_default_path_off_windows() {
         assert_eq!(default_path().unwrap(), None);
+        assert_eq!(log_dir().unwrap(), None);
         assert_eq!(load(None).unwrap(), defaults());
     }
 

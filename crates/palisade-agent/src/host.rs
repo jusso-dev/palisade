@@ -21,8 +21,9 @@ use crate::{
     boot::{self, BootMode},
     cli::Args,
     clock::ClockMonitor,
-    config::{self, AgentConfig, LoadedConfig, LogLevel, RuntimeConfig},
+    config::{self, AgentConfig, LoadedConfig, LogFiles, LogLevel, RuntimeConfig},
     control::{Control, HostEvent, TamperGuard},
+    logfile::RotatingFile,
     platform::SystemClock,
     subsystem::{BoxFuture, Criticality, Subsystem, SubsystemContext, SubsystemError},
     supervisor::{HostEvents, RestartPolicy, ShutdownReport, Supervisor, SupervisorError},
@@ -106,20 +107,44 @@ fn level_filter(level: LogLevel) -> LevelFilter {
     }
 }
 
-/// Sends `tracing` records at or above `level` to standard error. Rotating
-/// log files and the event-log channel are still to come (#56). Safe to call
-/// more than once; only the first call has an effect. The level can be
-/// changed later with [`set_log_level`].
-pub fn init_logging(level: LogLevel) {
-    use tracing_subscriber::{layer::SubscriberExt, reload};
+/// Sends `tracing` records at or above `level` to standard error and, if
+/// `file` is given, to a rotating log file as well. The event-log channel is
+/// still to come (#56). Safe to call more than once; only the first call has
+/// an effect. The level can be changed later with [`set_log_level`].
+pub fn init_logging(level: LogLevel, file: Option<RotatingFile>) {
+    use tracing_subscriber::{fmt, layer::SubscriberExt, reload};
     let (filter, handle) = reload::Layer::new(level_filter(level));
-    let subscriber = tracing_subscriber::registry().with(filter).with(
-        tracing_subscriber::fmt::layer()
-            .with_writer(io::stderr)
-            .with_ansi(false),
-    );
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_writer(io::stderr).with_ansi(false))
+        .with(file.map(|file| fmt::layer().with_writer(file).with_ansi(false)));
     if tracing::subscriber::set_global_default(subscriber).is_ok() {
         let _ = LOG_LEVEL.set(handle);
+    }
+}
+
+/// Opens the rotating log file in the default log directory
+/// ([`config::log_dir`]), if there is one. A directory that cannot be found
+/// or opened is reported on standard error, and the agent logs to standard
+/// error only: logging never stops the agent.
+pub fn open_log_file(files: LogFiles) -> Option<RotatingFile> {
+    let dir = match config::log_dir() {
+        Ok(Some(dir)) => dir,
+        Ok(None) => return None,
+        Err(e) => {
+            eprintln!("palisade-agent: no log file: {e}");
+            return None;
+        }
+    };
+    match RotatingFile::open(&dir, files.files, files.max_bytes()) {
+        Ok(file) => Some(file),
+        Err(e) => {
+            eprintln!(
+                "palisade-agent: cannot open the log file in {}: {e}",
+                dir.display()
+            );
+            None
+        }
     }
 }
 
@@ -200,8 +225,12 @@ impl ConfigSubsystem {
         if next == previous {
             return Ok(false);
         }
-        if next.config.runtime != previous.config.runtime {
-            tracing::warn!("runtime sizes changed; they apply when the agent restarts");
+        if next.config.runtime != previous.config.runtime
+            || next.config.log_files != previous.config.log_files
+        {
+            tracing::warn!(
+                "runtime sizes or log rotation changed; they apply when the agent restarts"
+            );
         }
         if next.config.log_level != previous.config.log_level {
             set_log_level(next.config.log_level);
@@ -431,7 +460,10 @@ impl ConsoleSignals {
 pub fn prepare(args: &Args) -> Result<LoadedConfig, ExitCode> {
     match config::load(args.config.as_deref()) {
         Ok(loaded) => {
-            init_logging(loaded.config.log_level);
+            init_logging(
+                loaded.config.log_level,
+                open_log_file(loaded.config.log_files),
+            );
             install_panic_hook();
             Ok(loaded)
         }

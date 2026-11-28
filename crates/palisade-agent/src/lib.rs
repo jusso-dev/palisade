@@ -13,6 +13,7 @@ pub mod control;
 mod ffi;
 pub mod host;
 pub mod lifecycle;
+pub mod logfile;
 pub mod platform;
 #[cfg(windows)]
 pub mod service;
