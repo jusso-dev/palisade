@@ -492,9 +492,10 @@ fn policy_ref() -> BoxedStrategy<PolicyRef> {
         of(name()),
         of(token()),
         of(uuid7()),
+        of(bytes::<16>()),
     )
         .prop_map(
-            |(id, name, version, hash, rule, rule_name, rule_type, profile)| PolicyRef {
+            |(id, name, version, hash, rule, rule_name, rule_type, profile, kid)| PolicyRef {
                 id: id.map(PolicyId),
                 name,
                 version,
@@ -503,6 +504,7 @@ fn policy_ref() -> BoxedStrategy<PolicyRef> {
                 rule_name,
                 rule_type,
                 profile_id: profile,
+                kid: kid.map(Hex::from_bytes),
             },
         )
         .boxed()

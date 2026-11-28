@@ -12,6 +12,7 @@ Appears at: `/policy`.
 |---|---|---|---|---|---|---|
 | `hash` | string | no |  | matches `^[0-9a-f]{64}$` | 1.0.0 | The SHA-256 of the policy bundle. |
 | `id` | [`PolicyId`](types.md#policyid) | no |  |  | 1.0.0 | The policy ID. |
+| `kid` | string | no |  | matches `^[0-9a-f]{32}$` | 1.3.0 | The key that signed the policy bundle: its key ID, the first 16 bytes of the SHA-256 of its `SubjectPublicKeyInfo`, in 32 lowercase hex digits (#325). Since 1.3. |
 | `name` | string | no |  | 1 to 256 characters | 1.0.0 | The policy name. |
 | `profile_id` | [`Uuid7`](types.md#uuid7) | no |  |  | 1.0.0 | The profile the policy was assigned through. |
 | `rule_id` | [`RuleId`](types.md#ruleid) | no |  |  | 1.0.0 | The rule that decided. |

@@ -297,7 +297,7 @@ fn unknown_keys_types_and_versions_are_rejected() {
             .to_string()
             .contains("targets event schema 2.0.0")
     );
-    let newer = file_with(GOOD_ENTRY).replace("schema_version: 1.0.0", "schema_version: 1.3.0");
+    let newer = file_with(GOOD_ENTRY).replace("schema_version: 1.0.0", "schema_version: 1.4.0");
     assert!(MappingSet::from_yaml("t.yaml", &newer).is_err());
     let bare = file_with(GOOD_ENTRY)
         .replace("schema_version: 1.0.0", "schema_version: 1.1.0")
