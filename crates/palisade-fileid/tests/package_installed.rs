@@ -118,8 +118,21 @@ fn field<'a>(text: &'a str, key: &str) -> &'a str {
         .trim()
 }
 
+/// The final path of `path`. Opened for its attributes only, as the agent
+/// opens files: `WindowsApps` lets a standard user read attributes of the
+/// package folder but not its data, so `File::open` is refused there.
+/// Backup semantics let the folder itself be opened.
 fn final_path(path: &Path) -> palisade_fileid::fsctx::NormalizedPath {
-    links::final_path_of(&std::fs::File::open(path).unwrap()).unwrap()
+    use std::os::windows::fs::OpenOptionsExt as _;
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(0x7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    links::final_path_of(&file).unwrap()
 }
 
 #[test]
