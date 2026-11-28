@@ -29,10 +29,12 @@
 //!   `on_expiry = audit_only`, and the stricter `mode_disconnected` of the
 //!   policy model (#36) applies through the device state the caller passes.
 //!
-//! What a cache file holds is the business of an [`EnvelopeVerifier`]: the
-//! signed envelope of #325 plugs in there. Until then, [`BareBundles`]
-//! reports every bundle as unsigned, so in the default `enforce` signature
-//! mode nothing loads.
+//! A cache file holds one signed bundle envelope (#325). The
+//! [`EnvelopeVerifier`] checks it before anything past the bundle header is
+//! decoded; the agent's is [`SignedEnvelopes`], which verifies against the
+//! device's trust set. A bundle the checks accept is then decoded,
+//! validated and compiled in one step ([`palisade_policy::bundle::load()`]),
+//! with the bundle's inlined library sets and the agent's system baseline.
 
 #![forbid(unsafe_code)]
 
@@ -51,13 +53,16 @@ use std::{
 
 use arc_swap::ArcSwap;
 use palisade_policy::{
-    bundle::{BundleDelta, BundleLimits, DeltaError, Header, PolicyBundle, apply},
+    bundle::{self, BundleLimits, Header},
     engine::{self, Engine, EngineConfig, Outcome, Request},
+    scope::CompiledProfiles,
+    unknown::SystemBaseline,
 };
 use palisade_proto::{
     events::{Sha256Hex, Timestamp},
     policy_bundle::{
         BundleMeta, EffectiveMode, Examined, Rejection, Target,
+        envelope::{self, RebuildError},
         record::{Record, RecordCopies, RecordKey},
         select::{self, CacheFile, Finding, Load, PendingOutcome, Startup},
         stale::{self, StaleAfter, Staleness},
@@ -67,7 +72,7 @@ use palisade_proto::{
 pub use builtin::Builtin;
 pub use store::{FileRecordStore, PolicyStore, RecordStore};
 pub use subsystem::{PolicyCacheSubsystem, STATUS_INTERVAL, health_of};
-pub use verify::{BareBundles, EnvelopeVerifier, Examination};
+pub use verify::{EnvelopeVerifier, Examination, SharedTrust, SignedEnvelopes};
 
 /// What an enrolled device's cache needs.
 #[derive(Debug)]
@@ -80,8 +85,11 @@ pub struct CacheSetup {
     pub records: Box<dyn RecordStore>,
     /// The device's record key (#220).
     pub key: RecordKey,
-    /// Reads the envelope of a cache file (#325).
+    /// Reads the envelope of a cache file (#325): [`SignedEnvelopes`].
     pub verifier: Box<dyn EnvelopeVerifier>,
+    /// The agent's `system_baseline` facts (#39), added to every bundle
+    /// it loads. `None` until the agent reports them.
+    pub baseline: Option<SystemBaseline>,
     /// The signature mode in force, after its gate.
     pub mode: EffectiveMode,
     /// `policy.stale_after`.
@@ -96,6 +104,9 @@ pub struct Active {
     engine: Engine,
     load: Load,
     header: Option<Header>,
+    /// The bundle's location profiles, compiled with its sets. `None` for
+    /// a built-in policy.
+    profiles: Option<CompiledProfiles>,
     /// The whole cache file it was read from, exactly as verified, and
     /// where the bundle is in it. `None` for a built-in policy.
     file: Option<(Arc<[u8]>, std::ops::Range<usize>)>,
@@ -115,6 +126,7 @@ impl Active {
                 Builtin::Emergency => Load::Emergency,
             },
             header: None,
+            profiles: None,
             file: None,
         }
     }
@@ -156,6 +168,12 @@ impl Active {
     /// The bundle header. `None` for a built-in policy.
     pub const fn header(&self) -> Option<&Header> {
         self.header.as_ref()
+    }
+
+    /// The bundle's location profiles, compiled with its sets, for the
+    /// location tracker (#38). `None` for a built-in policy.
+    pub const fn profiles(&self) -> Option<&CompiledProfiles> {
+        self.profiles.as_ref()
     }
 
     /// The validated policy.
@@ -335,9 +353,10 @@ impl PolicyCache {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Chooses and loads the policy to run (see the module docs). Blocking
-    /// I/O: call it from a blocking thread.
-    pub fn load_startup(&self) -> StartupReport {
+    /// Chooses and loads the policy to run (see the module docs). `now` is
+    /// trusted time (#220), for the signing keys' validity windows.
+    /// Blocking I/O: call it from a blocking thread.
+    pub fn load_startup(&self, now: Timestamp) -> StartupReport {
         let mut locked = self.lock();
         let Some(setup) = &self.setup else {
             self.active.store(Arc::new(Active::builtin(
@@ -368,8 +387,9 @@ impl PolicyCache {
                 Some(Err(()))
             }
         };
-        let mut active = Candidate::examine(read(CacheFile::Active), &*setup.verifier);
-        let mut previous = Candidate::examine(read(CacheFile::Previous), &*setup.verifier);
+        let examine = |read| Candidate::examine(read, &*setup.verifier, now, setup.mode);
+        let mut active = examine(read(CacheFile::Active));
+        let mut previous = examine(read(CacheFile::Previous));
 
         // Decode only what `select` chose. A bundle that does not decode,
         // validate or compile is refused as unsupported, and the choice is
@@ -390,7 +410,7 @@ impl PolicyCache {
             let Some(c) = candidate.as_mut() else {
                 break (selection, None);
             };
-            match c.compile(self.engine) {
+            match c.compile(self.engine, setup.baseline.as_ref()) {
                 Ok(compiled) => break (selection, Some((compiled, c.clone_file()))),
                 Err(()) => c.refuse_schema(),
             }
@@ -403,12 +423,7 @@ impl PolicyCache {
         }
 
         let next = match chosen {
-            Some(((engine, header), file)) => Active {
-                engine,
-                load: selection.load,
-                header: Some(header),
-                file,
-            },
+            Some((compiled, file)) => compiled.into_active(selection.load, file),
             None => Active::builtin(
                 if selection.load == Load::FirstInstall {
                     Builtin::FirstInstall
@@ -433,8 +448,10 @@ impl PolicyCache {
         }
     }
 
-    /// Activates a downloaded cache file (ADR 0007 steps 1 to 5). `now` is
-    /// trusted time (#220), recorded as when a bundle was last received.
+    /// Activates a downloaded bundle envelope (ADR 0007 steps 1 to 5). `now`
+    /// is trusted time (#220): the signing keys' validity windows are
+    /// checked at it, and it is recorded as when a bundle was last
+    /// received.
     /// Blocking I/O: call it from a blocking thread.
     ///
     /// # Errors
@@ -467,7 +484,7 @@ impl PolicyCache {
         file: &[u8],
         now: Timestamp,
     ) -> Result<Activated, ActivateError> {
-        let candidate = Candidate::from_bytes(Arc::from(file), &*setup.verifier);
+        let candidate = Candidate::from_bytes(Arc::from(file), &*setup.verifier, now, setup.mode);
         // Step 1: every check, then the version against the floor and the
         // running `active`.
         let plan = match select::pending(
@@ -487,8 +504,8 @@ impl PolicyCache {
         };
         // Compiled before anything is written, so a bundle that does not
         // build never reaches the disk.
-        let (engine, header) = candidate
-            .compile(self.engine)
+        let compiled = candidate
+            .compile(self.engine, setup.baseline.as_ref())
             .map_err(|()| ActivateError::Rejected(Rejection::SchemaUnsupported))?;
 
         let io = ActivateError::Io;
@@ -538,13 +555,8 @@ impl PolicyCache {
             bundle: plan.bundle,
             signed: plan.signed,
         };
-        let file = candidate.clone_file();
-        self.active.store(Arc::new(Active {
-            engine,
-            load,
-            header: Some(header),
-            file,
-        }));
+        self.active
+            .store(Arc::new(compiled.into_active(load, candidate.clone_file())));
         locked.record = Some(plan.record_after_rename);
         locked.loadable_active = plan.signed.then_some(plan.bundle);
         locked.last_received = Some(now);
@@ -557,19 +569,24 @@ impl PolicyCache {
         self.lock().last_received = Some(now);
     }
 
-    /// Rebuilds the full bundle a delta describes, from the running bundle.
-    /// The result must then be wrapped and verified as a whole before
-    /// [`Self::activate`] takes it: an unsigned delta never changes the
-    /// policy (#325).
+    /// Rebuilds the full bundle envelope a delta envelope describes, from
+    /// the running bundle ([`envelope::rebuild`]). Nothing in the result is
+    /// trusted yet: pass it to [`Self::activate`], which verifies the
+    /// delta's signatures over the rebuilt bundle as a whole, so an
+    /// unsigned or forged delta never changes the policy (#325). The
+    /// rebuilt envelope is what the cache stores.
     ///
     /// # Errors
     ///
-    /// [`DeltaError`] if the running policy is not the delta's base, or the
-    /// result does not hash to the delta's target. Ask for a full bundle.
-    pub fn rebuild_from_delta(&self, delta: &BundleDelta) -> Result<Vec<u8>, DeltaError> {
+    /// [`RebuildError`] if the envelope is not a delta, the running policy
+    /// is not the delta's base (or is a built-in policy), or the result does
+    /// not hash to the delta's target. Ask for a full bundle.
+    pub fn rebuild_from_delta(&self, delta_envelope: &[u8]) -> Result<Vec<u8>, RebuildError> {
         let current = self.current();
-        let base = current.bundle_bytes().ok_or(DeltaError::WrongBase)?;
-        apply(base, delta, &BundleLimits::DEFAULT).map(|(_, bytes)| bytes)
+        let base = current
+            .bundle_bytes()
+            .ok_or(RebuildError::Delta(bundle::DeltaError::WrongBase))?;
+        envelope::rebuild(delta_envelope, base, &BundleLimits::DEFAULT).map(|e| e.encode())
     }
 
     /// The policy status at `now` (trusted time, #220).
@@ -603,9 +620,11 @@ impl Candidate {
     fn examine(
         read: Option<Result<Arc<[u8]>, ()>>,
         verifier: &dyn EnvelopeVerifier,
+        now: Timestamp,
+        mode: EffectiveMode,
     ) -> Option<Self> {
         Some(match read? {
-            Ok(file) => Self::from_bytes(file, verifier),
+            Ok(file) => Self::from_bytes(file, verifier, now, mode),
             Err(()) => Self {
                 file: None,
                 examination: Examination::UNREADABLE,
@@ -613,8 +632,13 @@ impl Candidate {
         })
     }
 
-    fn from_bytes(file: Arc<[u8]>, verifier: &dyn EnvelopeVerifier) -> Self {
-        let examination = verifier.examine(&file);
+    fn from_bytes(
+        file: Arc<[u8]>,
+        verifier: &dyn EnvelopeVerifier,
+        now: Timestamp,
+        mode: EffectiveMode,
+    ) -> Self {
+        let examination = verifier.examine(&file, now, mode);
         Self {
             file: Some(file),
             examination,
@@ -627,22 +651,28 @@ impl Candidate {
             .map(|f| (f, self.examination.bundle.clone()))
     }
 
-    /// Decodes, validates and compiles the bundle. `select` has already
-    /// accepted the envelope, so the signature verified or the mode
-    /// tolerates that it did not.
-    fn compile(&self, config: EngineConfig) -> Result<(Engine, Header), ()> {
+    /// Decodes, validates and compiles the bundle in one step, with its
+    /// inlined library sets and the agent's system baseline. `select` has
+    /// already accepted the envelope, so the signature verified or the
+    /// mode tolerates that it did not.
+    fn compile(
+        &self,
+        config: EngineConfig,
+        baseline: Option<&SystemBaseline>,
+    ) -> Result<Compiled, ()> {
         let bytes = self
             .file
             .as_deref()
             .and_then(|f| f.get(self.examination.bundle.clone()))
             .ok_or(())?;
-        // #355 replaces these three steps with `bundle::load` and
-        // `Engine::from_loaded`, which also compiles the bundle's inlined
-        // library sets for set-scoped rules.
-        let bundle = PolicyBundle::decode(bytes, &BundleLimits::DEFAULT).map_err(|_| ())?;
-        let policy = bundle.validate().map_err(|_| ())?;
-        let engine = Engine::new(policy, config).map_err(|_| ())?;
-        Ok((engine, bundle.header))
+        let loaded = bundle::load(bytes, &BundleLimits::DEFAULT, baseline).map_err(|e| {
+            tracing::warn!(error = %e, "a verified policy bundle does not load");
+        })?;
+        Ok(Compiled {
+            header: *loaded.header(),
+            profiles: loaded.profiles().clone(),
+            engine: Engine::from_loaded(loaded, config),
+        })
     }
 
     fn refuse_schema(&mut self) {
@@ -653,6 +683,25 @@ impl Candidate {
             *schema_supported = false;
         } else {
             self.examination = Examination::UNREADABLE;
+        }
+    }
+}
+
+/// A bundle loaded and compiled, not yet running.
+struct Compiled {
+    engine: Engine,
+    header: Header,
+    profiles: CompiledProfiles,
+}
+
+impl Compiled {
+    fn into_active(self, load: Load, file: Option<(Arc<[u8]>, std::ops::Range<usize>)>) -> Active {
+        Active {
+            engine: self.engine,
+            load,
+            header: Some(self.header),
+            profiles: Some(self.profiles),
+            file,
         }
     }
 }
