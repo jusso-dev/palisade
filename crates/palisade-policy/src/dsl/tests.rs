@@ -194,6 +194,10 @@ fn source_locations_scale_linearly_with_findings() {
     // proportional to the map size for each one.
     let keys: String = (0..200_000).map(|i| format!("      k{i}: 1\n")).collect();
     let text = minimal_with(&format!("  settings:\n    advanced:\n{keys}"));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let started = std::time::Instant::now();
     let errors = from_str(&text).unwrap().validate().unwrap_err();
     assert_eq!(errors.len(), 200_001);
@@ -1173,6 +1177,10 @@ fn lookahead_limit_bounds_memory_before_the_node_limit() {
     // items, 8 times the node limit) fails after reading at most
     // `max_lookahead` characters, rather than queueing every token first.
     let wide = format!("[{}x]", "x,".repeat(31_999_999));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let started = std::time::Instant::now();
     let e = to_json_value(&wide, &Limits::DEFAULT).unwrap_err();
     assert_eq!(e.kind(), YamlErrorKind::LimitExceeded, "{e}");

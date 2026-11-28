@@ -5,7 +5,10 @@
 # Policy evaluation is pure (ADR 0003): it receives facts and a clock from
 # the caller, and never reads the system itself. `cargo xtask check-deps`
 # keeps I/O crates out of its dependency tree; these bans cover the
-# standard library's clock and process APIs, in tests too.
+# standard library's clocks (wall and monotonic) and process APIs, in tests
+# too. The one place that reads the monotonic clock is `engine::SystemClock`,
+# and tests that bound how long an operation takes say so with
+# `#[expect(clippy::disallowed_methods, reason = "...")]`.
 
 msrv = "1.94"
 allow-unwrap-in-tests = true
@@ -13,5 +16,6 @@ allow-expect-in-tests = true
 
 disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "take time from palisade_core::platform::Clock (#29)" },
+    { path = "std::time::Instant::now", reason = "take monotonic time from engine::Clock; evaluation must not read the process clock (#29)" },
     { path = "std::process::Command::new", reason = "policy evaluation must not run processes (ADR 0003)" },
 ]

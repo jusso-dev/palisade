@@ -1532,6 +1532,10 @@ fn a_long_parent_chain_validates_quickly() {
         let parent = if i == 0 { 10 } else { 30_000 + i - 1 };
         nodes.push(node(30_000 + i, "group", Some(parent), json!({})));
     }
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let found = errors(&snapshot(nodes, vec![], vec![]));
     assert!(found.iter().any(|(c, _)| c == "group_too_deep"));
@@ -1684,6 +1688,10 @@ fn a_flat_tenant_of_many_groups_validates_quickly() {
         )],
         vec![],
     );
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let h = validated(&snap);
     assert!(
@@ -2705,6 +2713,10 @@ fn unknown_limits_build_up_to_the_cap_and_are_rejected_past_it() {
     let per = 999;
     let policies = u32::try_from(MAX_UNKNOWN_SCOPE_VALUES / (per + 1)).unwrap();
     assert_eq!((policies as usize) * (per + 1), MAX_UNKNOWN_SCOPE_VALUES);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let h = validated(&capped_snapshot(policies, per, 0));
     let e = effective(&h, 20);
@@ -2793,6 +2805,10 @@ fn the_worst_case_composition_is_built_only_up_to_the_cap() {
     use crate::hierarchy::limits::{MAX_ASSIGNMENTS_PER_NODE, MAX_UNKNOWN_SCOPE_VALUES};
     use crate::scope::limits::MAX_SCOPE_ENTRIES;
     let policies = u32::try_from(MAX_ASSIGNMENTS_PER_NODE).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let found = errors(&capped_snapshot(policies, MAX_SCOPE_ENTRIES, policies));
     assert!(found.iter().any(|(c, _)| c == "too_many"), "{found:?}");

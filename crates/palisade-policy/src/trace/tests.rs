@@ -1866,6 +1866,10 @@ fn a_simulated_run_is_fast_enough() {
         })
         .collect();
     let sim = Simulator::new(&p).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
     let start = std::time::Instant::now();
     let r = sim
         .run(&snaps, Some(&Candidate::Mode(Mode::Audit)))
