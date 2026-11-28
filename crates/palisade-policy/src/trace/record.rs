@@ -161,6 +161,7 @@ impl<'p> TracedRule<'p> {
         policy: &Policy,
         set: &'p RuleSet,
         rule: &'p Rule,
+        sets: &dyn crate::scope::ScopeLibrary,
     ) -> Result<Option<Self>, BuildError> {
         let Some(stage) = RuleStage::of(set, rule) else {
             return Ok(None);
@@ -192,7 +193,7 @@ impl<'p> TracedRule<'p> {
             nodes: Vec::new(),
             leaves: Vec::new(),
         };
-        out.add(&rule.match_, "/match".to_owned(), false)
+        out.add(&rule.match_, "/match".to_owned(), false, sets)
             .map_err(|errors| BuildError {
                 rule_id: rule.id,
                 errors,
@@ -205,6 +206,7 @@ impl<'p> TracedRule<'p> {
         node: &'p Match,
         pointer: String,
         negated: bool,
+        sets: &dyn crate::scope::ScopeLibrary,
     ) -> Result<u32, Vec<crate::condition::TreeError>> {
         let entry = match node {
             Match::All(items) | Match::Any(items) => {
@@ -215,7 +217,7 @@ impl<'p> TracedRule<'p> {
                 };
                 let mut ids = Vec::with_capacity(items.len());
                 for (i, child) in items.iter().enumerate() {
-                    ids.push(self.add(child, format!("{pointer}/{key}/{i}"), negated)?);
+                    ids.push(self.add(child, format!("{pointer}/{key}/{i}"), negated, sets)?);
                 }
                 if matches!(node, Match::All(_)) {
                     Node::All(ids)
@@ -223,7 +225,9 @@ impl<'p> TracedRule<'p> {
                     Node::Any(ids)
                 }
             }
-            Match::Not(child) => Node::Not(self.add(child, format!("{pointer}/not"), !negated)?),
+            Match::Not(child) => {
+                Node::Not(self.add(child, format!("{pointer}/not"), !negated, sets)?)
+            }
             // As the evaluator: the hierarchy resolves every reference
             // before evaluation (#37), and validation rejects one left over.
             Match::Ref(_) => {
@@ -232,12 +236,13 @@ impl<'p> TracedRule<'p> {
                 }]);
             }
             Match::Criterion(c) => {
-                let compiled = CompiledCriterion::compile(c).map_err(|errors| {
+                let mut compiled = CompiledCriterion::compile(c).map_err(|errors| {
                     vec![crate::condition::TreeError::Criterion {
                         pointer: format!("{pointer}/criterion"),
                         errors,
                     }]
                 })?;
+                compiled.bind_set(sets);
                 self.leaves.push(Leaf {
                     criterion: c,
                     compiled,

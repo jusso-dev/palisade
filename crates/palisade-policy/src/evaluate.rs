@@ -238,7 +238,10 @@ enum Tree<'p> {
 }
 
 impl Tree<'_> {
-    fn compile<'p>(rule: &'p Rule) -> Result<Tree<'p>, Vec<crate::condition::TreeError>> {
+    fn compile<'p>(
+        rule: &'p Rule,
+        sets: &dyn ScopeLibrary,
+    ) -> Result<Tree<'p>, Vec<crate::condition::TreeError>> {
         use crate::model::{FieldClass, Match, Operator};
         if let Match::Criterion(c) = &rule.match_ {
             // Only a criterion with no options: `safety_critical` changes
@@ -265,7 +268,7 @@ impl Tree<'_> {
                 }
             }
         }
-        CompiledMatch::compile(&rule.match_).map(Tree::Compiled)
+        CompiledMatch::compile_with(&rule.match_, sets).map(Tree::Compiled)
     }
 
     /// The tree's result. `mandatory` is whether the rule is a mandatory
@@ -561,7 +564,7 @@ impl<'p> Evaluator<'p> {
                         None => continue,
                     },
                 };
-                let tree = Tree::compile(rule).map_err(|errors| BuildError {
+                let tree = Tree::compile(rule, library).map_err(|errors| BuildError {
                     rule_id: rule.id,
                     errors,
                 })?;
@@ -606,7 +609,7 @@ impl<'p> Evaluator<'p> {
                     twins.push(Compiled {
                         set,
                         rule,
-                        tree: Tree::compile(rule).map_err(|errors| BuildError {
+                        tree: Tree::compile(rule, library).map_err(|errors| BuildError {
                             rule_id: rule.id,
                             errors,
                         })?,

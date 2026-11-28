@@ -136,6 +136,17 @@ pub trait ScopeLibrary: core::fmt::Debug + Sync {
     fn network_set(&self, set: &SetRef) -> Option<Vec<String>>;
     /// A schedule from a schedule set.
     fn schedule_set(&self, set: &SetRef) -> Option<Schedule>;
+    /// The digests of a hash set on `field` (#368), at the reference's
+    /// pinned version. `None` if there is no such set, it is of another
+    /// kind, or it is on another field: a criterion on it is then unknown.
+    fn hash_set(
+        &self,
+        set: &SetRef,
+        field: crate::model::Field,
+    ) -> Option<crate::hashset::Digests> {
+        let _ = (set, field);
+        None
+    }
 }
 
 /// Every library set a scope references, with its JSON Pointer relative to
@@ -379,6 +390,21 @@ impl ScopeLibrary for CatalogueLibrary<'_> {
             }
             _ => None,
         }
+    }
+
+    fn hash_set(
+        &self,
+        set: &SetRef,
+        field: crate::model::Field,
+    ) -> Option<crate::hashset::Digests> {
+        // Only a pinned reference: the evaluator never guesses a version.
+        if set.pin == crate::library::Pin::Latest {
+            return None;
+        }
+        self.catalogue
+            .resolve(set, self.from)
+            .ok()?
+            .hash_digests(field)
     }
 }
 

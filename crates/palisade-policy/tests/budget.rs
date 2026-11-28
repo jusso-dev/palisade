@@ -329,6 +329,61 @@ fn loading_the_reference_bundle_is_within_budget() {
     }
 }
 
+/// The same 100,000 hashes as one first-class hash set (#368): raw
+/// digests in the bundle, one rule that names the set. Within the same
+/// budget, and much smaller than 4,000 rules of 25 hex values.
+#[test]
+fn loading_a_hash_set_bundle_is_within_budget() {
+    let b = budgets();
+    let rules = reference::bundle(Size::Reference, PrecedenceModel::DenyWins);
+    let bytes = reference::hash_set_bundle(Size::Reference, PrecedenceModel::DenyWins);
+    // Raw digests save at least the hex half of every hash, and the rule
+    // around each 25 of them.
+    assert!(
+        rules.len() - bytes.len() >= 100_000 * 32,
+        "{} bytes as a set, {} as rules",
+        bytes.len(),
+        rules.len()
+    );
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "times the operation to check its performance bound"
+    )]
+    let start = Instant::now();
+    let loaded = bundle::load(&bytes, &BundleLimits::DEFAULT, None).unwrap();
+    let ms = start.elapsed().as_millis();
+    eprintln!(
+        "load_hash_set_bundle: {ms} ms for {} bytes (rules: {} bytes)",
+        bytes.len(),
+        rules.len()
+    );
+    let engine = Engine::from_loaded(loaded, EngineConfig::default());
+    let policy = engine.snapshot();
+    let state = DeviceState::of(&policy.policy().document().policy);
+    let variables = PathVariables::new();
+    let context = reference::context();
+    for case in Case::ALL {
+        for i in [0, 7, 99_999] {
+            let facts = case.facts(i, Size::Reference);
+            let subject = Subject {
+                object_type: ObjectType::Executable,
+                facts: &facts,
+                variables: &variables,
+                context: &context,
+            };
+            let d = policy
+                .evaluator()
+                .evaluate_in(&subject, &state, TraceId([0; 16]))
+                .unwrap();
+            assert_eq!(d.outcome(), case.expected(), "{case:?} {i}");
+        }
+    }
+    if enforce() {
+        let limit = u128::from(b.budget.load_reference_policy.max_ms);
+        assert!(ms <= limit, "hash set bundle load {ms} ms > {limit} ms");
+    }
+}
+
 /// The heap a loaded policy holds, counted by the allocator: everything
 /// still allocated once the engine is built, including the validated
 /// document the snapshot keeps. Building the JSON form the document is

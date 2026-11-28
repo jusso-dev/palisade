@@ -747,7 +747,7 @@ impl<'p> Tracer<'p> {
                 continue;
             };
             for rule in &set.rules {
-                if let Some(traced) = TracedRule::build(policy, set, rule)? {
+                if let Some(traced) = TracedRule::build(policy, set, rule, library)? {
                     rules.push(traced);
                 }
             }

@@ -46,6 +46,11 @@ const fn k(id: i64, name: &'static str) -> Key {
     Key { id, name, since: 1 }
 }
 
+/// A key added in bundle format 2 (#368).
+const fn k2(id: i64, name: &'static str) -> Key {
+    Key { id, name, since: 2 }
+}
+
 /// Every key, critical first, each in the order it was added.
 pub const KEYS: &[Key] = &[
     k(0, "id"),
@@ -594,6 +599,15 @@ pub const KEYS: &[Key] = &[
     k(543, "once_per_boot"),
     k(544, "on_policy_change"),
     k(545, "condition_budget_ms"),
+    k2(546, "set"),
+    k2(547, "hash_set"),
+    k2(548, "digests"),
+    k2(549, "put_library"),
+    k2(550, "remove_library"),
+    k2(551, "patch_hash_set"),
+    k2(552, "base_version"),
+    k2(553, "add"),
+    k2(554, "remove"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

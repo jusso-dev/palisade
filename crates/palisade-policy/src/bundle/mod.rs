@@ -31,7 +31,7 @@ pub mod load;
 pub mod serial;
 
 pub use compile::{BundleSets, CompileError, Compiled, Source, compile};
-pub use delta::{BundleDelta, DeltaError, Op, apply, diff, worth_sending};
+pub use delta::{BundleDelta, DeltaError, HashSetPatch, Op, apply, diff, worth_sending};
 pub use format::{
     AgentVersion, Body, BundleError, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent,
     SourceRevisions, Target, TargetScope, bundle_hash, decode_header,

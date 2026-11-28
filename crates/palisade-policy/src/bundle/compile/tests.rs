@@ -805,3 +805,273 @@ fn a_generated_at_the_assistant_cannot_read_fails_the_compile() {
         "{err}"
     );
 }
+
+// --- First-class hash sets (#368) ------------------------------------------
+
+const HASHES: &str = "01936b2e-8c4a-7004-9f21-000000000068";
+
+fn hash_lib(version: u32, digits: &[char]) -> Library {
+    let hashes: Vec<String> = digits
+        .iter()
+        .map(|c| std::iter::repeat_n(*c, 64).collect())
+        .collect();
+    serde_json::from_value(json!({
+        "id": HASHES, "version": version, "name": "Approved", "realm": "global",
+        "content": {"kind": "hash_set", "field": "hash.sha256", "hashes": hashes},
+    }))
+    .unwrap()
+}
+
+fn set_ref(version: u32) -> crate::library::LibraryRef {
+    crate::library::LibraryRef {
+        id: serde_json::from_value(json!(HASHES)).unwrap(),
+        pin: crate::library::Pin::Version(version),
+    }
+}
+
+/// An allow for hashes in the set at `version`, on `field`.
+fn set_policy(field: crate::model::Field, version: u32, negated: bool) -> ValidatedPolicy {
+    let mut doc: PolicyDocument = PolicyBuilder::new()
+        .rule_set(RuleSetBuilder::mixed(1).rule(RuleBuilder::allow(1, hash('f'))))
+        .build();
+    doc.rule_sets[0].rules[0].match_ = crate::model::Match::Criterion(
+        crate::model::Criterion::in_hash_set(field, set_ref(version), negated),
+    );
+    doc.validate().unwrap()
+}
+
+fn compile_set(policy: &ValidatedPolicy, libs: Vec<Library>) -> Result<Compiled, CompileError> {
+    let catalogue = Catalogue::new(libs).unwrap();
+    compile(
+        &Source {
+            policy,
+            catalogue: &catalogue,
+            from: Visibility::Global,
+            sources: SourceRevisions::default(),
+            facts: crate::analysis::Facts::default(),
+            admin: None,
+        },
+        header(),
+        &BundleLimits::DEFAULT,
+    )
+}
+
+/// The outcome for an object with hash `c`, through the loaded bundle.
+fn loaded_outcome(bytes: &[u8], c: char) -> crate::decision::Outcome {
+    let loaded = match crate::bundle::load(bytes, &BundleLimits::DEFAULT, None) {
+        Ok(l) => l,
+        Err(e) => panic!("{e}"),
+    };
+    let object = facts().sha256(c).build();
+    let vars = PathVariables::new();
+    let ctx = EvaluationContext::default();
+    let subject = Subject {
+        object_type: ObjectType::Executable,
+        facts: &object,
+        variables: &vars,
+        context: &ctx,
+    };
+    loaded
+        .snapshot()
+        .evaluator()
+        .evaluate(&subject, TRACE)
+        .outcome()
+}
+
+#[test]
+fn a_hash_set_is_inlined_as_raw_digests_and_matches() {
+    let policy = set_policy(crate::model::Field::HashSha256, 2, false);
+    let c = compile_set(&policy, vec![hash_lib(1, &['a']), hash_lib(2, &['c', 'b'])]).unwrap();
+    let libs = c.bundle.body.libraries();
+    assert_eq!(libs.len(), 1, "only the pinned version");
+    assert_eq!(libs[0].resolved_version, 2);
+    let SetContent::HashSet { field, digests } = &libs[0].content else {
+        panic!("{libs:?}")
+    };
+    assert_eq!(*field, crate::model::Field::HashSha256);
+    assert_eq!(digests.as_bytes().len(), 64);
+    assert_eq!(&digests.as_bytes()[..32], &[0xbb; 32], "sorted");
+    assert!(
+        c.bundle
+            .body
+            .source_revisions()
+            .libraries
+            .contains(&(set_ref(2).id, 2))
+    );
+    use crate::decision::Outcome;
+    assert_eq!(loaded_outcome(&c.bytes, 'b'), Outcome::Allowed);
+    assert_eq!(loaded_outcome(&c.bytes, 'c'), Outcome::Allowed);
+    // Version 1's entry is not in version 2.
+    assert_eq!(loaded_outcome(&c.bytes, 'a'), Outcome::Blocked);
+}
+
+#[test]
+fn a_set_that_does_not_resolve_does_not_compile() {
+    let policy = set_policy(crate::model::Field::HashSha256, 3, false);
+    assert!(matches!(
+        compile_set(&policy, vec![hash_lib(1, &['a'])]),
+        Err(CompileError::UnresolvedSet { .. })
+    ));
+    // Another kind of library at that ID and version.
+    let other: Library = serde_json::from_value(json!({
+        "id": HASHES, "version": 3, "name": "Office", "realm": "global",
+        "content": {"kind": "network_set", "entries": ["10.0.0.0/8"]},
+    }))
+    .unwrap();
+    assert!(matches!(
+        compile_set(&policy, vec![other]),
+        Err(CompileError::UnresolvedSet { .. })
+    ));
+}
+
+#[test]
+fn a_missing_or_wrong_set_never_matches_an_allow() {
+    use crate::decision::Outcome;
+    let ok = compile_set(
+        &set_policy(crate::model::Field::HashSha256, 1, false),
+        vec![hash_lib(1, &['a'])],
+    )
+    .unwrap();
+    // The bundle with its set removed, then with the set at another
+    // version, on another field, or of another kind: the allow never
+    // applies.
+    let rebuild = |libraries: Vec<InlineLibrary>| {
+        let body = Body::new(
+            ok.bundle.body.document().clone(),
+            libraries,
+            SourceRevisions::default(),
+        )
+        .unwrap();
+        PolicyBundle::new(header(), body).to_bytes().unwrap()
+    };
+    let inlined = ok.bundle.body.libraries()[0].clone();
+    let SetContent::HashSet { digests, .. } = inlined.content.clone() else {
+        panic!()
+    };
+    let cases = [
+        Vec::new(),
+        vec![InlineLibrary {
+            resolved_version: 2,
+            ..inlined.clone()
+        }],
+        vec![InlineLibrary {
+            content: SetContent::HashSet {
+                field: crate::model::Field::HashAuthenticodeSha256,
+                digests,
+            },
+            ..inlined.clone()
+        }],
+        vec![InlineLibrary {
+            content: SetContent::NetworkSet(vec!["10.0.0.0/8".to_owned()]),
+            ..inlined.clone()
+        }],
+    ];
+    for libs in cases {
+        assert_eq!(
+            loaded_outcome(&rebuild(libs.clone()), 'a'),
+            Outcome::Blocked,
+            "{libs:?}"
+        );
+    }
+    assert_eq!(
+        loaded_outcome(&rebuild(vec![inlined]), 'a'),
+        Outcome::Allowed
+    );
+    // An allow on `not_member_of` alone identifies nothing: refused.
+    let mut doc = ok.bundle.body.document().clone();
+    let crate::model::Match::Criterion(c) = &mut doc.rule_sets[0].rules[0].match_ else {
+        panic!()
+    };
+    c.operator = crate::model::Operator::NotMemberOf;
+    let errors = doc.validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.code.as_str() == "no_identity_anchor"),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_set_test_is_unknown_with_a_note_until_bound() {
+    use crate::ops::{CompiledCriterion, Note, Tri};
+    let c =
+        crate::model::Criterion::in_hash_set(crate::model::Field::HashSha256, set_ref(1), false);
+    let mut compiled = CompiledCriterion::compile(&c).unwrap();
+    assert_eq!(compiled.set(), Some(set_ref(1)));
+    let object = facts().sha256('a').build();
+    let vars = PathVariables::new();
+    let ctx = EvaluationContext::default();
+    let eval_ctx = crate::ops::EvalContext {
+        action: crate::model::ActionKind::Allow,
+        variables: &vars,
+        context: &ctx,
+    };
+    let e = compiled.eval(&object, &eval_ctx);
+    assert_eq!(e.result, Tri::Unknown);
+    assert!(e.notes.contains(Note::SetUnresolved));
+    let catalogue = Catalogue::new(vec![hash_lib(1, &['a'])]).unwrap();
+    compiled.bind_set(&CatalogueLibrary {
+        catalogue: &catalogue,
+        from: Visibility::Global,
+    });
+    assert_eq!(compiled.eval(&object, &eval_ctx).result, Tri::Match);
+    // A malformed fact is unknown, not a miss.
+    let bad = facts().with(crate::model::Field::HashSha256, "abc").build();
+    let e = compiled.eval(&bad, &eval_ctx);
+    assert_eq!(e.result, Tri::Unknown);
+    assert!(e.notes.contains(Note::FactMalformed));
+    // An unpinned reference is never bound by a catalogue.
+    let latest = crate::library::LibraryRef {
+        pin: crate::library::Pin::Latest,
+        ..set_ref(1)
+    };
+    let lib = CatalogueLibrary {
+        catalogue: &catalogue,
+        from: Visibility::Global,
+    };
+    assert!(
+        lib.hash_set(&latest, crate::model::Field::HashSha256)
+            .is_none()
+    );
+    assert!(
+        BundleSets::default()
+            .hash_set(&latest, crate::model::Field::HashSha256)
+            .is_none()
+    );
+}
+
+#[test]
+fn set_criteria_are_validated() {
+    use crate::model::{Criterion, Field, Match, Operator};
+    let check = |c: Criterion| {
+        let mut doc: PolicyDocument = PolicyBuilder::new()
+            .rule_set(RuleSetBuilder::mixed(1).rule(RuleBuilder::deny(1, hash('f'))))
+            .build();
+        doc.rule_sets[0].rules[0].match_ = Match::Criterion(c);
+        doc.validate()
+            .err()
+            .map(|e| e.iter().map(|e| e.code.as_str()).collect::<Vec<_>>())
+    };
+    assert_eq!(
+        check(Criterion::in_hash_set(Field::HashSha256, set_ref(1), false)),
+        None
+    );
+    // Unpinned.
+    let latest = crate::library::LibraryRef {
+        pin: crate::library::Pin::Latest,
+        ..set_ref(1)
+    };
+    assert_eq!(
+        check(Criterion::in_hash_set(Field::HashSha256, latest, false)),
+        Some(vec!["unresolved_ref"])
+    );
+    // A field that takes no set, another operator, or values as well.
+    assert!(check(Criterion::in_hash_set(Field::HashSha1, set_ref(1), false)).is_some());
+    let mut equals = Criterion::in_hash_set(Field::HashSha256, set_ref(1), false);
+    equals.operator = Operator::Equals;
+    assert!(check(equals).is_some());
+    let mut with_values = Criterion::in_hash_set(Field::HashSha256, set_ref(1), false);
+    with_values.values = vec!["a".repeat(64)];
+    assert_eq!(check(with_values), Some(vec!["invalid_value_count"]));
+}

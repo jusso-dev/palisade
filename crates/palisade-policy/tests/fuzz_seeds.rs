@@ -352,6 +352,54 @@ fn write_bundle_delta_fuzz_seeds() {
     fs::write(dir.join("seed-delta-base"), other.to_bytes().unwrap()).unwrap();
 }
 
+/// Hash set inputs (#368) for `fuzz_hash_set`: a base, additions and
+/// removals that apply, ones that do not, and sets out of order or cut
+/// short.
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_hash_set_fuzz_seeds() {
+    use palisade_policy::hashset::Digests;
+    let dir = seed_dir();
+    let set = |ns: &[u8]| Digests::from_digests(ns.iter().map(|n| [*n; 32]));
+    let input = |base: &[u8], add: &[u8], remove: &[u8]| {
+        let mut out = vec![
+            u8::try_from(base.len() / 32).unwrap(),
+            u8::try_from(add.len() / 32).unwrap(),
+        ];
+        out.extend_from_slice(base);
+        out.extend_from_slice(add);
+        out.extend_from_slice(remove);
+        out
+    };
+    let base = set(&[1, 3, 5]);
+    let cases = [
+        (
+            "applies",
+            input(base.as_bytes(), set(&[2]).as_bytes(), set(&[3]).as_bytes()),
+        ),
+        (
+            "remove-missing",
+            input(base.as_bytes(), &[], set(&[4]).as_bytes()),
+        ),
+        (
+            "add-present",
+            input(base.as_bytes(), set(&[1]).as_bytes(), &[]),
+        ),
+        (
+            "unsorted",
+            input(
+                &[set(&[5]).as_bytes(), set(&[1]).as_bytes()].concat(),
+                &[],
+                &[],
+            ),
+        ),
+        ("short", input(&base.as_bytes()[..40], &[], &[])),
+    ];
+    for (name, bytes) in cases {
+        fs::write(dir.join(format!("seed-{name}")), bytes).unwrap();
+    }
+}
+
 /// The command lines of the operator vectors, and a few awkward shapes:
 /// quotes, backslashes and white space at the edges (#329).
 #[test]

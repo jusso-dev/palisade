@@ -170,12 +170,14 @@ fn sets_become_criteria_of_at_most_25_values() {
 
 #[test]
 fn a_set_too_large_for_one_rule_is_rejected_when_inlined() {
-    let hashes: Vec<String> = (0..801).map(|i| format!("{i:064x}")).collect();
+    // Only SHA-256 hash sets are first-class (#368); a large SHA-1 set is
+    // still refused.
+    let hashes: Vec<String> = (0..801).map(|i| format!("{i:040x}")).collect();
     let c = Catalogue::new(vec![library(
         1,
         1,
         json!("global"),
-        json!({"kind": "hash_set", "field": "hash.sha256", "hashes": hashes}),
+        json!({"kind": "hash_set", "field": "hash.sha1", "hashes": hashes}),
     )])
     .unwrap();
     let e = c
@@ -678,4 +680,109 @@ fn an_unresolved_ref_is_rejected_by_policy_validation_and_compilation() {
             pointer: "/all/1/ref".to_owned()
         }]
     );
+}
+
+#[test]
+fn a_large_sha256_set_becomes_one_pinned_set_criterion() {
+    // #368: more than fits inline, so the tree names the set at the
+    // version `latest` resolves to.
+    let hashes: Vec<String> = (0..801).map(|i| format!("{i:064x}")).collect();
+    let set = |v| {
+        library(
+            1,
+            v,
+            json!("global"),
+            json!({"kind": "hash_set", "field": "hash.sha256", "hashes": hashes}),
+        )
+    };
+    let c = Catalogue::new(vec![set(1), set(2)]).unwrap();
+    let mut used = BTreeSet::new();
+    let out = c
+        .expand(&tree(r(1)), Visibility::Global, &mut used)
+        .unwrap();
+    let Match::Criterion(crit) = &out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(crit.field, Field::HashSha256);
+    assert_eq!(crit.operator, Operator::MemberOf);
+    assert!(crit.values.is_empty());
+    let pinned = crit.set.unwrap();
+    assert_eq!(pinned.pin, Pin::Version(2));
+    assert!(used.contains(&(pinned.id, 2)));
+    let digests = c
+        .get(pinned.id, 2)
+        .unwrap()
+        .hash_digests(Field::HashSha256)
+        .unwrap();
+    assert_eq!(digests.len(), 801);
+    // Another field, or another kind, has no digests.
+    assert!(
+        c.get(pinned.id, 2)
+            .unwrap()
+            .hash_digests(Field::HashAuthenticodeSha256)
+            .is_none()
+    );
+}
+
+#[test]
+fn a_set_criterion_is_pinned_and_checked_when_expanded() {
+    let hashes: Vec<String> = (0..3).map(|i| format!("{i:064x}")).collect();
+    let c = Catalogue::new(vec![
+        library(
+            1,
+            4,
+            json!("global"),
+            json!({"kind": "hash_set", "field": "hash.sha256", "hashes": hashes}),
+        ),
+        library(
+            2,
+            1,
+            json!("global"),
+            json!({"kind": "publisher_set", "publishers": ["Example"]}),
+        ),
+    ])
+    .unwrap();
+    let crit_on = |field: Field, n: u32| {
+        Match::Criterion(Criterion::in_hash_set(
+            field,
+            LibraryRef {
+                id: lib_id(n),
+                pin: Pin::Latest,
+            },
+            true,
+        ))
+    };
+    let mut used = BTreeSet::new();
+    let out = c
+        .expand(
+            &crit_on(Field::HashSha256, 1),
+            Visibility::Global,
+            &mut used,
+        )
+        .unwrap();
+    let Match::Criterion(crit) = &out else {
+        panic!()
+    };
+    assert_eq!(crit.set.unwrap().pin, Pin::Version(4));
+    assert_eq!(crit.operator, Operator::NotMemberOf);
+    assert_eq!(used.len(), 1);
+    // `refs_in` reports it, so deletion checks see the use.
+    assert_eq!(refs_in(&crit_on(Field::HashSha256, 1)).len(), 1);
+    // The wrong field, the wrong kind, or a missing set: refused.
+    for (m, code) in [
+        (
+            crit_on(Field::HashAuthenticodeSha256, 1),
+            LibraryCode::RefKindNotAllowed,
+        ),
+        (
+            crit_on(Field::HashSha256, 2),
+            LibraryCode::RefKindNotAllowed,
+        ),
+        (crit_on(Field::HashSha256, 3), LibraryCode::UnknownLibrary),
+    ] {
+        let e = c
+            .expand(&m, Visibility::Global, &mut BTreeSet::new())
+            .unwrap_err();
+        assert_eq!((e.code, e.path.as_str()), (code, "/criterion/set"), "{m:?}");
+    }
 }

@@ -164,6 +164,15 @@ pub struct Criterion {
     /// warm field means every decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluate: Option<Cadence>,
+    /// Only for `member_of` and `not_member_of` on a SHA-256 hash field
+    /// (`hash.sha256`, `hash.authenticode_sha256`, `hash.page_sha256`,
+    /// `hash.msi_fuzzy_sha256`): the library hash set the fact is tested
+    /// against (#368), by ID and pinned version, instead of `values`. The
+    /// hierarchy pins `latest` to the version it resolves; a bundle carries
+    /// the set itself. A set the evaluator does not have at that version,
+    /// for that field, is unknown, so it never lets an allow match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set: Option<crate::library::LibraryRef>,
 }
 
 /// How costly a field's fact is to collect at decision time (#33, #329).
@@ -216,6 +225,51 @@ impl Criterion {
             value_name: None,
             arg_index: None,
             evaluate: None,
+            set: None,
+        }
+    }
+
+    /// A test of `field` against the library hash set `set` (#368):
+    /// `member_of`, or `not_member_of` when `negated`.
+    #[must_use]
+    pub fn in_hash_set(field: Field, set: crate::library::LibraryRef, negated: bool) -> Self {
+        let operator = if negated {
+            Operator::NotMemberOf
+        } else {
+            Operator::MemberOf
+        };
+        Self {
+            set: Some(set),
+            ..Self::new(field, operator, Vec::<String>::new())
+        }
+    }
+
+    /// Whether this criterion tests a library hash set (#368).
+    #[must_use]
+    pub const fn is_set_test(&self) -> bool {
+        self.set.is_some()
+    }
+
+    /// How many values the criterion takes: [`Operator::value_count`], or
+    /// none for a set test, whose entries are the set's.
+    #[must_use]
+    pub const fn value_count(&self) -> (usize, usize) {
+        if self.set.is_some() {
+            (0, 0)
+        } else {
+            self.operator.value_count()
+        }
+    }
+
+    /// Whether the operator is valid on the field: the class table, and
+    /// `member_of` or `not_member_of` for a set test on a hash field.
+    #[must_use]
+    pub const fn operator_fits(&self) -> bool {
+        if self.set.is_some() {
+            crate::hashset::field_allowed(self.field)
+                && matches!(self.operator, Operator::MemberOf | Operator::NotMemberOf)
+        } else {
+            self.operator.applies_to_field(self.field)
         }
     }
 
@@ -1576,8 +1630,13 @@ impl Operator {
 fn values_by_operator(schema: &mut schemars::Schema) {
     let rule = serde_json::json!({
         "if": {
-            "properties": { "operator": { "enum": ["is_true", "is_false", "exists", "not_exists"] } },
-            "required": ["operator"]
+            "anyOf": [
+                {
+                    "properties": { "operator": { "enum": ["is_true", "is_false", "exists", "not_exists"] } },
+                    "required": ["operator"]
+                },
+                { "required": ["set"] }
+            ]
         },
         "then": { "properties": { "values": { "maxItems": 0 } } },
         "else": {
