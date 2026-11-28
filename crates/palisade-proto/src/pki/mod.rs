@@ -15,6 +15,8 @@
 //! - [`lifecycle`]: renewal, expiry-alert and rotation-overlap schedules,
 //!   and trust-version adoption.
 //! - [`time`]: validity windows with clock-skew tolerance, and the clock.
+//! - `issue` (feature `issuance`): X.509 certificates and revocation lists
+//!   for the CA hierarchy, signed through a [`Signer`].
 //!
 //! Every signature covers a [`Domain`] prefix followed by the payload, so a
 //! signature made for one purpose can never verify as another
@@ -24,6 +26,8 @@
 #![forbid(unsafe_code)]
 
 pub(crate) mod crypto;
+#[cfg(feature = "issuance")]
+pub mod issue;
 pub mod key;
 pub mod lifecycle;
 pub mod signer;
@@ -43,7 +47,7 @@ pub use lifecycle::{
     Adoption, ExpiryAlert, ExpiryAlerts, LifecycleError, RenewalPolicy, RenewalStatus,
     RotationPhase, RotationPlan,
 };
-pub use signer::{Signature, Signer, SignerError, SoftwareSigner};
+pub use signer::{Signature, Signer, SignerError, SoftwareSigner, signs_x509};
 pub use time::{Clock, FixedClock, SkewTolerance, SystemClock, TimeError, Validity};
 pub use trust_set::{
     DecodeError, Rejection, SignedTrustSet, TrustAnchor, TrustSet, TrustSetError, TrustedKey,

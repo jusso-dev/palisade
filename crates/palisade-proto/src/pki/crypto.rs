@@ -98,6 +98,17 @@ impl Rng {
     }
 }
 
+impl Rng {
+    /// Fills `out` from the operating system's secure random source.
+    #[cfg(feature = "issuance")]
+    pub(crate) fn fill(&self, out: &mut [u8]) -> Result<(), CryptoError> {
+        use ring::rand::SecureRandom as _;
+        self.0
+            .fill(out)
+            .map_err(|_| CryptoError("the secure random source failed"))
+    }
+}
+
 impl fmt::Debug for Rng {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Rng")
@@ -191,6 +202,63 @@ impl PrivateKey {
             Self::Ed25519(k) => Ok(k.sign(message).as_ref().to_vec()),
         }
     }
+
+    /// Signs `message` for an X.509 structure: an ECDSA P-384 signature
+    /// over the SHA-384 of `message`, DER-encoded as `ECDSA-Sig-Value`
+    /// (RFC 5480), the form certificates and revocation lists carry.
+    /// Ed25519 keys are refused: no key purpose that issues certificates
+    /// allows them.
+    pub(crate) fn sign_x509(&self, rng: &Rng, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        match self {
+            Self::EcdsaP384(k) => {
+                let fixed = k
+                    .sign(&rng.0, message)
+                    .map_err(|_| CryptoError("signing failed"))?;
+                Ok(ecdsa_fixed_to_der(fixed.as_ref()))
+            }
+            Self::Ed25519(_) => Err(CryptoError("Ed25519 keys do not sign certificates")),
+        }
+    }
+}
+
+/// Converts a fixed-length ECDSA signature (`r ‖ s`, each half the length)
+/// to DER `SEQUENCE { INTEGER r, INTEGER s }`. Each integer is minimal:
+/// leading zero bytes are dropped and one is added back when the high bit
+/// is set, so the value stays positive. For P-384 the whole encoding is at
+/// most 104 bytes, so every length fits the short form.
+pub(crate) fn ecdsa_fixed_to_der(fixed: &[u8]) -> Vec<u8> {
+    let (r, s) = fixed.split_at(fixed.len() / 2);
+    let mut body = Vec::with_capacity(fixed.len().saturating_add(6));
+    for half in [r, s] {
+        let start = half.iter().position(|&b| b != 0).unwrap_or(half.len());
+        let digits = half.get(start..).unwrap_or_default();
+        let pad = digits.first().is_none_or(|&b| b & 0x80 != 0);
+        body.push(0x02);
+        body.push(short_len(digits.len().saturating_add(usize::from(pad))));
+        if pad {
+            body.push(0x00);
+        }
+        body.extend_from_slice(digits);
+    }
+    let mut der = Vec::with_capacity(body.len().saturating_add(2));
+    der.push(0x30);
+    der.push(short_len(body.len()));
+    der.extend_from_slice(&body);
+    der
+}
+
+/// A DER short-form length. Callers only pass lengths below 128.
+fn short_len(len: usize) -> u8 {
+    u8::try_from(len).unwrap_or(u8::MAX) & 0x7f
+}
+
+/// Verifies a DER `ECDSA-Sig-Value` P-384 SHA-384 signature over `message`
+/// with a raw (uncompressed) P-384 public key. For tests of the X.509 path.
+#[cfg(all(test, feature = "issuance"))]
+pub(crate) fn verify_p384_der(raw_public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+    UnparsedPublicKey::new(&ring_sig::ECDSA_P384_SHA384_ASN1, raw_public_key)
+        .verify(message, signature)
+        .is_ok()
 }
 
 /// A fresh unencrypted PKCS#8 key, for import tests. Test keys are made at

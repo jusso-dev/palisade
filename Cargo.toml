@@ -73,6 +73,11 @@ miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-a
 proc-macro2 = { version = "1.0.107", default-features = false }
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 quick-xml = { version = "0.42.0", default-features = false }
+# X.509 certificate and CRL encoding for the internal CA (#224), behind
+# `palisade-proto`'s off-by-default `issuance` feature. Without default
+# features: no `ring` or `aws-lc-rs` back end and no PEM, so every signature
+# comes from Palisade's own `Signer` (ADR 0017).
+rcgen = { version = "0.14.10", default-features = false }
 # Test fixture generation only (dev-dependency): a seeded RNG for repeatable
 # test keys.
 rand_core = { version = "0.10.1", default-features = false }
@@ -94,6 +99,9 @@ sha2 = { version = "0.11.0", default-features = false }
 smallvec = { version = "1.16.6", default-features = false, features = ["serde"] }
 socket2 = { version = "0.6.5", default-features = false }
 sqlx = { version = "0.9.1", default-features = false, features = ["macros", "migrate", "postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "uuid"] }
+# Certificate validity times for `rcgen` (#224), behind `palisade-proto`'s
+# `issuance` feature. Already in the tree through `rcgen`.
+time = { version = "0.3.55", default-features = false }
 tokio = { version = "1.54.1", default-features = false }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 toml = { version = "1.2.2", default-features = false, features = ["std", "parse", "serde"] }

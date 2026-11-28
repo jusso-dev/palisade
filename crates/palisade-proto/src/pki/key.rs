@@ -421,7 +421,7 @@ impl PublicKey {
     }
 
     /// The raw key after the fixed prefix.
-    fn raw(&self) -> &[u8] {
+    pub(crate) fn raw(&self) -> &[u8] {
         let prefix_len = match self.key_type {
             KeyType::P384 => P384_SPKI_PREFIX.len(),
             KeyType::Ed25519 => ED25519_SPKI_PREFIX.len(),

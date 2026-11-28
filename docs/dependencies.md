@@ -114,7 +114,10 @@ crate `adler2`), exempted with a note that names #53. Dependabot PRs #308 (`prop
 (`criterion` 0.8) were merged before `cargo vet` passed; the follow-up moved their exemptions to the
 new versions and exempted the 6 crates they added (`core_detect`, and for criterion `alloca`,
 `page_size` and `winapi` with its two import-library crates), all dev-only except `sha2`, with a
-note that names the PR. The exemptions are the backlog.
+note that names the PR. X.509 issuance for the internal CA (#224) added 8 more (`rcgen`, used
+without its cryptography back end, and `time`, `yasna` and their helpers), behind
+`palisade-proto`'s off-by-default `issuance` feature, exempted with a note that names #224. The
+exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
 
