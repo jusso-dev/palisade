@@ -48,6 +48,8 @@ libc = { workspace = true }
 # The Windows API, for `palisade_fileid::win` only, so only with `os-trust`.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, optional = true, features = [
+    # `RtlUpcaseUnicodeChar`: the OS's upcase table (#332).
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
     "Win32_NetworkManagement_NetManagement",
     "Win32_NetworkManagement_WNet",

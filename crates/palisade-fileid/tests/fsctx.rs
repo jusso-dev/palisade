@@ -202,6 +202,42 @@ fn write_fsctx_fuzz_seeds() {
     full.extend_from_slice(&[0, 0]);
     read.extend_from_slice(&full);
     std::fs::write(dir.join("seed-journal-read"), read).unwrap();
+    // A 1 KiB `$UpCase` file record: the update sequence array, an
+    // unnamed `$DATA` attribute and a resident `$Info` with the standard
+    // CRC, then the end marker.
+    let mut upcase = vec![0_u8; 1024];
+    upcase[..4].copy_from_slice(b"FILE");
+    upcase[4..6].copy_from_slice(&0x30_u16.to_le_bytes());
+    upcase[6..8].copy_from_slice(&3_u16.to_le_bytes());
+    upcase[20..22].copy_from_slice(&0x38_u16.to_le_bytes());
+    let mut at = 0x38;
+    for (name, value) in [("", &[][..]), ("$Info", &[0_u8; 32][..])] {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        let value_at = (24 + units.len() * 2).next_multiple_of(8);
+        let len = (value_at + value.len()).next_multiple_of(8);
+        upcase[at..at + 4].copy_from_slice(&0x80_u32.to_le_bytes());
+        upcase[at + 4..at + 8].copy_from_slice(&u32::try_from(len).unwrap().to_le_bytes());
+        upcase[at + 9] = u8::try_from(units.len()).unwrap();
+        upcase[at + 10..at + 12].copy_from_slice(&24_u16.to_le_bytes());
+        upcase[at + 16..at + 20]
+            .copy_from_slice(&u32::try_from(value.len()).unwrap().to_le_bytes());
+        upcase[at + 20..at + 22].copy_from_slice(&u16::try_from(value_at).unwrap().to_le_bytes());
+        for (i, u) in units.iter().enumerate() {
+            upcase[at + 24 + 2 * i..at + 26 + 2 * i].copy_from_slice(&u.to_le_bytes());
+        }
+        if !value.is_empty() {
+            let crc = palisade_fileid::fsctx::STANDARD_UPCASE_CRC.to_le_bytes();
+            upcase[at + value_at + 8..at + value_at + 16].copy_from_slice(&crc);
+        }
+        at += len;
+    }
+    upcase[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    upcase[24..28].copy_from_slice(&u32::try_from(at + 8).unwrap().to_le_bytes());
+    assert_eq!(
+        palisade_fileid::fsctx::parse_upcase_info(&upcase),
+        Ok(Some(palisade_fileid::fsctx::STANDARD_UPCASE_CRC))
+    );
+    std::fs::write(dir.join("seed-upcase"), upcase).unwrap();
     std::fs::write(
         dir.join("seed-zone"),
         "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.invalid/\r\nHostUrl=https://example.invalid/setup.exe\r\n",

@@ -16,9 +16,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use palisade_fileid::fsctx::{BusType, DriveType, FsType, LocationClass};
+use palisade_fileid::fsctx::{BusType, DriveType, FsType, LocationClass, VolumeUpcase};
 use palisade_fileid::win::volume::{
-    is_case_sensitive_dir, network_evidence, read_volume, read_volume_opened_as,
+    folds_as_standard, is_case_sensitive_dir, network_evidence, read_volume, read_volume_opened_as,
+    volume_upcase,
 };
 
 /// A directory this test created, removed when dropped.
@@ -259,6 +260,15 @@ fn an_attached_vhd_is_a_virtual_disk() {
     let host = read_volume(&open_dir(&dir.0));
     assert_ne!(host.serial, v.serial);
     assert_ne!(host.bus_type, Some(BusType::FileBackedVirtual));
+    // Formatted just now by a current Windows: the standard upcase table
+    // (#332), so its final paths have rule keys.
+    let f = File::open(&file).unwrap();
+    assert_eq!(volume_upcase(&f).unwrap(), VolumeUpcase::Standard);
+    assert!(folds_as_standard(&f));
+    let fp = palisade_fileid::win::links::final_path_of(&f).unwrap();
+    assert!(!fp.fold_unknown());
+    assert!(fp.match_key().is_ok());
+    drop(f);
     vhd.detach();
 }
 
@@ -273,6 +283,17 @@ fn a_fat_vhd_has_no_owners_or_journal() {
     assert_eq!(v.supports_usn, Some(false), "{v:?}");
     assert!(!v.supports_owner());
     assert!(v.location_class().is_untrusted_location());
+    // FAT has no upcase table to check: unknown fold, no rule key (#332).
+    let f = File::open(&file).unwrap();
+    assert!(volume_upcase(&f).is_err());
+    assert!(!folds_as_standard(&f));
+    let fp = palisade_fileid::win::links::final_path_of(&f).unwrap();
+    assert!(fp.fold_unknown());
+    assert_eq!(
+        fp.match_key(),
+        Err(palisade_fileid::fsctx::PathError::UnknownFold)
+    );
+    drop(f);
     vhd.detach();
 }
 
@@ -313,6 +334,10 @@ fn a_file_on_a_local_smb_share_is_on_the_network() {
     }
     // Whatever any one query says, a UNC name is never read as local.
     assert!(network_evidence(&file, Some(&unc)).is_network());
+    // The server's file system decides how names fold: unknown (#332).
+    assert!(!folds_as_standard(&file));
+    let fp = palisade_fileid::win::links::final_path_of(&file).unwrap();
+    assert!(fp.fold_unknown());
 }
 
 #[test]

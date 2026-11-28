@@ -172,9 +172,15 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `win::fsctx::final_path`), not on the normalised name (T-agent-13). It handles `\\?\`, `\??\`, `\\.\`,
     `GLOBALROOT`, NT device paths, volume GUID paths, UNC, `.` and `..`,
     trailing dots and spaces, reserved device names, alternate data stream
-    syntax, NTFS-style case folding and paths up to 32,767 UTF-16 units.
+    syntax, NTFS case folding (the OS's upcase table, from
+    `palisade_core::upcase`) and paths up to 32,767 UTF-16 units.
     Possible 8.3 short names must be expanded through the
-    `ShortNameResolver` hook before a path yields a match key.
+    `ShortNameResolver` hook before a path yields a match key, and a path
+    marked "unknown fold" (`mark_fold_unknown`) yields none.
+  - `fsctx::upcase`: reads the CRC that an NTFS volume records for its
+    upcase table (`$UpCase:$Info`) from the file record the OS returns.
+    Only a volume that records the standard table's CRC folds names as the
+    OS table does; any other is "unknown fold" (#332).
   - `fsctx::acl`: a hardened self-relative security descriptor parser, and
     the writability decision: which write-type rights any non-administrator
     may hold on a file and on each ancestor folder. Deny ACEs, ACE order,
@@ -222,7 +228,11 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `VolumeInfo` for the volume an open handle is on (drive type, bus and
     hot-plug state from the storage queries, OS volume by GUID, file
     system and journal support), and `is_case_sensitive_dir` reads the
-    per-directory case-sensitivity flag. A file is a network file if any
+    per-directory case-sensitivity flag. `folds_as_standard` says whether
+    a volume's names fold as the OS table does (NTFS, the standard
+    `$UpCase:$Info` CRC, read once per volume through the volume device,
+    which needs administrator rights); final paths on any other volume are
+    marked "unknown fold", so they have no rule key. A file is a network file if any
     of three signs says so (the remote-protocol query, the handle's NT path
     under a redirector device, the name it was opened by), and a handle with
     no local volume root keeps only its serial, so a share never reads as

@@ -2,10 +2,11 @@
 //! NT forms), self-relative security descriptors with the writability
 //! evaluation, `Zone.Identifier` streams, and the stream-list and
 //! change-journal records the OS returns (one file's record, the journal
-//! state, and the record lists of a journal read and an MFT enumeration), the storage descriptors the
-//! volume backend reads, and reparse data buffers. No input may panic, and a
-//! normalised path, and each ancestor that is not too long, must normalise
-//! to itself again.
+//! state, and the record lists of a journal read and an MFT enumeration),
+//! the storage descriptors the volume backend reads, reparse data buffers,
+//! and the `$UpCase` file record. No input may panic, and a normalised
+//! path, and each ancestor that is not too long, must normalise to itself
+//! again.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -16,8 +17,9 @@ use palisade_fileid::fsctx::ntfs::{
 };
 use palisade_fileid::fsctx::reparse::{ReparseKind, parse_reparse_point};
 use palisade_fileid::fsctx::{
-    normalize_nt, normalize_win32, nt_path_on_network, opened_name_on_network, parse_hotplug_info,
-    parse_storage_device_descriptor, parse_zone_identifier,
+    STANDARD_UPCASE_CRC, VolumeUpcase, normalize_nt, normalize_win32, nt_path_on_network,
+    opened_name_on_network, parse_hotplug_info, parse_storage_device_descriptor,
+    parse_upcase_info, parse_zone_identifier,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -72,6 +74,13 @@ fuzz_target!(|data: &[u8]| {
         assert!(r.name.encode_utf16().count() <= MAX_JOURNAL_NAME_UNITS);
     }
     let _ = parse_storage_device_descriptor(data);
+    if let Ok(crc) = parse_upcase_info(data) {
+        // Only the standard CRC folds as the standard table.
+        assert_eq!(
+            VolumeUpcase::from_crc(crc).folds_as_standard(),
+            crc == Some(STANDARD_UPCASE_CRC)
+        );
+    }
     if let Ok(r) = parse_reparse_point(data) {
         assert_eq!(r.kind == ReparseKind::from_tag(r.tag), r.kind != ReparseKind::MountPoint);
         if let Some(a) = r.app_exec_link() {

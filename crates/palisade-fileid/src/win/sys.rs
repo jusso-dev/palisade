@@ -32,9 +32,10 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Ioctl::{
-    FSCTL_ENUM_USN_DATA, FSCTL_GET_REPARSE_POINT, FSCTL_QUERY_USN_JOURNAL,
-    FSCTL_READ_FILE_USN_DATA, FSCTL_READ_USN_JOURNAL, IOCTL_STORAGE_GET_HOTPLUG_INFO,
-    IOCTL_STORAGE_QUERY_PROPERTY, MFT_ENUM_DATA_V1, PropertyStandardQuery, READ_FILE_USN_DATA,
+    FSCTL_ENUM_USN_DATA, FSCTL_GET_NTFS_FILE_RECORD, FSCTL_GET_REPARSE_POINT,
+    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_FILE_USN_DATA, FSCTL_READ_USN_JOURNAL,
+    IOCTL_STORAGE_GET_HOTPLUG_INFO, IOCTL_STORAGE_QUERY_PROPERTY, MFT_ENUM_DATA_V1,
+    NTFS_FILE_RECORD_INPUT_BUFFER, PropertyStandardQuery, READ_FILE_USN_DATA,
     READ_USN_JOURNAL_DATA_V1, STORAGE_PROPERTY_QUERY, StorageDeviceProperty, USN_JOURNAL_DATA_V0,
 };
 use windows_sys::Win32::System::Memory::{
@@ -591,6 +592,71 @@ pub(crate) fn hotplug_bytes(volume: &File) -> io::Result<Vec<u8>> {
     // input and writes one 8-byte `STORAGE_HOTPLUG_INFO`, within the
     // 16-byte output length.
     unsafe { fsctl::<()>(volume, IOCTL_STORAGE_GET_HOTPLUG_INFO, None, 16) }
+}
+
+/// The MFT record number of `$UpCase`.
+const UPCASE_RECORD: i64 = 10;
+/// The largest file record accepted: NTFS records are 1 or 4 KiB.
+const MAX_FILE_RECORD: usize = 64 * 1024;
+/// The header of `NTFS_FILE_RECORD_OUTPUT_BUFFER` before the record:
+/// `FileReferenceNumber` and `FileRecordLength`.
+const FILE_RECORD_HEADER: usize = 12;
+
+/// The `$UpCase` file record (MFT record 10) of the NTFS volume `volume`
+/// (`FSCTL_GET_NTFS_FILE_RECORD`), for
+/// [`crate::fsctx::upcase::parse_upcase_info`]. `volume` is a handle to the
+/// volume device opened for reading, which needs administrator rights.
+pub(crate) fn upcase_file_record(volume: &File) -> io::Result<Vec<u8>> {
+    let input = NTFS_FILE_RECORD_INPUT_BUFFER {
+        FileReferenceNumber: UPCASE_RECORD,
+    };
+    // SAFETY: `FSCTL_GET_NTFS_FILE_RECORD` (`METHOD_BUFFERED`) reads one
+    // `NTFS_FILE_RECORD_INPUT_BUFFER` and writes the 12-byte output header
+    // and one file record, within the output length passed; a record
+    // larger than that fails rather than overruns.
+    let out = unsafe {
+        fsctl(
+            volume,
+            FSCTL_GET_NTFS_FILE_RECORD,
+            Some(&input),
+            FILE_RECORD_HEADER + MAX_FILE_RECORD,
+        )
+    }?;
+    let bad = || io::Error::new(io::ErrorKind::InvalidData, "malformed file record output");
+    let reference = out
+        .get(..8)
+        .and_then(|b| b.try_into().ok())
+        .map(i64::from_le_bytes)
+        .ok_or_else(bad)?;
+    // The call returns the nearest record in use at or below the one
+    // asked for; only record 10 itself is `$UpCase`. The low 48 bits are
+    // the record number, the rest its sequence number.
+    if reference & 0xFFFF_FFFF_FFFF != UPCASE_RECORD {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the volume returned another file record",
+        ));
+    }
+    let len = out
+        .get(8..FILE_RECORD_HEADER)
+        .and_then(|b| b.try_into().ok())
+        .map(u32::from_le_bytes)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(bad)?;
+    out.get(FILE_RECORD_HEADER..FILE_RECORD_HEADER.checked_add(len).ok_or_else(bad)?)
+        .map(<[u8]>::to_vec)
+        .ok_or_else(bad)
+}
+
+/// `RtlUpcaseUnicodeChar`: the OS's own upper case of one UTF-16 code unit,
+/// from the upcase table the OS loaded at boot. The tests check the
+/// embedded table against it.
+#[cfg(test)]
+pub(crate) fn os_upcase_unit(unit: u16) -> u16 {
+    use windows_sys::Wdk::System::SystemServices::RtlUpcaseUnicodeChar;
+    // SAFETY: the call takes and returns a plain value and touches no
+    // memory of the caller's.
+    unsafe { RtlUpcaseUnicodeChar(unit) }
 }
 
 /// UTF-16 with a terminating NUL, for a path passed to the OS. Fails on

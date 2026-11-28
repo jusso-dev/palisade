@@ -311,6 +311,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_rule_path_keeps_what_the_os_read() {
+        let mut info = PathInfo {
+            original: r"C:\Src\Tool\run.exe".to_owned(),
+            claimed: false,
+            normalized: None,
+            normalize_error: None,
+            final_path: Some(r"C:\Src\Tool\run.exe".to_owned()),
+            lexical_key: None,
+            rule_key: None,
+            final_case_sensitive: Vec::new(),
+            final_fold_unknown: false,
+        };
+        let plain = info.rule_path().unwrap();
+        assert!(plain.case_sensitive_components().is_empty());
+        assert!(!plain.fold_unknown());
+        info.final_case_sensitive = vec![2];
+        info.final_fold_unknown = true;
+        let read = info.rule_path().unwrap();
+        assert_eq!(read.case_sensitive_components(), [2]);
+        assert!(read.fold_unknown());
+        assert!(read.match_key().is_err());
+        // Without a final path: the normalised path as written.
+        info.final_path = None;
+        info.normalized = Some(r"C:\Src\x.exe".to_owned());
+        assert!(!info.rule_path().unwrap().fold_unknown());
+    }
+
+    #[test]
     fn names_from_paths() {
         let n = |p: &str| NameInfo::from_text(Some(p)).file_name;
         assert_eq!(n(r"C:\temp\a::$DATA").as_deref(), Some("a"));
@@ -1246,13 +1274,19 @@ pub struct PathInfo {
     pub lexical_key: Option<String>,
     /// The case-folded key of the final path: what path rules match.
     /// `None` when a component of the final path is in a case-sensitive
-    /// directory (#332).
+    /// directory, or the volume's upcase table is not known to be the
+    /// standard one (#332).
     pub rule_key: Option<String>,
     /// The components of the final path that are in case-sensitive
     /// directories, as the OS read them, so `rule_path` keeps
     /// them. Not serialised: `rule_key` already reflects it.
     #[serde(skip)]
     pub final_case_sensitive: Vec<usize>,
+    /// The final path is on a volume whose upcase table is not known to be
+    /// the standard one (#332), so [`Self::rule_path`] keeps it unfolded.
+    /// Not serialised: `rule_key` already reflects it.
+    #[serde(skip)]
+    pub final_fold_unknown: bool,
 }
 
 impl PathInfo {
@@ -1266,6 +1300,9 @@ impl PathInfo {
             p.mark_long_names_verified();
             if !self.final_case_sensitive.is_empty() {
                 p.set_case_sensitive_components(&self.final_case_sensitive);
+            }
+            if self.final_fold_unknown {
+                p.mark_fold_unknown();
             }
             return Some(p);
         }
