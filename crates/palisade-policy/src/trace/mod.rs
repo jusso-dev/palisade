@@ -1089,6 +1089,13 @@ impl<'p> Tracer<'p> {
                         .or_default()
                         .insert(r.reference.rule_id, r.reference);
                 }
+                // A timeout in a rule the decision never consulted (an
+                // attribute rule without a stage-4 allow) had no effect.
+                if consulted && lr.notes.contains(Note::ConditionTimeout) {
+                    warn.entry(WarningCode::ConditionTimeout)
+                        .or_default()
+                        .insert(r.reference.rule_id, r.reference);
+                }
                 if lr.notes.contains(Note::ShortNameUnresolved) {
                     warn.entry(WarningCode::ShortNameUnresolved)
                         .or_default()

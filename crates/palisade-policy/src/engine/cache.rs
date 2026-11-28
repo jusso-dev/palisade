@@ -35,8 +35,9 @@
 //! prompt or a re-authentication), one made during an override session,
 //! one in `learning` (which must be seen by the learning pipeline every
 //! time, #5), and every decision while the clock is not trusted
-//! ([`super::Clock`]). Instance limits and condition timeouts (#33) are not
-//! modelled by the engine yet; when they are, they join this list.
+//! ([`super::Clock`]). A probed fact the agent ran out of budget for
+//! (`condition_timeout`, #329) is an unknown fact, so a decision that
+//! rests on one is not cached either.
 //!
 //! # Invalidation
 //!

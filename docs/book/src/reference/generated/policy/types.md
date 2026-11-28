@@ -28,6 +28,17 @@ Who a device-local approval applies to.
 | `user` | Only the user who approved it. The default. |
 | `device` | Every user of the device. |
 
+## Cadence
+
+When the agent refreshes a probed fact (#33, #329). The result is cached
+in the context until then.
+
+| Value | Meaning |
+|---|---|
+| `once_per_session` | Once in each logon session. |
+| `once_per_boot` | Once after each boot. |
+| `on_policy_change` | Each time a new policy is applied. |
+
 ## Combine
 
 How a scope's dimensions combine.

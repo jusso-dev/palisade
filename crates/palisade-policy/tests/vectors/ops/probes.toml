@@ -27,18 +27,18 @@ expect = "unknown"
 
 [[case]]
 name = "not_exists when the agent did not look: the negation of unknown is unknown"
-criterion = { field = "fs.file", operator = "not_exists", target = 'C:\Tools\kill.flag' }
+criterion = { field = "fs.file", operator = "not_exists", target = 'C:\Tools\kill.flag', evaluate = "once_per_session" }
 expect = "unknown"
 
 [[case]]
 name = "a file that exists"
-criterion = { field = "fs.file", operator = "exists", target = 'c:/tools/KILL.flag' }
+criterion = { field = "fs.file", operator = "exists", target = 'c:/tools/KILL.flag', evaluate = "once_per_session" }
 probe = "present"
 expect = "match"
 
 [[case]]
 name = "a folder that does not exist"
-criterion = { field = "fs.folder", operator = "not_exists", target = '\\server\share\drop' }
+criterion = { field = "fs.folder", operator = "not_exists", target = '\\server\share\drop', evaluate = "once_per_session" }
 probe = "absent"
 expect = "match"
 
@@ -143,7 +143,7 @@ error = "invalid_value"
 
 [[case]]
 name = "exists takes no values"
-criterion = { field = "fs.file", operator = "exists", target = 'C:\x', values = ["y"] }
+criterion = { field = "fs.file", operator = "exists", target = 'C:\x', values = ["y"], evaluate = "once_per_session" }
 error = "value_count"
 
 [[case]]
@@ -165,3 +165,20 @@ error = "option_not_applicable"
 name = "exists only on probed fields"
 criterion = { field = "user.sid", operator = "exists" }
 error = "operator_field_mismatch"
+
+[[case]]
+name = "the budget ran out before the agent looked: unknown"
+criterion = { field = "reg.key", operator = "exists", target = 'HKLM\Software\Vendor' }
+probe = "timed_out"
+expect = "unknown"
+
+[[case]]
+name = "and so is the negation"
+criterion = { field = "fs.file", operator = "not_exists", target = 'C:\x', evaluate = "once_per_boot" }
+probe = "timed_out"
+expect = "unknown"
+
+[[case]]
+name = "evaluate only on probed fields"
+criterion = { field = "user.sid", operator = "equals", values = ["S-1-5-18"], evaluate = "once_per_session" }
+error = "option_not_applicable"

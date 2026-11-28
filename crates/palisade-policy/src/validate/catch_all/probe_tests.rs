@@ -6,7 +6,12 @@ use serde_json::{Value, json};
 
 /// A probe criterion as JSON (#329).
 fn probe(field: &str, target: &str) -> Value {
-    json!({"criterion": {"field": field, "operator": "exists", "target": target}})
+    let mut c = json!({"field": field, "operator": "exists", "target": target});
+    // A cold criterion needs a cadence.
+    if field.starts_with("fs.") {
+        c["evaluate"] = json!("once_per_session");
+    }
+    json!({ "criterion": c })
 }
 
 fn hash_and(other: Value) -> Value {
@@ -154,7 +159,7 @@ fn a_probe_needs_a_valid_target() {
         json!({}),
         vec![rule(
             1,
-            json!({"match": tree(json!({"field": "fs.file", "operator": "exists", "target": "relative"}))}),
+            json!({"match": tree(json!({"field": "fs.file", "operator": "exists", "target": "relative", "evaluate": "on_policy_change"}))}),
         )],
         vec![],
     );
@@ -186,4 +191,69 @@ fn a_probe_needs_a_valid_target() {
         ErrorCode::UserControlledContext.as_str(),
         "user_controlled_context"
     );
+}
+
+#[test]
+fn a_cold_criterion_needs_a_cadence() {
+    let tree = |c: Value| hash_and(json!({ "criterion": c }));
+    let d = doc(
+        json!({}),
+        vec![rule(
+            1,
+            json!({"match": tree(json!({"field": "fs.folder", "operator": "exists", "target": r"C:\x"}))}),
+        )],
+        vec![],
+    );
+    let f = findings(d);
+    assert!(
+        f.contains(&error(
+            ErrorCode::InvalidValue,
+            "/rule_sets/0/rules/0/match/all/1/criterion/evaluate"
+        )),
+        "{f:?}"
+    );
+    // A warm one may have one, and a hot one may not.
+    let d = doc(
+        json!({}),
+        vec![rule(
+            1,
+            json!({"match": tree(json!({"field": "reg.key", "operator": "exists", "target": r"HKLM\X", "evaluate": "once_per_boot"}))}),
+        )],
+        vec![],
+    );
+    assert_eq!(findings(d), []);
+    let d = doc(
+        json!({}),
+        vec![rule(
+            1,
+            json!({"match": tree(json!({"field": "user.sid", "operator": "equals", "values": ["S-1-5-18"], "evaluate": "once_per_boot"}))}),
+        )],
+        vec![],
+    );
+    assert_eq!(
+        findings(d),
+        [error(
+            ErrorCode::OptionNotApplicable,
+            "/rule_sets/0/rules/0/match/all/1/criterion/evaluate"
+        )]
+    );
+}
+
+#[test]
+fn the_condition_budget_is_bounded() {
+    for (budget, ok) in [
+        (0, false),
+        (1, true),
+        (50, true),
+        (10_000, true),
+        (10_001, false),
+    ] {
+        let d = doc(
+            json!({"settings": {"condition_budget_ms": budget}}),
+            vec![rule(1, json!({}))],
+            vec![],
+        );
+        let f = findings(d);
+        assert_eq!(f.is_empty(), ok, "{budget}: {f:?}");
+    }
 }

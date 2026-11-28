@@ -39,13 +39,20 @@ pub mod ranges {
     /// Most values per criterion a policy may allow, and the default: the
     /// fixed maximum ([`MAX_VALUES_PER_CRITERION`](crate::model::limits::MAX_VALUES_PER_CRITERION)).
     pub const VALUES_PER_CRITERION_MAX: u8 = 25;
+    /// Shortest per-rule budget for warm and cold criteria, in
+    /// milliseconds.
+    pub const CONDITION_BUDGET_MIN: u16 = 1;
+    /// Longest per-rule budget, in milliseconds (ten seconds).
+    pub const CONDITION_BUDGET_MAX: u16 = 10_000;
+    /// The default per-rule budget, in milliseconds.
+    pub const CONDITION_BUDGET_DEFAULT: u16 = 50;
 }
 
 use ranges::{
-    ADVANCED_KEYS_MAX, ANCESTOR_DEPTH_MAX, ANCESTOR_DEPTH_MIN, CRITERIA_PER_RULE_MAX,
-    DECISION_CACHE_TTL_MAX, GROUP_CACHE_MAX_AGE_MAX, GROUP_CACHE_MAX_AGE_MIN, OVERRIDE_MINUTES_MAX,
-    OVERRIDE_SLOTS_MAX, POLL_INTERVAL_MAX, POLL_INTERVAL_MIN, TREE_DEPTH_MAX,
-    VALUES_PER_CRITERION_MAX,
+    ADVANCED_KEYS_MAX, ANCESTOR_DEPTH_MAX, ANCESTOR_DEPTH_MIN, CONDITION_BUDGET_DEFAULT,
+    CONDITION_BUDGET_MAX, CONDITION_BUDGET_MIN, CRITERIA_PER_RULE_MAX, DECISION_CACHE_TTL_MAX,
+    GROUP_CACHE_MAX_AGE_MAX, GROUP_CACHE_MAX_AGE_MIN, OVERRIDE_MINUTES_MAX, OVERRIDE_SLOTS_MAX,
+    POLL_INTERVAL_MAX, POLL_INTERVAL_MIN, TREE_DEPTH_MAX, VALUES_PER_CRITERION_MAX,
 };
 
 /// Settings that apply to the whole policy. Every field is optional in a
@@ -104,6 +111,13 @@ pub struct PolicySettings {
     #[schemars(range(min = 1, max = VALUES_PER_CRITERION_MAX))]
     #[serde(skip_serializing_if = "is_max_values_per_criterion_default")]
     pub max_values_per_criterion: u8,
+    /// The most time, in milliseconds, the agent spends collecting the
+    /// warm and cold facts of one rule (#33, #329): 1 to 10000, default
+    /// 50. A fact not collected in time is unknown, with the trace note
+    /// `condition_timeout`. Separate from the per-decision watchdog (#42).
+    #[schemars(range(min = CONDITION_BUDGET_MIN, max = CONDITION_BUDGET_MAX))]
+    #[serde(skip_serializing_if = "is_condition_budget_default")]
+    pub condition_budget_ms: u16,
     /// Engineering settings, checked against a registry of known keys. The
     /// registry is empty in this version, so any key is rejected unless
     /// `allow_unknown_advanced` is set. Keys are added only with the feature
@@ -208,6 +222,7 @@ impl Default for PolicySettings {
             max_criteria_per_rule: CRITERIA_PER_RULE_MAX,
             max_tree_depth: TREE_DEPTH_MAX,
             max_values_per_criterion: VALUES_PER_CRITERION_MAX,
+            condition_budget_ms: CONDITION_BUDGET_DEFAULT,
             advanced: BTreeMap::new(),
             allow_unknown_advanced: false,
         }
@@ -267,4 +282,10 @@ const fn is_max_tree_depth_default(v: &u8) -> bool {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 const fn is_max_values_per_criterion_default(v: &u8) -> bool {
     *v == VALUES_PER_CRITERION_MAX
+}
+
+/// serde's `skip_serializing_if` passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_condition_budget_default(v: &u16) -> bool {
+    *v == CONDITION_BUDGET_DEFAULT
 }

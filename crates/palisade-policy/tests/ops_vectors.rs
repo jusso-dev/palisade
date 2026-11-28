@@ -133,6 +133,7 @@ fn run_case(file: &str, case: &toml::Table) {
             toml::Value::String(t) if t == "absent" => Probe::Absent,
             toml::Value::String(t) if t == "present" => Probe::Present,
             toml::Value::String(t) if t == "other" => Probe::Other,
+            toml::Value::String(t) if t == "timed_out" => Probe::TimedOut,
             toml::Value::String(t) => Probe::Text(t.clone()),
             toml::Value::Integer(n) => Probe::Number(u64::try_from(*n).unwrap()),
             other => panic!("{label}: unknown probe {other:?}"),

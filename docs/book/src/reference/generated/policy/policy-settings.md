@@ -14,6 +14,7 @@ Appears at: `/policy/settings`.
 | `advanced` | map of [`AdvancedValue`](types.md#advancedvalue) | no |  | at most 256 entries; keys: matches `^[a-z][a-z0-9_.-]{0,127}$` | 1.0.0 | Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless `allow_unknown_advanced` is set. Keys are added only with the feature that reads them (#330), and never relax a decision. |
 | `allow_unknown_advanced` | boolean | no | `false` |  | 1.0.0 | Accept keys in `advanced` that the registry does not know. |
 | `capture_command_line` | boolean | no | `false` |  | 1.0.0 | Whether the agent records process command lines. Off by default for privacy (#18). |
+| `condition_budget_ms` | integer | no |  | 1 to 10000; format `uint16` | 1.0.0 | The most time, in milliseconds, the agent spends collecting the warm and cold facts of one rule (#33, #329): 1 to 10000, default 50. A fact not collected in time is unknown, with the trace note `condition_timeout`. Separate from the per-decision watchdog (#42). |
 | `decision_cache_ttl_secs` | integer | no | `300` | 0 to 86400; format `uint32` | 1.0.0 | How long a decision may be cached, in seconds. `0` disables the cache. |
 | `dll_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for libraries. |
 | `driver_control` | [`ControlLevel`](types.md#controllevel) | no | `"enforce"` |  | 1.0.0 | Control level for drivers. |

@@ -242,6 +242,26 @@
         }
       ]
     },
+    "Cadence": {
+      "description": "When the agent refreshes a probed fact (#33, #329). The result is cached\nin the context until then.",
+      "oneOf": [
+        {
+          "const": "once_per_session",
+          "description": "Once in each logon session.",
+          "type": "string"
+        },
+        {
+          "const": "once_per_boot",
+          "description": "Once after each boot.",
+          "type": "string"
+        },
+        {
+          "const": "on_policy_change",
+          "description": "Each time a new policy is applied.",
+          "type": "string"
+        }
+      ]
+    },
     "ClientFilter": {
       "additionalProperties": false,
       "description": "The client connected to a remote desktop session, for per-client\nscoping on multi-session hosts. Each list that is set must match.",
@@ -414,6 +434,17 @@
             "boolean",
             "null"
           ]
+        },
+        "evaluate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cadence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the agent refreshes what this criterion probes (#33, #329).\nRequired on a `cold` field (`fs.*`), allowed on a `warm` one\n(`env.*`, `reg.*`), and not applicable to a `hot` one. Unset on a\nwarm field means every decision."
         },
         "field": {
           "$ref": "#/$defs/Field",
@@ -2566,6 +2597,13 @@
           "default": false,
           "description": "Whether the agent records process command lines. Off by default for\nprivacy (#18).",
           "type": "boolean"
+        },
+        "condition_budget_ms": {
+          "description": "The most time, in milliseconds, the agent spends collecting the\nwarm and cold facts of one rule (#33, #329): 1 to 10000, default\n50. A fact not collected in time is unknown, with the trace note\n`condition_timeout`. Separate from the per-decision watchdog (#42).",
+          "format": "uint16",
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
         },
         "decision_cache_ttl_secs": {
           "default": 300,

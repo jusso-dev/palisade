@@ -286,6 +286,9 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
                 Criterion {
                     case_sensitive: case,
                     target,
+                    // A cold criterion needs a cadence (#329).
+                    evaluate: (field.cost_class() == crate::model::CostClass::Cold)
+                        .then_some(crate::model::Cadence::OncePerSession),
                     ..Criterion::new(field, operator, values)
                 }
             })
@@ -576,6 +579,7 @@ fn settings() -> impl Strategy<Value = PolicySettings> {
                 max_criteria_per_rule: super::settings::ranges::CRITERIA_PER_RULE_MAX,
                 max_tree_depth: super::settings::ranges::TREE_DEPTH_MAX,
                 max_values_per_criterion: super::settings::ranges::VALUES_PER_CRITERION_MAX,
+                condition_budget_ms: super::settings::ranges::CONDITION_BUDGET_DEFAULT,
                 // Unknown keys are only valid with the opt-in.
                 allow_unknown_advanced: !advanced.is_empty(),
                 advanced,

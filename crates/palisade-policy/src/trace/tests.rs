@@ -3293,7 +3293,7 @@ fn the_trace_judges_activity_at_the_evaluators_clock() {
 #[test]
 fn user_controlled_context_is_marked_only_when_it_was_read() {
     // An allow of hash `a` unless a kill-switch file exists (#329).
-    let file = serde_json::json!({"criterion": {"field": "fs.file", "operator": "not_exists", "target": "C:\\Tools\\stop.flag"}});
+    let file = serde_json::json!({"criterion": {"field": "fs.file", "operator": "not_exists", "target": "C:\\Tools\\stop.flag", "evaluate": "once_per_session"}});
     let p = validated(policy_doc(
         "enforce",
         vec![(
@@ -3414,4 +3414,78 @@ fn the_attribute_stage_passes_after_an_allow_it_does_not_block() {
     let p = with_attribute(false, watch);
     let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
     assert_eq!(outcome(&t, StageName::Attribute), StageOutcome::Skipped);
+}
+
+#[test]
+fn a_condition_timeout_is_unknown_and_traced() {
+    let key = serde_json::json!({"criterion": {"field": "reg.key", "operator": "exists", "target": "HKLM\\Software\\Approved"}});
+    let p = validated(policy_doc(
+        "enforce",
+        vec![(
+            1,
+            "mixed",
+            false,
+            vec![rule(
+                1,
+                "Approved tool",
+                serde_json::json!({"all": [crit("hash.sha256", "equals", &[&sha('a')]), key]}),
+                serde_json::json!({"type": "allow"}),
+            )],
+        )],
+    ));
+    let mut o = object('a', "Example Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.probes.insert(
+        Field::RegKey,
+        "HKLM\\Software\\Approved",
+        None,
+        crate::context::Probe::TimedOut,
+    );
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    // The allow does not apply: a timeout never relaxes a decision.
+    assert!(t.decisive.is_none());
+    let w = t
+        .warnings
+        .iter()
+        .find(|w| w.code == WarningCode::ConditionTimeout)
+        .unwrap();
+    assert_eq!(w.rules[0].display_id.unwrap().to_string(), "R-000001");
+    assert!(
+        t.unknown_facts
+            .iter()
+            .any(|u| u.field == Field::RegKey && u.notes.contains(&"condition_timeout"))
+    );
+}
+
+#[test]
+fn a_timeout_in_an_unconsulted_attribute_rule_is_not_warned() {
+    // An attribute deny reads a probe that timed out. Without a stage-4
+    // allow the attribute stage is never consulted (#329), so its timeout
+    // had no effect on the decision and is not reported.
+    let key = serde_json::json!({"criterion": {"field": "reg.key", "operator": "exists", "target": "HKLM\\Software\\Blocked"}});
+    let deny = rule(
+        2,
+        "Block when the key exists",
+        key,
+        serde_json::json!({"type": "deny"}),
+    );
+    let mut o = object('a', "Example Ltd", "Other", "C:\\Apps\\x.exe", Some(false));
+    o.context.probes.insert(
+        Field::RegKey,
+        "HKLM\\Software\\Blocked",
+        None,
+        crate::context::Probe::TimedOut,
+    );
+    let timeout = |t: &Trace| {
+        t.warnings
+            .iter()
+            .any(|w| w.code == WarningCode::ConditionTimeout)
+    };
+    let p = with_attribute(false, deny.clone());
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(t.decisive.is_none());
+    assert!(!timeout(&t), "{:?}", t.warnings);
+    // After an allow the attribute stage runs, so the timeout is reported.
+    let p = with_attribute(true, deny);
+    let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
+    assert!(timeout(&t), "{:?}", t.warnings);
 }
