@@ -90,8 +90,8 @@ pub fn mapped_drive_unc(path: &NormalizedPath) -> Option<NormalizedPath> {
 }
 
 /// The handle's final path in the volume form `flags`, normalised, with
-/// its components marked as long names and each directory's
-/// case-sensitivity flag read (the NT form is opened through the
+/// its components marked as long names, each directory's
+/// case-sensitivity flag read, and the volume's upcase table checked (the NT form is opened through the
 /// `\\?\GLOBALROOT` Win32 form).
 fn final_form(file: &File, flags: u32) -> Option<NormalizedPath> {
     let text = sys::final_path_by_handle(file, flags).ok()?;
@@ -102,6 +102,9 @@ fn final_form(file: &File, flags: u32) -> Option<NormalizedPath> {
     };
     p.mark_long_names_verified();
     p.resolve_case_sensitivity(&super::volume::OsCaseSensitivity);
+    if !super::volume::folds_as_standard(file) {
+        p.mark_fold_unknown();
+    }
     Some(p)
 }
 

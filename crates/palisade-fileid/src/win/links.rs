@@ -212,13 +212,18 @@ pub fn read_details(ctx: &mut FsContext, path: &Path, file: &File) {
 /// names, not the one it was opened by, so it is the opened file's even if
 /// that path has since been replaced. Each directory's case-sensitivity
 /// flag is read too ([`super::volume::OsCaseSensitivity`]), so its
-/// `match_key` is refused for a name in a case-sensitive directory.
+/// `match_key` is refused for a name in a case-sensitive directory, and
+/// for any name on a volume whose upcase table is not known to be the
+/// standard one ([`super::volume::folds_as_standard`]).
 pub fn final_path_of(file: &File) -> io::Result<crate::fsctx::NormalizedPath> {
     let text = sys::final_path_by_handle(file, VOLUME_NAME_DOS)?;
     let mut normalized = crate::fsctx::normalize_win32(&text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     normalized.mark_long_names_verified();
     normalized.resolve_case_sensitivity(&super::volume::OsCaseSensitivity);
+    if !super::volume::folds_as_standard(file) {
+        normalized.mark_fold_unknown();
+    }
     Ok(normalized)
 }
 

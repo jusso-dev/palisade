@@ -20,6 +20,8 @@
 //! - [`reparse`]: reparse data buffers (links, junctions, mount points,
 //!   app execution aliases, cloud placeholders, deduplication);
 //! - [`streams`]: alternate data streams, tagged and sniffed;
+//! - [`upcase`]: which upcase table a volume records, so path keys are
+//!   refused where names may fold differently (#332);
 //! - [`writable`]: the per-descriptor writability cache, streaming
 //!   ancestor assessment and `enumerate_user_writable_dirs`.
 //!
@@ -42,6 +44,7 @@ pub mod path;
 pub mod reparse;
 pub mod sid;
 pub mod streams;
+pub mod upcase;
 pub mod vars;
 pub mod volume;
 pub mod writable;
@@ -57,6 +60,7 @@ pub use path::{
     Stream, fold_case, normalize_nt, normalize_win32,
 };
 pub use sid::{Sid, SidError};
+pub use upcase::{STANDARD_UPCASE_CRC, VolumeUpcase, parse_upcase_info};
 pub use vars::{KnownFolders, PathVariable, path_variables_matched};
 pub use volume::{
     BusType, DriveType, FsType, HotplugInfo, LocationClass, NetworkEvidence, StorageDevice,
@@ -175,6 +179,15 @@ impl PathForms {
     /// the UNC form may then be a namespace path whose target is unknown,
     /// and its key would not match the target's rules. A caller treats such
     /// a file as unknown, never as matching no network rule.
+    ///
+    /// The key is folded with the standard table even when the opened
+    /// file's volume is "unknown fold" (as every network share is, #332).
+    /// That is deliberate: the share's own folding is the server's and
+    /// cannot be known, and folding can only make the key match more
+    /// spellings, never fewer. So a deny rule on a share still matches
+    /// (stricter), and a path allow on a share is refused anyway, because
+    /// a path is trusted only on a fixed local volume (#363). Dropping the
+    /// key instead would let a deny rule on a share stop matching.
     #[must_use]
     pub fn network_key(&self) -> Option<String> {
         if self.dfs_unresolved() {
@@ -345,6 +358,11 @@ mod tests {
         assert_eq!(f.lexical_key().as_deref(), Some(r"C:\TRUSTED\LINK.EXE"));
         // A final path with an unexpanded short name still yields no key.
         f.final_path = normalize_win32(r"C:\PROGRA~1\x.exe").ok();
+        assert_eq!(f.case_folded(), None);
+        // Nor does one on a volume whose upcase table is unknown (#332).
+        let mut odd = normalize_win32(r"D:\x.exe").unwrap();
+        odd.mark_fold_unknown();
+        f.final_path = Some(odd);
         assert_eq!(f.case_folded(), None);
     }
 }

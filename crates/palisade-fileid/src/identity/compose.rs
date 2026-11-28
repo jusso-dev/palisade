@@ -1522,6 +1522,10 @@ fn path_info(text: &str, claimed: bool, opened: Option<&std::fs::File>) -> PathI
             .as_ref()
             .map(|p| p.case_sensitive_components().to_vec())
             .unwrap_or_default(),
+        final_fold_unknown: forms
+            .final_path
+            .as_ref()
+            .is_some_and(crate::fsctx::NormalizedPath::fold_unknown),
     }
 }
 

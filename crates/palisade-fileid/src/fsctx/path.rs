@@ -57,12 +57,21 @@
 //!
 //! NTFS compares names by upper-casing each UTF-16 code unit with the
 //! volume's upcase table. [`NormalizedPath::case_folded`] does the same with
-//! Unicode simple upper-case mappings, limited to mappings that keep one
-//! UTF-16 code unit (so `ß` stays `ß`, as on NTFS). The volume's own table
-//! can differ for some non-ASCII letters; it is authoritative and reading it
-//! is left to the OS backend (#54). Unicode normalisation (NFC/NFD) is not
-//! applied, because NTFS does not apply it either: the two forms are two
-//! different files.
+//! the table that Windows 7 and later write, and that the OS upper-cases
+//! with ([`palisade_core::upcase`]; so `ß` stays `ß`, and `ı` never becomes
+//! `I`, as on NTFS). Unicode normalisation (NFC/NFD) is not applied,
+//! because NTFS does not apply it either: the two forms are two different
+//! files.
+//!
+//! A volume formatted by an older Windows holds an older table, and NTFS
+//! goes on using it there. The Windows backend reads which table a volume
+//! records ([`super::upcase`]) and calls
+//! [`NormalizedPath::mark_fold_unknown`] for a path on a volume whose table
+//! is not the standard one, or cannot be told. Such a path gets no
+//! [`NormalizedPath::match_key`] ([`PathError::UnknownFold`]) and
+//! [`NormalizedPath::starts_with`] compares it exactly, so a path rule
+//! about it is unknown rather than matched by a fold the volume may not
+//! share (#332, ADR 0018).
 //!
 //! A directory can be marked case-sensitive, and then two names that differ
 //! only in case are two entries. A parsed path cannot know that, so until
@@ -212,6 +221,9 @@ pub struct NormalizedPath {
     notes: PathNotes,
     short_names: ShortNames,
     case_dirs: CaseDirs,
+    /// The volume's upcase table may not be the standard one, so folding
+    /// is not known to match how the volume compares names.
+    fold_unknown: bool,
 }
 
 /// Why a path could not be normalised. A caller that cannot normalise a
@@ -252,6 +264,10 @@ pub enum PathError {
     /// could not be read), so a case-folded key could join it with a
     /// different entry that differs only in case.
     CaseSensitiveDirectory(String),
+    /// The path is on a volume whose upcase table is not known to be the
+    /// standard one, so a case-folded key may join or split names
+    /// differently from the volume ([`NormalizedPath::mark_fold_unknown`]).
+    UnknownFold,
 }
 
 impl fmt::Display for PathError {
@@ -276,6 +292,9 @@ impl fmt::Display for PathError {
             }
             Self::CaseSensitiveDirectory(c) => {
                 write!(f, "component {c:?} is in a case-sensitive directory")
+            }
+            Self::UnknownFold => {
+                f.write_str("the volume's upcase table is not known to be the standard one")
             }
         }
     }
@@ -917,6 +936,7 @@ fn finish_with(
             ShortNames::Candidates(candidates)
         },
         case_dirs: CaseDirs::Unchecked,
+        fold_unknown: false,
     };
     // The canonical form can be longer than the input (a `\\?\GLOBALROOT`
     // prefix, say). It must itself be a valid path.
@@ -927,73 +947,12 @@ fn finish_with(
 // ---------------------------------------------------------------------------
 // Case folding.
 
-/// Upper-cases a name the way NTFS compares names: each character maps to
-/// its simple upper-case form only when that is a single character of the
-/// same UTF-16 length. See the module documentation.
+/// Upper-cases a name the way NTFS compares names on a volume formatted
+/// by Windows 7 or later: each UTF-16 code unit through the standard upcase
+/// table ([`palisade_core::upcase`]). See the module documentation.
 #[must_use]
 pub fn fold_case(s: &str) -> String {
-    s.chars().map(fold_char).collect()
-}
-
-fn fold_char(c: char) -> char {
-    if c.is_ascii() {
-        return c.to_ascii_uppercase();
-    }
-    if c.len_utf16() != 1 {
-        return c;
-    }
-    let mut upper = c.to_uppercase();
-    match (upper.next(), upper.next()) {
-        (Some(u), None) if u.len_utf16() == 1 => u,
-        // A full mapping of more than one character. The simple mapping
-        // may still be a single code unit.
-        (Some(_), Some(_)) => simple_upper_exception(c).unwrap_or(c),
-        _ => c,
-    }
-}
-
-/// The Basic Multilingual Plane characters whose full upper-case mapping
-/// has more than one character but whose simple mapping is a single
-/// character (`UnicodeData.txt` against `SpecialCasing.txt`): the Greek
-/// letters with a combining iota subscript. Every other character with a
-/// multi-character full mapping (`ß`, `ŉ`, the ligatures) has no simple
-/// mapping and stays unchanged.
-const SIMPLE_UPPER_EXCEPTIONS: [(char, char); 27] = [
-    ('\u{1F80}', '\u{1F88}'),
-    ('\u{1F81}', '\u{1F89}'),
-    ('\u{1F82}', '\u{1F8A}'),
-    ('\u{1F83}', '\u{1F8B}'),
-    ('\u{1F84}', '\u{1F8C}'),
-    ('\u{1F85}', '\u{1F8D}'),
-    ('\u{1F86}', '\u{1F8E}'),
-    ('\u{1F87}', '\u{1F8F}'),
-    ('\u{1F90}', '\u{1F98}'),
-    ('\u{1F91}', '\u{1F99}'),
-    ('\u{1F92}', '\u{1F9A}'),
-    ('\u{1F93}', '\u{1F9B}'),
-    ('\u{1F94}', '\u{1F9C}'),
-    ('\u{1F95}', '\u{1F9D}'),
-    ('\u{1F96}', '\u{1F9E}'),
-    ('\u{1F97}', '\u{1F9F}'),
-    ('\u{1FA0}', '\u{1FA8}'),
-    ('\u{1FA1}', '\u{1FA9}'),
-    ('\u{1FA2}', '\u{1FAA}'),
-    ('\u{1FA3}', '\u{1FAB}'),
-    ('\u{1FA4}', '\u{1FAC}'),
-    ('\u{1FA5}', '\u{1FAD}'),
-    ('\u{1FA6}', '\u{1FAE}'),
-    ('\u{1FA7}', '\u{1FAF}'),
-    ('\u{1FB3}', '\u{1FBC}'),
-    ('\u{1FC3}', '\u{1FCC}'),
-    ('\u{1FF3}', '\u{1FFC}'),
-];
-
-fn simple_upper_exception(c: char) -> Option<char> {
-    SIMPLE_UPPER_EXCEPTIONS
-        .binary_search_by_key(&c, |&(from, _)| from)
-        .ok()
-        .and_then(|i| SIMPLE_UPPER_EXCEPTIONS.get(i))
-        .map(|&(_, to)| to)
+    palisade_core::upcase::fold(s)
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,6 +1091,7 @@ impl NormalizedPath {
             },
             short_names,
             case_dirs,
+            fold_unknown: self.fold_unknown,
         }
     }
 
@@ -1232,6 +1192,21 @@ impl NormalizedPath {
         self.case_dirs = CaseDirs::Checked(sensitive.iter().copied().filter(|i| *i < n).collect());
     }
 
+    /// Marks the path as on a volume whose upcase table is not known to be
+    /// the standard one (see the module documentation): afterwards
+    /// [`Self::match_key`] fails with [`PathError::UnknownFold`], and
+    /// [`Self::starts_with`] compares every component exactly. Its
+    /// ancestors keep the mark.
+    pub fn mark_fold_unknown(&mut self) {
+        self.fold_unknown = true;
+    }
+
+    /// Whether [`Self::mark_fold_unknown`] was called.
+    #[must_use]
+    pub fn fold_unknown(&self) -> bool {
+        self.fold_unknown
+    }
+
     /// Marks every component as a long name. Only for paths taken from the
     /// OS's normalised final path, which never contains short names.
     #[cfg(all(windows, feature = "os-trust"))]
@@ -1318,8 +1293,9 @@ impl NormalizedPath {
     /// is the upper-cased Win32 form (`C:\WINDOWS\CMD.EXE`). It is a key,
     /// not a path to open.
     ///
-    /// Per-directory case sensitivity is not modelled: every component is
-    /// folded (see the module documentation).
+    /// Per-directory case sensitivity and the volume's own upcase table are
+    /// not taken into account here: every component is folded with the
+    /// standard table. [`Self::match_key`] is the key that refuses both.
     #[must_use]
     pub fn case_folded(&self) -> String {
         let mut key = root_key(&self.root);
@@ -1358,9 +1334,13 @@ impl NormalizedPath {
     /// once every short-name candidate has been expanded, and only if no
     /// component is in a directory found to be case-sensitive (see
     /// [`Self::resolve_case_sensitivity`]): the folded key would join it
-    /// with another entry that differs only in case.
+    /// with another entry that differs only in case. Nor is there one on a
+    /// volume whose upcase table is unknown ([`Self::mark_fold_unknown`]).
     pub fn match_key(&self) -> Result<String, PathError> {
         self.require_long_names()?;
+        if self.fold_unknown {
+            return Err(PathError::UnknownFold);
+        }
         if let Some(i) = self.case_sensitive_components().first() {
             let name = self.components.get(*i).cloned().unwrap_or_default();
             return Err(PathError::CaseSensitiveDirectory(name));
@@ -1411,6 +1391,8 @@ impl NormalizedPath {
             // The rebased components are in other directories now, whose
             // flags have not been read.
             case_dirs: CaseDirs::Unchecked,
+            // The root is `onto`'s, and so is the volume.
+            fold_unknown: onto.fold_unknown,
         };
         Some(path.check_length().map(|()| path))
     }
@@ -1418,12 +1400,16 @@ impl NormalizedPath {
     /// True if `prefix` is this path or a directory above it: same root,
     /// and its components are a leading run of these components, compared
     /// case-insensitively. A component that either path found to be in a
-    /// case-sensitive directory is compared exactly. A prefix with a
-    /// stream never matches.
+    /// case-sensitive directory is compared exactly, and so is every
+    /// component when either path is on a volume whose upcase table is
+    /// unknown ([`Self::mark_fold_unknown`]). A prefix with a stream never
+    /// matches.
     #[must_use]
     pub fn starts_with(&self, prefix: &Self) -> bool {
         let exact = |i: &usize| {
-            self.case_sensitive_components().contains(i)
+            self.fold_unknown
+                || prefix.fold_unknown
+                || self.case_sensitive_components().contains(i)
                 || prefix.case_sensitive_components().contains(i)
         };
         prefix.stream.is_none()
@@ -1898,12 +1884,10 @@ mod tests {
         assert_eq!(key("C:\\\u{1F80}.exe"), key("C:\\\u{1F88}.EXE"));
         // No simple mapping: unchanged.
         assert_eq!(fold_case("\u{149}"), "\u{149}");
-        assert!(SIMPLE_UPPER_EXCEPTIONS.windows(2).all(|w| w[0].0 < w[1].0));
-        for (from, to) in SIMPLE_UPPER_EXCEPTIONS {
-            assert!(from.to_uppercase().count() > 1, "{from:?}");
-            assert_eq!(from.len_utf16(), 1);
-            assert_eq!(to.len_utf16(), 1);
-        }
+        // Unicode maps these into ASCII; NTFS does not, so they are other
+        // names.
+        assert_ne!(key("C:\\\u{17F}etup.exe"), key(r"C:\SETUP.EXE"));
+        assert_ne!(key("C:\\\u{212A}ey.exe"), key(r"C:\KEY.EXE"));
         assert_eq!(key(r"C:\Ünïcode\Ä.exe"), key(r"c:\üNÏCODE\ä.EXE"));
     }
 
@@ -2031,15 +2015,18 @@ mod tests {
 
     #[test]
     fn match_key_ignores_the_display_prefix() {
-        // U+0131 (dotless i) folds to `I`, so these name the same entry,
-        // but only the ASCII spelling is a reserved name that needs the
-        // literal prefix in its Win32 form.
-        let ascii = normalize_win32(r"\\?\C:\CONIN$").unwrap();
-        let dotless = normalize_win32("\\\\?\\C:\\CON\u{131}N$").unwrap();
-        assert!(ascii.starts_with(&dotless) && dotless.starts_with(&ascii));
-        assert_ne!(ascii.to_win32_string(), dotless.to_win32_string());
-        assert_eq!(ascii.match_key(), dotless.match_key());
-        assert_eq!(ascii.match_key().unwrap(), r"C:\CONIN$");
+        // Two spellings of one reserved name: one key, whatever the case.
+        let upper = normalize_win32(r"\\?\C:\CONIN$").unwrap();
+        let mixed = normalize_win32(r"\\?\C:\CoNiN$").unwrap();
+        assert!(upper.starts_with(&mixed) && mixed.starts_with(&upper));
+        assert_eq!(upper.match_key(), mixed.match_key());
+        assert_eq!(upper.match_key().unwrap(), r"C:\CONIN$");
+        // U+0131 (dotless i) does not fold to `I` on NTFS, so nothing
+        // outside ASCII folds into a reserved name: another entry.
+        let dotless = normalize_win32("C:\\CON\u{131}N$").unwrap();
+        assert_eq!(dotless.to_win32_string(), "C:\\CON\u{131}N$");
+        assert!(!upper.starts_with(&dotless));
+        assert_ne!(upper.match_key(), dotless.match_key());
         // A literal path with a trailing dot keeps its own key.
         assert_ne!(key(r"\\?\C:\x.exe."), key(r"C:\x.exe"));
         // Keys for other roots.
@@ -2112,6 +2099,51 @@ mod tests {
         let src = normalize_win32(r"C:\Src").unwrap();
         let moved = p.rebase(&src, &onto).unwrap().unwrap();
         assert!(!moved.case_sensitivity_checked());
+    }
+
+    #[test]
+    fn an_unknown_fold_gives_no_key_and_compares_exactly() {
+        let mut file = normalize_win32(r"E:\Tools\run.exe").unwrap();
+        assert!(!file.fold_unknown());
+        assert_eq!(file.match_key().unwrap(), r"E:\TOOLS\RUN.EXE");
+        file.mark_fold_unknown();
+        assert!(file.fold_unknown());
+        assert_eq!(file.match_key(), Err(PathError::UnknownFold));
+        assert!(PathError::UnknownFold.to_string().contains("upcase"));
+        // The folded form is still there for display.
+        assert_eq!(file.case_folded(), r"E:\TOOLS\RUN.EXE");
+        // Short names are still reported first.
+        let mut short = normalize_win32(r"E:\TOOLS~1\run.exe").unwrap();
+        short.mark_fold_unknown();
+        assert!(matches!(
+            short.match_key(),
+            Err(PathError::UnresolvedShortName(_))
+        ));
+        // Every component compares exactly, either way round.
+        let same = normalize_win32(r"E:\Tools").unwrap();
+        let other_case = normalize_win32(r"e:\tools").unwrap();
+        assert!(file.starts_with(&same));
+        assert!(!file.starts_with(&other_case));
+        let mut prefix = normalize_win32(r"E:\TOOLS").unwrap();
+        prefix.mark_fold_unknown();
+        assert!(!normalize_win32(r"E:\tools\x").unwrap().starts_with(&prefix));
+        assert!(normalize_win32(r"E:\TOOLS\x").unwrap().starts_with(&prefix));
+        // Ancestors are on the same volume; a rebased path takes the mark
+        // of the volume it is rebased onto.
+        assert!(file.parent().unwrap().unwrap().fold_unknown());
+        let onto = normalize_win32(r"\\srv\share").unwrap();
+        let moved = file.rebase(&same, &onto).unwrap().unwrap();
+        assert!(!moved.fold_unknown());
+        let mut onto_unknown = onto.clone();
+        onto_unknown.mark_fold_unknown();
+        let plain = normalize_win32(r"E:\Tools\run.exe").unwrap();
+        assert!(
+            plain
+                .rebase(&same, &onto_unknown)
+                .unwrap()
+                .unwrap()
+                .fold_unknown()
+        );
     }
 
     #[test]

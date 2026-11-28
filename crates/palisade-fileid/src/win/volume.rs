@@ -28,6 +28,16 @@
 //! [`crate::fsctx::NormalizedPath::resolve_case_sensitivity`], so a
 //! folded key is never produced for a name in a case-sensitive directory
 //! (#332).
+//!
+//! [`folds_as_standard`] says whether names on the volume of an open file
+//! fold as [`crate::fsctx::fold_case`] folds them: the volume is NTFS and
+//! its `$UpCase:$Info` records the standard table's CRC
+//! ([`crate::fsctx::upcase`]). NTFS compares names with the volume's own
+//! table, so that is what decides; the tests check that the standard
+//! table is also the OS's own (`RtlUpcaseUnicodeChar`). Anything else (another file system, a share, an older or unknown
+//! table, a record that cannot be read, which includes running without
+//! administrator rights) is "unknown fold", and the backend's final paths
+//! are marked so ([`crate::fsctx::NormalizedPath::mark_fold_unknown`]).
 
 #![forbid(unsafe_code)]
 
@@ -35,9 +45,11 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::path::Path;
+use std::sync::Mutex;
 
 use super::file::volume_root;
 use super::sys;
+use crate::fsctx::upcase::{VolumeUpcase, parse_upcase_info};
 use crate::fsctx::volume::{
     NetworkEvidence, combined_hotplug, nt_path_on_network, opened_name_on_network,
     parse_hotplug_info, parse_storage_device_descriptor,
@@ -201,10 +213,100 @@ impl crate::fsctx::CaseSensitivityResolver for OsCaseSensitivity {
     }
 }
 
+/// What the NTFS volume that `file` is on records about its upcase table.
+/// Opens the volume device for reading, which needs administrator rights.
+/// Fails on a volume that is not NTFS, or whose `$UpCase` record cannot be
+/// read or parsed.
+pub fn volume_upcase(file: &File) -> io::Result<VolumeUpcase> {
+    let facts = sys::volume_information(file)?;
+    if FsType::from_name(&facts.fs_name) != FsType::Ntfs {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "not an NTFS volume",
+        ));
+    }
+    let root = volume_root(file)?;
+    let device = OpenOptions::new().read(true).share_mode(0x7).open(&root)?;
+    let record = sys::upcase_file_record(&device)?;
+    let crc =
+        parse_upcase_info(&record).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(VolumeUpcase::from_crc(crc))
+}
+
+/// The volumes already asked, by volume GUID root and serial number (a
+/// reformatted volume has a new serial). Bounded: past the limit it is
+/// cleared and refilled.
+static VOLUMES: Mutex<Vec<((String, u32), bool)>> = Mutex::new(Vec::new());
+/// The most volumes remembered.
+const MAX_VOLUMES: usize = 64;
+
+/// Whether names on the volume of the open `file` are known to fold as
+/// [`crate::fsctx::fold_case`] folds them. See the module documentation.
+/// `false` whenever that cannot be shown, so a caller treats the volume as
+/// "unknown fold" (ADR 0018). The answer is remembered per volume.
+#[must_use]
+pub fn folds_as_standard(file: &File) -> bool {
+    let (Ok(root), Ok(facts)) = (volume_root(file), sys::volume_information(file)) else {
+        return false;
+    };
+    let key = (root, facts.serial);
+    if let Ok(cache) = VOLUMES.lock()
+        && let Some((_, known)) = cache.iter().find(|(k, _)| *k == key)
+    {
+        return *known;
+    }
+    // Only a classification that was read is remembered. A failed read
+    // answers `false` this time but is retried next time, so a passing
+    // error never pins a volume as "unknown fold".
+    let Ok(upcase) = volume_upcase(file) else {
+        return false;
+    };
+    let standard = upcase.folds_as_standard();
+    if let Ok(mut cache) = VOLUMES.lock() {
+        if cache.len() >= MAX_VOLUMES {
+            cache.clear();
+        }
+        cache.push((key, standard));
+    }
+    standard
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fsctx::LocationClass;
+
+    /// The table `palisade_core::upcase` embeds is the OS's own, unit for
+    /// unit: the owner's decision for #332 is to fold with the OS's table.
+    #[test]
+    fn the_embedded_upcase_table_is_the_os_table() {
+        let differ: Vec<u16> = (0..=u16::MAX)
+            .filter(|&u| sys::os_upcase_unit(u) != crate::fsctx::upcase::upcase_unit(u))
+            .take(16)
+            .collect();
+        assert!(
+            differ.is_empty(),
+            "units that fold differently: {differ:04X?}"
+        );
+    }
+
+    /// The OS volume of the runners was formatted by a current Windows, so
+    /// it records the standard table; the tests run elevated, which the
+    /// volume read needs.
+    #[test]
+    fn the_os_volume_records_the_standard_upcase_table() {
+        let windir = sys::windows_directory().unwrap();
+        let f = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .share_mode(0x7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&windir)
+            .unwrap();
+        assert_eq!(volume_upcase(&f).unwrap(), VolumeUpcase::Standard);
+        assert!(folds_as_standard(&f));
+        // Remembered: asked again, the same answer.
+        assert!(folds_as_standard(&f));
+    }
 
     #[test]
     fn the_windows_directory_is_on_the_os_volume() {
