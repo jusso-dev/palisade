@@ -390,11 +390,14 @@ impl FactsBuilder {
         self.with(Field::HashSha256, &sha256_of(digit))
     }
 
-    /// The path, not user-writable, with no volume mapping.
+    /// The path, not user-writable, on a fixed volume, with no volume
+    /// mapping: a path an allow can trust.
     pub fn path(mut self, path: &str) -> Self {
-        self.0 = self
-            .0
-            .with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(false));
+        self.0 = self.0.with_path(
+            PathFact::new(path, &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
+        );
         self
     }
 

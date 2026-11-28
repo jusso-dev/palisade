@@ -20,7 +20,11 @@ Specified in [#31](https://github.com/jusso-dev/palisade/issues/31) (identity cr
 The strength matters. Validation warns about an allow rule whose only identity is weak, and an
 allow rule must have a positive identity on every branch of its match tree, so a rule cannot
 allow "anything not named X". A path rule only allows a file in a location that ordinary users
-cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time.
+cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time. The ACL
+counts only on a fixed local disk: on a removable, optical or network volume, or one whose kind
+the agent could not tell, a path allow does not match, because whoever holds the disk, or the
+server, decides what its folders hold whatever their permissions say. A path deny matches
+everywhere.
 
 **Hash rules** are the most precise and the most work: every update needs a new rule.
 **Publisher rules** trust what a signer signs, optionally narrowed by product name and minimum
@@ -42,6 +46,13 @@ authority, which vouches for everything it signs, so validation warns about it a
 with every signer criterion, a revoked or otherwise untrusted signature does not take part by
 default, and an unknown key hash never makes a rule match. **Path rules** are the easiest to write and
 the easiest to get wrong.
+
+Path criteria match the **final** path, after symbolic links and junctions are resolved. A
+**hard link** is another name for the same file, with no final path to resolve to: a file
+hard-linked into an allowed folder from somewhere else is the same content under both names, and
+a path rule sees only the name it was started by. Only a hash or signer criterion follows the
+content across its names. Write those rules for files that must never run, and do not rely on a
+path deny alone to stop a file that users can hard-link elsewhere.
 
 A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:
 

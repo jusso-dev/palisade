@@ -152,6 +152,10 @@ fn facts(o: &Object) -> ObjectFacts {
     if let Some(path) = &o.path {
         let mut fact = PathFact::new(path, &VolumeMap::new());
         fact.user_writable = o.user_writable;
+        // A path an allow may trust is on a fixed local volume (#328).
+        if o.user_writable == Some(false) {
+            fact.volume = Some(palisade_policy::unknown::VolumeKind::Fixed);
+        }
         facts.path = Some(fact);
     }
     if let Some(publisher) = &o.publisher {

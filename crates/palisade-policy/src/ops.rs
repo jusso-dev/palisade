@@ -79,8 +79,12 @@
 //! that lets an object run, trusts it or excludes it (an allow, and the
 //! other actions with [`ActionKind::needs_identity`], #34), a positive
 //! `path.*` test that would match evaluates to `Unknown`,
-//! with the note [`Note::PathAclUnsafe`], unless the facts show that no
-//! non-administrative principal can write the file or a directory above it.
+//! with the note [`Note::PathAclUnsafe`], unless the facts show that the
+//! file is on a fixed local volume and that no non-administrative principal
+//! can write it or a directory above it ([`PathFact::acl_proven`]). On a
+//! removable, optical or network volume, or one of unknown kind, the ACL
+//! proves nothing: whoever holds the disk, or the server, decides what its
+//! folders hold.
 //! `Unknown` rather than `NoMatch`, so that the test also fails closed under
 //! negation.
 //!
@@ -308,8 +312,8 @@ pub enum Note {
     /// A fact the criterion needs was not provided.
     FactMissing = 0,
     /// A path test in a rule that lets an object run, trusts it or excludes
-    /// it matched a path that users may be able to write, or whose
-    /// permissions are unknown.
+    /// it matched a path that users may be able to write, whose
+    /// permissions are unknown, or that is not on a fixed local volume.
     PathAclUnsafe = 1,
     /// The path contains a short (8.3) name the agent could not expand.
     ShortNameUnresolved = 2,
@@ -771,10 +775,7 @@ impl CompiledCriterion {
                 // A path only identifies an object for a rule that lets it
                 // run, trusts it or excludes it when users cannot replace
                 // what is at that path.
-                if raw == Tri::Match
-                    && ctx.action.needs_identity()
-                    && path.user_writable != Some(false)
-                {
+                if raw == Tri::Match && ctx.action.needs_identity() && !path.acl_proven() {
                     notes.insert(Note::PathAclUnsafe);
                     return Tri::Unknown;
                 }

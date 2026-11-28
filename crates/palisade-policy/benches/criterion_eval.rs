@@ -60,7 +60,8 @@ fn eval(c: &mut Bench) {
         .with(Field::MetaFileVersion, "10.2.3.4")
         .with_path(
             PathFact::new(r"C:\Program Files\Example\bin\tool.exe", &VolumeMap::new())
-                .with_user_writable(false),
+                .with_user_writable(false)
+                .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
         );
 
     let cases = [

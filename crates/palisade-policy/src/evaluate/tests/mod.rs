@@ -127,7 +127,9 @@ fn facts() -> ObjectFacts {
         .with(Field::HashSha256, sha('a'))
         .with(Field::MetaFileVersion, "unknown build")
         .with_path(
-            PathFact::new("C:\\Tools\\Sub\\tool.exe", &VolumeMap::new()).with_user_writable(false),
+            PathFact::new("C:\\Tools\\Sub\\tool.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
         )
         .with_signers(vec![SignerFact {
             status: SignerStatus::Valid,

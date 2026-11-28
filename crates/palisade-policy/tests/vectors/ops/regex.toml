@@ -54,6 +54,7 @@ name = "a regex on path.full never matches a stream"
 criterion = { field = "path.full", operator = "regex", values = ["C:\\\\x\\\\.*"] }
 path = "C:\\x\\a.txt:payload"
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]

@@ -7,6 +7,7 @@ name = "extended-length prefix"
 criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
 path = "\\\\?\\C:\\Tools\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -14,6 +15,7 @@ name = "NT object prefix"
 criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
 path = "\\??\\C:\\Tools\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -21,6 +23,7 @@ name = "extended UNC is UNC"
 criterion = { field = "path.full", operator = "starts_with", values = ["\\\\srv\\share"] }
 path = "\\\\?\\UNC\\srv\\share\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -28,6 +31,7 @@ name = "mixed separators, dot segments and repeated separators"
 criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
 path = "C:/Tools//x/..\\.\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -35,6 +39,7 @@ name = "case does not matter on paths"
 criterion = { field = "path.full", operator = "equals", values = ["c:\\tools\\A.EXE"] }
 path = "C:\\Tools\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -42,6 +47,7 @@ name = "trailing dot is significant"
 criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
 path = "C:\\Tools\\a.exe."
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]
@@ -49,6 +55,7 @@ name = "trailing space is significant"
 criterion = { field = "path.full", operator = "equals", values = ["C:\\Tools\\a.exe"] }
 path = "C:\\Tools\\a.exe "
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]
@@ -56,6 +63,7 @@ name = "starts_with ends at a component"
 criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
 path = "C:\\ToolsX\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]
@@ -63,6 +71,7 @@ name = "a stream is its own object"
 criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Tools\\*"] }
 path = "C:\\Tools\\a.exe:payload"
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]
@@ -70,6 +79,7 @@ name = "match_ads lets the file's value match its streams"
 criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Tools\\*"], match_ads = true }
 path = "C:\\Tools\\a.exe:payload"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -82,6 +92,7 @@ name = "double star crosses components"
 criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Program Files\\**\\*.exe"] }
 path = "C:\\Program Files\\App\\bin\\x64\\app.exe"
 user_writable = false
+volume = "fixed"
 expect = "match"
 
 [[case]]
@@ -89,6 +100,7 @@ name = "single star stays in one component"
 criterion = { field = "path.full", operator = "wildcard", values = ["C:\\Program Files\\*.exe"] }
 path = "C:\\Program Files\\App\\app.exe"
 user_writable = false
+volume = "fixed"
 expect = "no_match"
 
 [[case]]
@@ -111,6 +123,7 @@ name = "allow trusts an admin-only path"
 criterion = { field = "path.full", operator = "starts_with", values = ["C:\\Tools"] }
 path = "C:\\Tools\\a.exe"
 user_writable = false
+volume = "fixed"
 action = "allow"
 expect = "match"
 
@@ -119,9 +132,66 @@ name = "an unmapped device path is unknown"
 criterion = { field = "path.full", operator = "not_equals", values = ["C:\\Tools\\a.exe"] }
 path = "\\Device\\HarddiskVolume9\\Tools\\a.exe"
 user_writable = false
+volume = "fixed"
 expect = "unknown"
 
 [[case]]
 name = "a relative value is rejected"
 criterion = { field = "path.full", operator = "equals", values = ["Tools\\a.exe"] }
 error = "invalid_value"
+
+# #328: a path is only an identity for an allow on a fixed local volume
+# whose ACL is proven. Removable, optical and network volumes, or an
+# unknown kind, prove nothing whatever their ACL says.
+
+[[case]]
+name = "an allow trusts a proven ACL on a fixed volume"
+criterion = { field = "path.directory", operator = "equals", values = ['C:\Tools'] }
+path = 'C:\Tools\a.exe'
+user_writable = false
+volume = "fixed"
+action = "allow"
+expect = "match"
+
+[[case]]
+name = "an allow does not trust a path on a removable volume"
+criterion = { field = "path.directory", operator = "equals", values = ['E:\Tools'] }
+path = 'E:\Tools\a.exe'
+user_writable = false
+volume = "removable"
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "an allow does not trust a path on a network volume"
+criterion = { field = "path.directory", operator = "equals", values = ['Z:\Tools'] }
+path = 'Z:\Tools\a.exe'
+user_writable = false
+volume = "network"
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "an allow does not trust a path on an optical volume"
+criterion = { field = "path.full", operator = "equals", values = ['D:\setup.exe'] }
+path = 'D:\setup.exe'
+user_writable = false
+volume = "optical"
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "an allow does not trust a path whose volume is unknown"
+criterion = { field = "path.directory", operator = "equals", values = ['C:\Tools'] }
+path = 'C:\Tools\a.exe'
+user_writable = false
+action = "allow"
+expect = "unknown"
+
+[[case]]
+name = "a deny on a removable volume still matches"
+criterion = { field = "path.directory", operator = "equals", values = ['E:\Tools'] }
+path = 'E:\Tools\a.exe'
+volume = "removable"
+action = "deny"
+expect = "match"

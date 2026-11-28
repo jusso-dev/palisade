@@ -10,12 +10,12 @@ Decided at stage unknown, under the deny\_wins precedence model.
 
 The path.directory fact was unknown, so a rule that would let this run did not apply.
 
-Warning: a path rule did not count, because users may be able to write the path: R\-000003.
+Warning: a path rule did not count, because users may be able to write the path, or it is not on a fixed local disk: R\-000003.
 
 ### Why not allowed?
 
 - Rule 'Example signed tools' \(R\-000001\) would allow this file, but the meta.product\_name on this file is `Other` (expected equals `Example Tools`).
-- Rule 'Tools folder' \(R\-000003\) would allow this file, but the path is user-writable.
+- Rule 'Tools folder' \(R\-000003\) would allow this file, but the path may be user-writable or is not on a fixed local disk.
 
 ### What would allow this?
 

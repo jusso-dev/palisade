@@ -306,6 +306,11 @@ pub(crate) fn pool_facts() -> impl Strategy<Value = PoolFacts> {
                 if let Some((k, writable, alias)) = path {
                     let mut fact = PathFact::new(PATHS[k % PATHS.len()], &VolumeMap::new());
                     fact.user_writable = writable;
+                    // Mostly a fixed volume, where an ACL can prove a path
+                    // safe; sometimes none, where it cannot (#328).
+                    if k % 5 != 4 {
+                        fact.volume = Some(crate::unknown::VolumeKind::Fixed);
+                    }
                     if alias {
                         fact.alias =
                             Some(palisade_core::path::normalize(PATHS[(k + 1) % PATHS.len()]));
@@ -779,7 +784,8 @@ fn exe_facts(sha: Option<char>, path: &str, writable: Option<bool>) -> ObjectFac
     if let Some(c) = sha {
         f.set(Field::HashSha256, hex(c, 64));
     }
-    let mut p = PathFact::new(path, &VolumeMap::new());
+    let mut p =
+        PathFact::new(path, &VolumeMap::new()).with_volume(crate::unknown::VolumeKind::Fixed);
     p.user_writable = writable;
     f.with_path(p)
 }

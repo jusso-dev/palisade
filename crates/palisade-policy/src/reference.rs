@@ -355,7 +355,11 @@ impl Case {
                 format!("{:040x}", 0xf000_0000_u64 + u64::from(i)),
             )
             .with(Field::MetaOriginalFilename, "tool.exe")
-            .with_path(PathFact::new(&path, &volumes).with_user_writable(false));
+            .with_path(
+                PathFact::new(&path, &volumes)
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
+            );
         let signers = match signer {
             Some((publisher, product)) => {
                 facts.set(Field::MetaProductName, product);
