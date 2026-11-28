@@ -32,8 +32,8 @@ use palisade_fileid::authenticode::TrustConfig;
 use palisade_fileid::catalog::{CatalogSource, CatalogStoreBuilder, StoreLimits};
 use palisade_fileid::fsctx::{KnownFolders, normalize_win32};
 use palisade_fileid::identity::{
-    ExpectedSigner, FileIdentity, IdentityContext, ProtectedList, ProtectedVendor, Tiers, identify,
-    identify_bytes,
+    ExpectedSigner, Field, FileIdentity, IdentityContext, ProtectedList, ProtectedVendor, Tiers,
+    identify, identify_bytes,
 };
 use synthetic::corpus_files;
 use yaml_rust2::{Yaml, YamlLoader};
@@ -42,6 +42,17 @@ const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/identi
 
 /// 2026-11-25T00:00:00Z: inside every corpus certificate's validity.
 const NOW: i64 = 1_795_564_800;
+
+/// 2027-01-01T00:00:00Z: inside the validity of the script, installer and
+/// package fixture sets' certificates, which start on 2026-11-24 to 27.
+const FIXTURE_NOW: i64 = 1_798_761_600;
+
+/// A file of one of the crate's committed, independently signed fixture
+/// sets (`tests/fixtures/<set>/`).
+fn fixture_set_file(set: &str, name: &str) -> Vec<u8> {
+    let path = format!("{}/tests/fixtures/{set}/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
 
 /// Every generated corpus file: the signed files, the catalogs, the CA and
 /// its CRL, by name, built from the synthetic files.
@@ -237,6 +248,9 @@ fn protected_list() -> ProtectedList {
 struct Contexts {
     untrusted: TrustConfig,
     trusted: TrustConfig,
+    /// The throwaway test roots of the script, installer and package
+    /// fixture sets (`tests/fixtures/{script,installer,package}/ca.der`).
+    fixture_roots: TrustConfig,
     catalogs: palisade_fileid::catalog::CatalogStore,
     revocation: palisade_fileid::authenticode::RevocationSet,
     /// The corpus CA's CRL, which revokes the vendor's second certificate.
@@ -275,9 +289,16 @@ impl Contexts {
             );
             assert!(report.errors.is_empty(), "{name}: {report:?}");
         }
+        let mut fixture_roots = TrustConfig::new();
+        for set in ["script", "installer", "package"] {
+            fixture_roots
+                .add_anchor(format!("{set} test root"), &fixture_set_file(set, "ca.der"))
+                .unwrap();
+        }
         Self {
             untrusted: TrustConfig::new(),
             trusted,
+            fixture_roots,
             catalogs: b.build(),
             revocation: palisade_fileid::authenticode::RevocationSet::new(),
             crl_revocation: {
@@ -311,6 +332,19 @@ impl Contexts {
                 ctx.tsa_trust = &self.trusted;
                 ctx.catalogs = Some(&self.catalogs);
             }
+            // The script, installer and package fixture roots trusted,
+            // at a time inside their certificates' validity.
+            "fixture_roots" => {
+                ctx.code_trust = &self.fixture_roots;
+                ctx.tsa_trust = &self.fixture_roots;
+                ctx.now = FIXTURE_NOW;
+            }
+            // Nothing trusted, at the same time.
+            "fixture_untrusted" => {
+                ctx.code_trust = &self.untrusted;
+                ctx.tsa_trust = &self.untrusted;
+                ctx.now = FIXTURE_NOW;
+            }
             // Trusted, with the corpus CA's CRL.
             "trusted_crl" => {
                 ctx.code_trust = &self.trusted;
@@ -340,6 +374,15 @@ fn identify_entry(e: &Entry, contexts: &Contexts) -> Option<FileIdentity> {
         }
         "generated" => {
             let bytes = generated(&e.file);
+            Some(identify_bytes(&bytes, Some(name), Tiers::ALL, &ctx))
+        }
+        // A file of another committed fixture set, by `set/name`.
+        "fixture" => {
+            let (set, file) = e
+                .generator
+                .split_once('/')
+                .unwrap_or_else(|| panic!("{}: generator is set/name", e.id));
+            let bytes = fixture_set_file(set, file);
             Some(identify_bytes(&bytes, Some(name), Tiers::ALL, &ctx))
         }
         "os" => {
@@ -445,6 +488,33 @@ fn actual(id: &FileIdentity, key: &str) -> String {
             kinds.join(",")
         }
         "recommended_level" => json(&palisade_fileid::identity::recommend(id).level),
+        "embedded_invalid_reason" => opt(s.and_then(|s| s.embedded_invalid_reason.clone())),
+        "msi_normalised_sha256" => opt(h.and_then(|h| h.msi_normalised_sha256.computed().cloned())),
+        "script_normalised_sha256" => {
+            opt(h.and_then(|h| h.script_normalised_sha256.computed().cloned()))
+        }
+        "script_signing_state" => opt(id.script.computed().map(|s| s.signing_state.to_owned())),
+        "installer_kind" => opt(id.installer.computed().map(|i| i.kind.to_owned())),
+        "product_code" => opt(id.installer.computed().and_then(|i| i.product_code.clone())),
+        "package_pfn" => opt(id.package.computed().map(|p| p.pfn.clone())),
+        "package_bundle" => opt(id.package.computed().map(|p| p.is_bundle.to_string())),
+        "package_signature_issue" => opt(id
+            .package
+            .computed()
+            .and_then(|p| p.signature_issue.clone())),
+        "package_display_name" => opt(id
+            .trusted_signer()
+            .and_then(|t| t.package_display_name.clone())),
+        "signature_kind" => opt(id
+            .signatures
+            .computed()
+            .and_then(|v| v.first())
+            .map(|s| s.kind.to_owned())),
+        k if k.starts_with("strength.") => opt(id
+            .strengths
+            .iter()
+            .find(|s| Some(s.attribute) == k.strip_prefix("strength."))
+            .map(|s| json(&s.strength))),
         other => panic!("unknown expected key `{other}`"),
     }
 }
@@ -788,7 +858,12 @@ fn unverified_reason_names_the_missing_catalog_lookup() {
         &contexts.get("default"),
     );
     let rec = palisade_fileid::identity::recommend(&text);
-    assert!(rec.refused.iter().any(|(_, w)| w.contains("#52")));
+    assert!(
+        rec.refused
+            .iter()
+            .any(|(_, w)| w.contains("signatures are not read")),
+        "{rec:?}"
+    );
 }
 
 #[test]
@@ -968,5 +1043,218 @@ fn location_is_unassessed_unless_every_folder_is_known() {
             "{path}: {:?}",
             id.masquerade
         );
+    }
+}
+
+/// #55 wiring: a script's or package's identity never lets a renamed
+/// protected binary through.
+///
+/// - The protected PowerShell host, named as a script or a package, is
+///   judged as the PE it is: no script or package reader runs, and the
+///   rename is still reported.
+/// - A trusted script signer whose signed metadata claims a protected
+///   binary's `OriginalFilename` is not that binary's signer: the claim is
+///   reported and no rule is recommended.
+/// - A package whose display name claims a protected vendor, under a
+///   signer that vendor does not expect, is impersonation.
+#[test]
+fn script_and_package_identity_never_vouch_for_a_protected_binary() {
+    use palisade_fileid::identity::{MasqueradeReason, RuleLevel, masquerade, recommend};
+    let contexts = Contexts::new();
+    let ctx = contexts.get("trusted");
+    for name in [
+        r"C:\Users\alice\AppData\Local\Temp\notepad.ps1",
+        r"C:\Users\alice\AppData\Local\Temp\notepad.msix",
+        r"C:\Users\alice\AppData\Local\Temp\notepad.msi",
+    ] {
+        let id = identify_bytes(&signed_powershell(), Some(name), Tiers::ALL, &ctx);
+        assert!(id.pe.is_computed(), "{name}");
+        assert_eq!(id.script, Field::NotApplicable, "{name}");
+        assert_eq!(id.package, Field::NotApplicable, "{name}");
+        assert_eq!(id.installer, Field::NotApplicable, "{name}");
+        assert!(
+            id.masquerade
+                .reasons
+                .iter()
+                .any(|r| matches!(r, MasqueradeReason::KnownBinaryRelocated { .. })),
+            "{name}: {:?}",
+            id.masquerade
+        );
+        assert_eq!(recommend(&id).level, RuleLevel::None, "{name}");
+    }
+
+    // A trusted script signer claiming the PowerShell host's name.
+    let fixture = contexts.get("fixture_roots");
+    let script = fixture_set_file("script", "ps1-utf8bom-crlf.ps1");
+    let mut id = identify_bytes(&script, Some("run.ps1"), Tiers::ALL, &fixture);
+    assert_eq!(recommend(&id).level, RuleLevel::Publisher);
+    if let Field::Computed(s) = &mut id.script {
+        let meta = s.signed_metadata.get_or_insert_with(Default::default);
+        meta.original_filename = Some("PowerShell.EXE".to_owned());
+    }
+    id.masquerade = masquerade::assess(
+        &id,
+        fixture.protected,
+        fixture.code_trust,
+        fixture.known_folders,
+    );
+    assert!(
+        id.masquerade
+            .reasons
+            .iter()
+            .any(|r| matches!(r, MasqueradeReason::ProtectedNameClaimed { .. })),
+        "{:?}",
+        id.masquerade
+    );
+    assert_eq!(recommend(&id).level, RuleLevel::None);
+
+    // A trusted package claiming the protected "OS" vendor in its display
+    // name, signed by the package fixture signer, which that vendor does
+    // not expect (it expects a well-known OS root, which the fixture roots
+    // do not hold, so it is unassessed rather than concluded).
+    let msix = fixture_set_file("package", "app-signed.msix");
+    let mut id = identify_bytes(&msix, Some("app.msix"), Tiers::ALL, &fixture);
+    if let Field::Computed(p) = &mut id.package {
+        p.display_name = Some("Palisade Test OS".to_owned());
+    }
+    id.masquerade = masquerade::assess(
+        &id,
+        fixture.protected,
+        fixture.code_trust,
+        fixture.known_folders,
+    );
+    assert!(
+        id.masquerade.unassessed.contains(&"signer_impersonation"),
+        "{:?}",
+        id.masquerade
+    );
+    assert_eq!(recommend(&id).level, RuleLevel::None);
+    // And a vendor expected by publisher name, which can be judged.
+    if let Field::Computed(p) = &mut id.package {
+        p.display_name = Some("Example Org Tools".to_owned());
+    }
+    id.masquerade = masquerade::assess(
+        &id,
+        fixture.protected,
+        fixture.code_trust,
+        fixture.known_folders,
+    );
+    assert!(
+        id.masquerade
+            .reasons
+            .iter()
+            .any(|r| matches!(r, MasqueradeReason::SignerImpersonation { .. })),
+        "{:?}",
+        id.masquerade
+    );
+    assert_eq!(recommend(&id).level, RuleLevel::None);
+}
+
+/// #55 wiring: a script, installer or package signature folds into the
+/// signing state fail closed. A script changed after signing, a package
+/// changed after signing, and an archive the strict reader refuses are
+/// invalid; a script format that is not read stays unverified.
+#[test]
+fn non_pe_signatures_fold_fail_closed() {
+    use palisade_fileid::identity::{EmbeddedState, RuleLevel, SigningStateKind, recommend};
+    let contexts = Contexts::new();
+    let fixture = contexts.get("fixture_roots");
+    let state = |bytes: &[u8], name: &str| {
+        let id = identify_bytes(bytes, Some(name), Tiers::ALL, &fixture);
+        let s = id.signing_state.computed().unwrap().clone();
+        (s, recommend(&id).level)
+    };
+
+    // One character of the script's text changed after signing.
+    let mut script = fixture_set_file("script", "ps1-utf8bom-crlf.ps1");
+    let at = script.windows(5).position(|w| w == b"Write").unwrap();
+    script[at] = b'w';
+    let (s, level) = state(&script, "run.ps1");
+    assert_eq!(s.state, SigningStateKind::Invalid, "{s:?}");
+    assert_eq!(s.embedded, EmbeddedState::Invalid);
+    assert_eq!(level, RuleLevel::None);
+
+    // A signed installer with a property value changed.
+    let mut msi = fixture_set_file("installer", "product-sha256.msi");
+    let at = msi
+        .windows(21)
+        .position(|w| w == b"Palisade Test Product")
+        .unwrap();
+    msi[at] ^= 0x20;
+    let (s, level) = state(&msi, "product.msi");
+    assert_eq!(s.state, SigningStateKind::Invalid, "{s:?}");
+    assert_eq!(level, RuleLevel::None);
+
+    // A package cut short: its archive has no central directory, so it is
+    // not recognised as a package at all and no signature is read. Never
+    // "unsigned", and never a signer rule.
+    let msix = fixture_set_file("package", "app-signed.msix");
+    let (s, level) = state(&msix[..msix.len() - 100], "app.msix");
+    assert_eq!(s.state, SigningStateKind::Unverified, "{s:?}");
+    assert!(!matches!(
+        level,
+        RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+    ));
+    // A package whose central directory names its manifest differently
+    // from its local record: whatever reads it, it is never trusted and
+    // never unsigned.
+    let doubled = {
+        let mut b = msix.clone();
+        let needle = b"AppxManifest.xml";
+        let at = b.windows(needle.len()).rposition(|w| w == needle).unwrap();
+        b[at] = b'B';
+        b
+    };
+    let (s, level) = state(&doubled, "app.msix");
+    assert_ne!(s.state, SigningStateKind::Trusted, "{s:?}");
+    assert_ne!(s.state, SigningStateKind::Unsigned, "{s:?}");
+    assert!(!matches!(
+        level,
+        RuleLevel::Publisher | RuleLevel::PublisherProduct | RuleLevel::FilePublisher
+    ));
+
+    // An encoded script is not read: unverified, never unsigned.
+    let (s, _) = state(b"#@~^AAAAAA==^#~@", "run.vbe");
+    assert_eq!(s.state, SigningStateKind::Unverified, "{s:?}");
+    assert_eq!(s.embedded, EmbeddedState::NotChecked);
+}
+
+/// #55 wiring: the deep tier merges into an execution-time record of a
+/// script, installer or package exactly as computing every tier at once,
+/// and a validly signed script whose deep tier did not run gets no rule
+/// (its signed metadata could claim a protected binary).
+#[test]
+fn deep_tier_records_merge_like_one_pass() {
+    use palisade_fileid::identity::{RuleLevel, Tier, recommend};
+    let contexts = Contexts::new();
+    let ctx = contexts.get("fixture_roots");
+    for (set, file, name) in [
+        ("script", "ps1-utf8bom-crlf.ps1", "run.ps1"),
+        ("installer", "product-sha256.msi", "product.msi"),
+        ("package", "app-signed.msix", "app.msix"),
+    ] {
+        let bytes = fixture_set_file(set, file);
+        let mut early = identify_bytes(&bytes, Some(name), Tiers::EXECUTION, &ctx);
+        if set == "script" {
+            assert!(
+                early
+                    .masquerade
+                    .unassessed
+                    .contains(&"known_binary_relocated"),
+                "{:?}",
+                early.masquerade
+            );
+            assert_eq!(recommend(&early).level, RuleLevel::None);
+        }
+        let late = identify_bytes(
+            &bytes,
+            Some(name),
+            [Tier::Context, Tier::Deep].into_iter().collect(),
+            &ctx,
+        );
+        assert!(early.merge(late, &ctx), "{name}");
+        let all = identify_bytes(&bytes, Some(name), Tiers::ALL, &ctx);
+        assert_eq!(early, all, "{name}");
+        assert!(all.computed_tiers.contains(Tier::Deep), "{name}");
     }
 }

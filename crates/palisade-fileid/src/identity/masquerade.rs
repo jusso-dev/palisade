@@ -328,10 +328,132 @@ pub fn assess(
         }
     }
 
+    non_pe_claims(
+        id,
+        list,
+        trust,
+        &mut m.unassessed,
+        &mut m.claims_protected,
+        &mut add,
+    );
+
     m.unassessed.sort_unstable();
     m.unassessed.dedup();
     m.score = score(&m.reasons);
     m
+}
+
+/// The claims a script, installer or package makes about who made it: a
+/// protected binary's name in a script's signed metadata, and a protected
+/// vendor in an installer's `Manufacturer` or `ProductName` or a package's
+/// display names. Only a trusted signer the vendor expects backs them. Not
+/// one of these formats, or a deep tier that did not run, leaves nothing to
+/// check here; the trust tier not run leaves them open.
+fn non_pe_claims(
+    id: &FileIdentity,
+    list: &ProtectedList,
+    trust: &TrustConfig,
+    unassessed: &mut Vec<&'static str>,
+    claims_protected: &mut Option<String>,
+    add: &mut impl FnMut(MasqueradeReason),
+) {
+    let signing = id.signing_state.computed();
+    let trusted_signer = signing
+        .filter(|s| s.state == SigningStateKind::Trusted)
+        .and_then(|s| s.signer.as_ref());
+    let trust_known = signing.is_some_and(|s| s.state != SigningStateKind::Unverified);
+    let unsigned = signing.is_some_and(|s| {
+        matches!(
+            s.state,
+            SigningStateKind::Unsigned | SigningStateKind::Invalid
+        )
+    });
+    let judgeable = |signer: &super::protected::ExpectedSigner| unsigned || signer.checkable(trust);
+
+    // An installer's or package's own record did not run (the deep tier
+    // was not requested, or the content could not be read): its vendor
+    // claims are open while there are vendors to check them against.
+    let content = id.kind.computed().map(|k| k.content_kind.as_str());
+    let installer = matches!(content, Some("msi" | "msp" | "mst" | "msm"));
+    let package = matches!(
+        content,
+        Some("msix" | "appx" | "msix_bundle" | "appx_bundle")
+    );
+    if !list.vendors.is_empty()
+        && ((installer && !id.installer.is_computed()) || (package && !id.package.is_computed()))
+    {
+        unassessed.push("signer_impersonation");
+    }
+    // A validly signed script whose record did not run: its signed
+    // metadata may claim a protected binary, so that check is open.
+    let signed = signing.is_some_and(|s| s.embedded == super::record::EmbeddedState::Valid);
+    let script = id.kind.computed().is_some_and(|k| k.script_kind.is_some());
+    if script && signed && !id.script.is_computed() {
+        unassessed.push("known_binary_relocated");
+    }
+
+    // A script's signed metadata may name a protected binary: whoever
+    // signed it, the script is not that binary, and only the binary's own
+    // expected signer could vouch for the claim.
+    let script_original = id
+        .script
+        .computed()
+        .and_then(|s| s.signed_metadata.as_ref())
+        .and_then(|m| m.original_filename.as_deref());
+    if let Some(original) = script_original
+        && list.binaries_named(original).next().is_some()
+    {
+        *claims_protected = Some(original.to_owned());
+        add(MasqueradeReason::ProtectedNameClaimed {
+            binary: original.to_owned(),
+        });
+    }
+
+    let claims: Vec<(&'static str, &str)> = if let Some(i) = id.installer.computed() {
+        [
+            ("manufacturer", i.manufacturer.as_deref()),
+            ("product_name", i.product_name.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(f, v)| v.map(|v| (f, v)))
+        .collect()
+    } else if let Some(p) = id.package.computed() {
+        [
+            (
+                "publisher_display_name",
+                p.publisher_display_name.as_deref(),
+            ),
+            ("display_name", p.display_name.as_deref()),
+        ]
+        .into_iter()
+        .filter_map(|(f, v)| v.map(|v| (f, v)))
+        .collect()
+    } else {
+        Vec::new()
+    };
+    // Only a claim that names a protected vendor needs a signer to back it.
+    for (field, value) in claims {
+        for vendor in &list.vendors {
+            let Some(name) = vendor.names.iter().find(|n| contains_word(value, n)) else {
+                continue;
+            };
+            let vouched = trusted_signer.is_some_and(|s| vendor.signer.matches(s));
+            if vouched {
+                continue;
+            }
+            if !trust_known {
+                // It may be catalog-signed by the vendor.
+                unassessed.push("signer_impersonation");
+            } else if judgeable(&vendor.signer) {
+                add(MasqueradeReason::SignerImpersonation {
+                    vendor: name.clone(),
+                    field,
+                });
+            } else {
+                unassessed.push("signer_impersonation");
+            }
+        }
+    }
 }
 
 /// The weight of each reason.

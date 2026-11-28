@@ -7,13 +7,11 @@
 //! | Class | Attributes |
 //! |---|---|
 //! | Strong | flat SHA-256 (and SHA-384, SHA-512); Authenticode SHA-256 of a conformant image; the chain identity (thumbprints, TBS hashes) of a trusted signer |
-//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; a path that is not user-writable |
-//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; a user-writable path, or one whose writability is unknown |
+//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; the normalised MSI hash; the package family name of a package whose valid signature a trusted signer made; a path that is not user-writable |
+//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; the normalised script hash; the package family name of a package no trusted signer binds; an installer's product and upgrade codes and `Manufacturer`; a user-writable path, or one whose writability is unknown |
 //! | Insecure | SHA-1 and MD5 digests of any kind; the digest of an empty file; the Authenticode digest of a non-conformant image; a catalog match that relies on SHA-1 |
 //!
-//! An attribute that is not in the record has no entry. The normalised
-//! MSI and script hashes (Medium) and the package family name (Medium on a
-//! signed package) get entries when #52 and #53 fill them in.
+//! An attribute that is not in the record has no entry.
 
 #![forbid(unsafe_code)]
 
@@ -129,6 +127,23 @@ pub fn classify(id: &FileIdentity) -> Vec<AttributeStrength> {
         }
     }
 
+    if let Some(h) = id.hashes.computed() {
+        if h.msi_normalised_sha256.is_computed() {
+            out.push(entry(
+                "msi_normalised_sha256",
+                Medium,
+                "the package's content without its timestamps: copies that differ only in timestamps match",
+            ));
+        }
+        if h.script_normalised_sha256.is_computed() {
+            out.push(entry(
+                "script_normalised_sha256",
+                Weak,
+                "tolerant of re-encoding, line endings and re-signing: for explicit opt-in rules only; use sha256",
+            ));
+        }
+    }
+
     let signing = id.signing_state.computed();
     let signer = signing.and_then(|s| s.signer.as_ref());
     if let Some(s) = signing {
@@ -223,6 +238,40 @@ pub fn classify(id: &FileIdentity) -> Vec<AttributeStrength> {
                     name,
                     Weak,
                     "free text that the file's author chooses; use a publisher rule instead",
+                ));
+            }
+        }
+    }
+
+    if let Some(p) = id.package.computed() {
+        // The family name hashes `Identity@Publisher`, which anyone can
+        // write: it names a publisher only when a trusted signer's valid
+        // signature binds the manifest's publisher to its own subject.
+        out.push(if trusted && p.signature_valid {
+            entry(
+                "package_family_name",
+                Medium,
+                "a trusted signer's package: every version of the app matches",
+            )
+        } else {
+            entry(
+                "package_family_name",
+                Weak,
+                "no trusted signer binds the manifest's publisher, so anyone can claim it",
+            )
+        });
+    }
+    if let Some(i) = id.installer.computed() {
+        for (name, present) in [
+            ("product_code", i.product_code.is_some()),
+            ("upgrade_code", i.upgrade_code.is_some()),
+            ("manufacturer", i.manufacturer.is_some()),
+        ] {
+            if present {
+                out.push(entry(
+                    name,
+                    Weak,
+                    "set by the package's author; use a publisher rule or a hash instead",
                 ));
             }
         }

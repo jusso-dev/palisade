@@ -11,15 +11,19 @@
 //! | `hashes` | [`crate::hash`] (#46), [`crate::authenticode`] image and page hashes (#47) | hash (T2) |
 //! | `signing_state`, `signatures` | [`crate::authenticode`] signatures, chains, validity (#48, #49, #50) | trust (T3) |
 //! | `catalog_matches` | [`crate::catalog`] (#51) | trust (T3) |
+//! | `signing_state`, `signatures` of scripts, installers and packages | [`crate::script`] (#52), [`crate::installer`], [`crate::package`] (#53) | trust (T3) |
+//! | `hashes.script_normalised_sha256`, `hashes.msi_normalised_sha256` | [`crate::script`], [`crate::installer`] | hash (T2), when T3 or T5 read the content |
 //! | `fs.motw`, `fs.path_variables` | [`crate::fsctx`] (#54) | context (T4) |
+//! | `script`, `installer`, `package` | [`crate::script`], [`crate::installer`], [`crate::package`] | deep (T5) |
 //! | `derived`, `masquerade`, `strengths` | this module | always |
 //!
-//! Groups other issues still deliver are present in the schema now, so the
-//! record's shape does not change when they land, and hold
-//! [`Field::NotYetSupported`] with the issue numbers: `script` and the
-//! normalised script hash (#52), `installer`, `package`
-//! and the normalised MSI hash (#53), and the owner, writability, streams,
-//! reparse points, file ID, volume and provenance in `fs` (#54).
+//! Which reader runs is decided by the content the classifier saw, never by
+//! the name alone: a PE image named `.ps1` or `.msix` is judged only as a
+//! PE, so no script or package signature can vouch for it. Groups other
+//! issues still deliver are present in the schema now, so the record's
+//! shape does not change when they land, and hold [`Field::NotYetSupported`]
+//! with the issue numbers: the owner, writability, streams, reparse points,
+//! file ID, volume and provenance in `fs` (#54).
 //!
 //! # Signing state
 //!
@@ -28,10 +32,17 @@
 //! for the file: an embedded signature that passed every #48, #49 and #50
 //! check, or a catalog whose signer is trusted and whose match does not
 //! rely on SHA-1 (ADR 0008). It is `unsigned` only when the file has no
-//! embedded signature and a catalog lookup found nothing. A file whose
-//! format's embedded signatures are not read yet (anything but a PE image,
-//! until #52 and #53), or that was not looked up in any catalog, is
-//! `unverified`, never `unsigned`.
+//! embedded signature and a catalog lookup found nothing. A script, an
+//! installer and an app package are judged by their own signatures with
+//! the same trust and validity evaluation as a PE image's; a package whose
+//! manifest names another publisher than its signer, a script or package
+//! changed after signing, and a container the strict reader refuses are
+//! `invalid`. A file whose format's signatures are not read (a cabinet, an
+//! encoded script, a file over a reader's limit), or that was not looked
+//! up in any catalog, is `unverified`, never `unsigned`. So is a script or
+//! installer that no catalog lists: which digest catalogs made by OS
+//! tooling list them under is not yet checked (#51), so a miss proves
+//! nothing.
 //!
 //! # Fail-conservative
 //!
@@ -78,10 +89,10 @@ pub use recommend::{MASQUERADE_THRESHOLD, Recommendation, RuleLevel, recommend};
 pub use record::{
     AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary, Derived,
     EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdentity, FsInfo,
-    Hashes, IdentityError, ManifestSummary, Masquerade, MasqueradeReason, MotwSummary, NameInfo,
-    NotYetDefined, PathInfo, PdbSummary, PeSummary, Pending, PublisherProduct, SCHEMA_VERSION,
-    SectionSummary, SignatureSummary, SigningState, SigningStateKind, Timestamps, TrustSource,
-    TrustedSigner, VersionSummary,
+    Hashes, IdentityError, InstallerSummary, ManifestSummary, Masquerade, MasqueradeReason,
+    MotwSummary, NameInfo, NotYetDefined, PackageSummary, PathInfo, PdbSummary, PeSummary, Pending,
+    PublisherProduct, SCHEMA_VERSION, ScriptSummary, SectionSummary, SignatureSummary,
+    SigningState, SigningStateKind, Timestamps, TrustSource, TrustedSigner, VersionSummary,
 };
 pub use strength::{AttributeStrength, IdentityStrength};
 pub use tier::{Tier, TierParseError, Tiers};
@@ -113,7 +124,7 @@ impl FileIdentity {
         // they read, and it is the same: two records of the same size and
         // name may still be of different content.
         let reads_content = |id: &Self| {
-            [Tier::Classify, Tier::Hash, Tier::Trust]
+            [Tier::Classify, Tier::Hash, Tier::Trust, Tier::Deep]
                 .iter()
                 .any(|t| id.computed_tiers.contains(*t))
         };
