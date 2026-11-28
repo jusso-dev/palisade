@@ -69,6 +69,11 @@ version = "1.1.5"
 criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23), raised from safe-to-run to safe-to-deploy because #251 (palisade-policy identity matching: regex operators) made it a normal dependency of a product crate before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.alloca]]
+version = "0.4.0"
+criteria = "safe-to-run"
+notes = "Added by #309 (new dependency of criterion 0.8, a dev-dependency of palisade-policy and palisade-fileid only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
 [[exemptions.allocation-counter]]
 version = "0.8.1"
 criteria = "safe-to-run"
@@ -249,6 +254,11 @@ version = "0.8.7"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
 
+[[exemptions.core_detect]]
+version = "1.0.0"
+criteria = "safe-to-run"
+notes = "Added by #308 (new dependency of proptest 1.12, a dev-dependency only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
 [[exemptions.cpubits]]
 version = "0.1.1"
 criteria = "safe-to-run"
@@ -270,14 +280,14 @@ criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
 
 [[exemptions.criterion]]
-version = "0.7.0"
+version = "0.8.2"
 criteria = "safe-to-run"
-notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+notes = "Bumped by #309 (criterion 0.7 to 0.8, a dev-dependency of palisade-policy and palisade-fileid only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.criterion-plot]]
-version = "0.6.0"
+version = "0.8.2"
 criteria = "safe-to-run"
-notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+notes = "Bumped by #309 (criterion 0.7 to 0.8, a dev-dependency of palisade-policy and palisade-fileid only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.crossbeam-queue]]
 version = "0.3.14"
@@ -744,6 +754,11 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
 
+[[exemptions.page_size]]
+version = "0.6.0"
+criteria = "safe-to-run"
+notes = "Added by #309 (new dependency of criterion 0.8, a dev-dependency of palisade-policy and palisade-fileid only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
 [[exemptions.parking]]
 version = "2.2.1"
 criteria = "safe-to-deploy"
@@ -815,9 +830,9 @@ criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
 [[exemptions.proptest]]
-version = "1.11.0"
+version = "1.12.0"
 criteria = "safe-to-run"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+notes = "Bumped by #308 (Dependabot cargo-minor-and-patch group), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.quick-xml]]
 version = "0.41.0"
@@ -860,9 +875,9 @@ criteria = "safe-to-deploy"
 notes = "Added by #127 (palisade-server Postgres layer: sqlx with the Postgres driver, migrations and rustls). Audit, or import an audit, before bumping."
 
 [[exemptions.rand_xorshift]]
-version = "0.4.0"
+version = "0.5.0"
 criteria = "safe-to-run"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+notes = "Bumped by #308 (Dependabot cargo-minor-and-patch group), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.redox_syscall]]
 version = "0.5.18"
@@ -1020,9 +1035,9 @@ criteria = "safe-to-deploy"
 notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
 
 [[exemptions.sha2]]
-version = "0.11.0"
+version = "0.11.2"
 criteria = "safe-to-deploy"
-notes = "Baseline when cargo-vet was adopted (#23). Audit, or import an audit, before bumping."
+notes = "Bumped by #308 (Dependabot cargo-minor-and-patch group), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.sharded-slab]]
 version = "0.1.7"
@@ -1379,10 +1394,25 @@ version = "1.2.1"
 criteria = "safe-to-deploy"
 notes = "Added by #252 (palisade-agent service host: async runtime, logging and the Windows service control manager) before cargo-vet landed. Audit, or import an audit, before bumping."
 
+[[exemptions.winapi]]
+version = "0.3.9"
+criteria = "safe-to-run"
+notes = "Added by #309 (Windows dependency of page_size, which criterion 0.8 uses; dev-dependency only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
+[[exemptions.winapi-i686-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-run"
+notes = "Added by #309 (import-library crate of winapi, through criterion 0.8; dev-dependency only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
+
 [[exemptions.winapi-util]]
 version = "0.1.11"
 criteria = "safe-to-run"
 notes = "Added by #25 (criterion benchmarks, a dev-dependency of palisade-policy and palisade-fileid only) when cargo-vet was already in place. Audit, or import an audit, before bumping."
+
+[[exemptions.winapi-x86_64-pc-windows-gnu]]
+version = "0.4.0"
+criteria = "safe-to-run"
+notes = "Added by #309 (import-library crate of winapi, through criterion 0.8; dev-dependency only), merged before cargo-vet passed; exempted after the fact in the follow-up. Audit, or import an audit, before bumping."
 
 [[exemptions.windows-link]]
 version = "0.2.1"
