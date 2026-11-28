@@ -28,7 +28,11 @@ max_blocking_threads = 8              # 1..=256; file I/O and hashing pool
 
 [log]
 level = "info"                        # "error" | "warn" | "info" | "debug" | "trace"
+files = 10                            # 1..=100; log files kept, the current one included
+file_size_mib = 10                    # 1..=1024; size limit of one log file
 ```
+
+On Windows the agent logs to standard error and to `%ProgramData%\Palisade\logs\agent.log`, which rotates by size to `agent.log.1` and onwards; with the defaults the log takes at most 100 MiB. The installer creates the directory with its ACL. If it is missing, the agent logs to standard error only. The level can change while the agent runs (on `PARAMCHANGE`); a change of rotation applies at the next start.
 
 `fail_mode` defaults to `fail_open` for M1. That is a security trade-off: while the agent's decision engine is unavailable, agent-side decisions allow, and the kernel-enforced OS-native policy stays the baseline ([ADR 0002](../../docs/adr/0002-enforcement-strategy.md)). Enforcement components (#113) consume the setting.
 
