@@ -36,7 +36,9 @@ On Windows the agent logs to standard error and to `%ProgramData%\Palisade\logs\
 
 `fail_mode` defaults to `fail_open` for M1. That is a security trade-off: while the agent's decision engine is unavailable, agent-side decisions allow, and the kernel-enforced OS-native policy stays the baseline ([ADR 0002](../../docs/adr/0002-enforcement-strategy.md)). Enforcement components (#113) consume the setting.
 
-The policy-delivered and local-override layers come with the policy cache (#61).
+The effective configuration has four layers, lowest priority first: built-in defaults, this file, the agent settings delivered with policy (#61), and local overrides in `%ProgramData%\Palisade\overrides.toml`. `settings::resolve` merges them and records where each value came from; `Effective::render` is the text `palctl config show` prints, with secret settings redacted. Overrides apply only while the policy sets `allow_local_overrides = true` and only if the file and every folder above it can be written by SYSTEM, Administrators and `TrustedInstaller` alone; otherwise they are ignored and reported. A policy layer or overrides file that would make the configuration invalid is dropped and reported, never fatal.
+
+Advanced settings (`agent.advanced.*`, delivered with policy) are checked against `settings::ADVANCED_SCHEMA` (name, type, range, default, whether secret). Unknown keys are logged and ignored; a wrong type or out-of-range value is logged and replaced by the default. The policy cache (#61) supplies the policy layer when it lands; until then the agent runs on the first two layers.
 
 ## Design
 
