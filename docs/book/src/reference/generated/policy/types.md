@@ -215,8 +215,9 @@ matcher.
 | `signer.pca` | The subject common name of the highest certificate below the root, as the signature provides it: the PCA. |
 | `signer.root_thumbprint` | The SHA-256 thumbprint of the chain's root certificate. |
 | `signer.root_thumbprint_sha1` | The SHA-1 thumbprint of the chain's root certificate. Compatibility only (ADR 0008). |
-| `signer.tbs_hash` | The hash of a chain certificate's `tbsCertificate`, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the `tbsCertificate` includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule. No criterion yet names a key across the certificates that carry it. `signer.position` says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008). |
+| `signer.tbs_hash` | The hash of a chain certificate's `tbsCertificate`, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the `tbsCertificate` includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule; `signer.spki_sha256` names the key across every certificate that carries it. `signer.position` says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008). |
 | `signer.eku` | The extended key usages of the leaf certificate, as dotted OIDs, such as `1.3.6.1.5.5.7.3.3` (code signing). A leaf without the extension has none. |
+| `signer.spki_sha256` | The SHA-256 of a chain certificate's DER `SubjectPublicKeyInfo`: its public key (#318). Unlike the TBS hash it stays the same when a certificate is reissued for the same key, so a deny on a stolen key's hash also blocks every reissue. `signer.position` says which certificate. A key above the leaf belongs to a certificate authority, which vouches for everything it signs. |
 
 ## FindingSeverity
 
@@ -549,7 +550,8 @@ compares (#31).
 
 ## TbsPosition
 
-Where the certificate of a `signer.tbs_hash` test must be (#31).
+Where the certificate of a `signer.tbs_hash` or `signer.spki_sha256`
+test must be (#31, #318).
 
 | Value | Meaning |
 |---|---|

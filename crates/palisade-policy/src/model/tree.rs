@@ -178,8 +178,8 @@ pub struct SignerOptions {
     /// Unset means `cn`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<SubjectComponent>,
-    /// Only for `signer.tbs_hash`: where in the chain the certificate must
-    /// be. Unset means `any`.
+    /// Only for `signer.tbs_hash` and `signer.spki_sha256`: where in the
+    /// chain the certificate must be. Unset means `any`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<TbsPosition>,
     /// The signature statuses that can match. Unset means `valid`,
@@ -259,7 +259,8 @@ pub enum SubjectComponent {
     FullDn,
 }
 
-/// Where the certificate of a `signer.tbs_hash` test must be (#31).
+/// Where the certificate of a `signer.tbs_hash` or `signer.spki_sha256`
+/// test must be (#31, #318).
 #[derive(
     Clone,
     Copy,
@@ -548,9 +549,9 @@ pub enum Field {
     /// It identifies that one certificate: the `tbsCertificate` includes
     /// the serial number and the validity period (RFC 5280), so a
     /// certificate reissued with the same key has another TBS hash, and
-    /// each issue needs its own rule. No criterion yet names a key across
-    /// the certificates that carry it. `signer.position` says which
-    /// certificate. A 40-digit (SHA-1) value is compatibility only
+    /// each issue needs its own rule; `signer.spki_sha256` names the key
+    /// across every certificate that carries it. `signer.position` says
+    /// which certificate. A 40-digit (SHA-1) value is compatibility only
     /// (ADR 0008).
     #[serde(rename = "signer.tbs_hash")]
     SignerTbsHash,
@@ -559,6 +560,14 @@ pub enum Field {
     /// extension has none.
     #[serde(rename = "signer.eku")]
     SignerEku,
+    /// The SHA-256 of a chain certificate's DER `SubjectPublicKeyInfo`: its
+    /// public key (#318). Unlike the TBS hash it stays the same when a
+    /// certificate is reissued for the same key, so a deny on a stolen
+    /// key's hash also blocks every reissue. `signer.position` says which
+    /// certificate. A key above the leaf belongs to a certificate
+    /// authority, which vouches for everything it signs.
+    #[serde(rename = "signer.spki_sha256")]
+    SignerSpkiSha256,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -654,7 +663,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -725,6 +734,7 @@ impl Field {
         Self::SignerRootThumbprintSha1,
         Self::SignerTbsHash,
         Self::SignerEku,
+        Self::SignerSpkiSha256,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -742,7 +752,16 @@ impl Field {
                 | Self::SignerRootThumbprintSha1
                 | Self::SignerTbsHash
                 | Self::SignerEku
+                | Self::SignerSpkiSha256
         )
+    }
+
+    /// Whether the field names a chain certificate that the
+    /// `signer.position` option chooses: `signer.tbs_hash` and
+    /// `signer.spki_sha256`.
+    #[must_use]
+    pub const fn has_position(self) -> bool {
+        matches!(self, Self::SignerTbsHash | Self::SignerSpkiSha256)
     }
 
     /// Whether the field describes the context of an evaluation (the user,
@@ -762,7 +781,8 @@ impl Field {
             | Self::HashPageSha256
             | Self::HashMsiFuzzySha256
             | Self::SignerLeafThumbprint
-            | Self::SignerRootThumbprint => FieldClass::Hash { hex_len: 64 },
+            | Self::SignerRootThumbprint
+            | Self::SignerSpkiSha256 => FieldClass::Hash { hex_len: 64 },
             Self::HashSha384 => FieldClass::Hash { hex_len: 96 },
             Self::HashSha512 => FieldClass::Hash { hex_len: 128 },
             Self::HashAuthenticodeSha1
@@ -843,9 +863,11 @@ impl Field {
     ///
     /// A certificate authority vouches for every file it signs, so the
     /// issuer, the PCA, the root thumbprint and the EKUs are weak alone.
-    /// A TBS hash is strong here, as #31 rates it; validation counts one
-    /// that may name a CA certificate (`position` other than `leaf`) as
-    /// weak in a rule that lets an object run.
+    /// A TBS hash is strong here, as #31 rates it, and so is a key hash
+    /// (#318); validation counts either that may name a CA certificate
+    /// (`position` other than `leaf`) as weak in a rule that lets an object
+    /// run. A leaf key hash names whoever holds the private key, across
+    /// every certificate issued for it.
     #[must_use]
     pub const fn strength(self) -> Option<Strength> {
         Some(match self {
@@ -855,7 +877,8 @@ impl Field {
             | Self::HashAuthenticodeSha256
             | Self::HashMsiFuzzySha256
             | Self::SignerLeafThumbprint
-            | Self::SignerTbsHash => Strength::Strong,
+            | Self::SignerTbsHash
+            | Self::SignerSpkiSha256 => Strength::Strong,
             Self::SignerPublisher | Self::PathFull | Self::PathDirectory => Strength::Medium,
             Self::HashAuthenticodeSha1
             | Self::HashPageSha256

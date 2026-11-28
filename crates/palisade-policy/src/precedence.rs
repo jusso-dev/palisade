@@ -258,8 +258,8 @@ fn features(node: &Match) -> Features {
 }
 
 /// Whether a signer criterion names the signer itself (tiers 2 to 4): the
-/// publisher, a leaf thumbprint, or the TBS hash of the leaf certificate
-/// (`position: leaf`). A TBS hash at any other position may name a CA
+/// publisher, a leaf thumbprint, or the TBS or key hash of the leaf
+/// certificate (`position: leaf`). One at any other position may name a CA
 /// certificate, and the issuer, the PCA, the root and the EKUs name a
 /// certificate authority. Those vouch for every file the CA signs, so they
 /// are tier 7: ranking a CA-wide allow with the publisher would let it beat
@@ -269,7 +269,7 @@ fn is_signer_identity(c: &crate::model::Criterion) -> bool {
         Field::SignerPublisher | Field::SignerLeafThumbprint | Field::SignerLeafThumbprintSha1 => {
             true
         }
-        Field::SignerTbsHash => {
+        Field::SignerTbsHash | Field::SignerSpkiSha256 => {
             c.signer.as_deref().and_then(|o| o.position) == Some(crate::model::TbsPosition::Leaf)
         }
         _ => false,

@@ -1360,6 +1360,11 @@ fn guaranteed_identity(node: &Match, pointer: &str) -> Guarantee {
                 Some(_) if c.field.is_weak_hash() => Identity::WeakHashOnly,
                 // SHA-1 values alone are a weak hash whatever the position;
                 // otherwise a TBS hash that may name a CA is weak (#31).
+                // A key hash is always SHA-256, but at a CA position it is
+                // weak too (#318).
+                Some(_) if names_ca(c) && c.field == crate::model::Field::SignerSpkiSha256 => {
+                    Identity::Weak
+                }
                 Some(_) if c.field == crate::model::Field::SignerTbsHash => match sha1_values(c) {
                     Sha1Values::All => Identity::WeakHashOnly,
                     Sha1Values::Some => Identity::Weak,
@@ -1400,10 +1405,11 @@ fn sha1_values(c: &Criterion) -> Sha1Values {
     }
 }
 
-/// Whether a `signer.tbs_hash` test may name a CA certificate rather than
-/// the signer's own: its `position` is not `leaf` (#31).
+/// Whether a `signer.tbs_hash` or `signer.spki_sha256` test may name a CA
+/// certificate rather than the signer's own: its `position` is not `leaf`
+/// (#31, #318).
 fn names_ca(c: &Criterion) -> bool {
-    c.field == crate::model::Field::SignerTbsHash
+    c.field.has_position()
         && c.signer.as_deref().and_then(|o| o.position) != Some(crate::model::TbsPosition::Leaf)
 }
 
