@@ -554,6 +554,8 @@ const fn variable_name(v: PathVariable) -> &'static str {
         PathVariable::LocalAppData => "LOCALAPPDATA",
         PathVariable::Temp => "TEMP",
         PathVariable::Public => "PUBLIC",
+        PathVariable::Removable => "REMOVABLE",
+        PathVariable::Hot => "HOT",
     }
 }
 

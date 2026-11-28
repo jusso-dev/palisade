@@ -1253,6 +1253,36 @@
           "const": "msi.package_code",
           "description": "A Windows Installer package's `PackageCode` (#328): the GUID of one\nbuild of the package.",
           "type": "string"
+        },
+        {
+          "const": "path.drive_type",
+          "description": "The drive type of the file's volume, as the OS reports it (#328):\n`fixed`, `removable`, `network`, `cd_rom` or `ram_disk`. An\n`unknown` drive type is a missing fact.",
+          "type": "string"
+        },
+        {
+          "const": "path.bus",
+          "description": "The bus of the disk the file's volume is on (#328): `usb`, `sata`,\n`nvme`, `scsi`, `sd`, `virtual`, `file_backed_virtual`, `iscsi` and\nso on. An `unknown` bus is a missing fact.",
+          "type": "string"
+        },
+        {
+          "const": "path.is_unc",
+          "description": "Whether the file is on a network share: its path, or the other form\nof it (a mapped drive's UNC path), is a UNC path (#328).",
+          "type": "string"
+        },
+        {
+          "const": "path.is_ads",
+          "description": "Whether the object is an alternate data stream of a file (#328).",
+          "type": "string"
+        },
+        {
+          "const": "path.share",
+          "description": "The `\\\\server\\share` a file on a network share is under (#328),\nfrom its UNC path. A file on no share has none, so `equals` does not\nmatch it.",
+          "type": "string"
+        },
+        {
+          "const": "path.user_can_change_acl",
+          "description": "Whether some non-administrator may change the permissions or the\nowner of the file or a directory above it (#328).",
+          "type": "string"
         }
       ]
     },

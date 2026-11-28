@@ -116,6 +116,15 @@ impl FactSet {
         if field.is_signer() {
             return Self::SIGNERS;
         }
+        // Where the path is: known with the path and its volume, except
+        // whether users may change its permissions, which the ACL check
+        // computes (#328).
+        if matches!(field, Field::PathUserCanChangeAcl) {
+            return Self::PATH_ACL;
+        }
+        if field.is_path_location() {
+            return Self::PATH;
+        }
         match field.class() {
             FieldClass::Hash { .. } => Self::hash(field),
             FieldClass::Path | FieldClass::FileName => Self::PATH,

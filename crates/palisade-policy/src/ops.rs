@@ -781,6 +781,28 @@ impl CompiledCriterion {
                 }
                 raw
             }
+            field if field.is_path_location() => {
+                let Some(path) = &facts.path else {
+                    notes.insert(Note::FactMissing);
+                    return Tri::Unknown;
+                };
+                match (path.location(field), &self.values) {
+                    (crate::facts::PathLocation::Text(Some(t)), _) => self.eval_value(t, notes),
+                    (crate::facts::PathLocation::Bool(Some(b)), Values::Bool(want)) => {
+                        Tri::from_bool(b == *want)
+                    }
+                    (crate::facts::PathLocation::None, _) => Tri::NoMatch,
+                    (crate::facts::PathLocation::Bool(Some(_)), _) => malformed(notes),
+                    (
+                        crate::facts::PathLocation::Text(None)
+                        | crate::facts::PathLocation::Bool(None),
+                        _,
+                    ) => {
+                        notes.insert(Note::FactMissing);
+                        Tri::Unknown
+                    }
+                }
+            }
             field => match facts.get(field) {
                 Some(fact) => self.eval_stored(fact, notes),
                 None => {

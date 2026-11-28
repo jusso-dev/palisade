@@ -1418,6 +1418,11 @@ fn observe(field: Field, sel: Selector, subject: &Subject<'_>) -> Option<Vec<Str
             };
             Some(std::iter::once(&p.path).chain(&p.alias).map(pick).collect())
         }
+        field if field.is_path_location() => match facts.path.as_ref()?.location(field) {
+            crate::facts::PathLocation::Text(t) => t.map(|t| vec![t.to_owned()]),
+            crate::facts::PathLocation::Bool(b) => b.map(|b| vec![b.to_string()]),
+            crate::facts::PathLocation::None => Some(Vec::new()),
+        },
         _ => facts.get(field).map(|v| vec![v.to_owned()]),
     }
 }

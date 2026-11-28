@@ -122,6 +122,7 @@ impl ObjectFacts {
 const fn is_stored(field: Field) -> bool {
     !field.is_context()
         && !field.is_signer()
+        && !field.is_path_location()
         && !matches!(field.class(), FieldClass::Path | FieldClass::FileName)
 }
 
@@ -150,6 +151,18 @@ pub struct PathFact {
     /// `removable`, `optical` or `network` for a drive path, nor rely on the
     /// classes that need a fixed volume ([`crate::unknown::location`]).
     pub volume: Option<crate::unknown::VolumeKind>,
+    /// The volume's drive type as the OS reports it, in `snake_case`
+    /// (`fixed`, `removable`, `network`, `cd_rom`, `ram_disk`), for
+    /// `path.drive_type` (#328). `None`, or `unknown`, means not known.
+    pub drive_type: Option<String>,
+    /// The bus of the volume's disk, in `snake_case` (`usb`, `sata`,
+    /// `nvme`, ...), for `path.bus` (#328). `None`, or `unknown`, means not
+    /// known.
+    pub bus: Option<String>,
+    /// Whether some non-administrator may change the permissions or the
+    /// owner of the file or a directory above it, for
+    /// `path.user_can_change_acl` (#328). `None` means not determined.
+    pub user_can_change_acl: Option<bool>,
 }
 
 impl PathFact {
@@ -163,6 +176,9 @@ impl PathFact {
             short_name_unresolved: false,
             user_writable: None,
             volume: None,
+            drive_type: None,
+            bus: None,
+            user_can_change_acl: None,
         }
     }
 
@@ -180,6 +196,48 @@ impl PathFact {
         self
     }
 
+    /// What a `path.*` location field (#328) reads from this fact.
+    /// [`Field::is_path_location`] fields only; any other is unknown.
+    #[must_use]
+    pub fn location(&self, field: Field) -> PathLocation<'_> {
+        use palisade_core::path::PathKind;
+        fn known(v: Option<&String>) -> Option<&str> {
+            v.map(String::as_str)
+                .filter(|t| !t.is_empty() && *t != "unknown")
+        }
+        let unc = core::iter::once(&self.path)
+            .chain(&self.alias)
+            .find(|p| p.kind() == PathKind::Unc);
+        // On a share: a UNC form, or a network volume. Not on one: a
+        // resolved path on a volume known to be local. Otherwise, such as
+        // a mapped drive with no UNC form recorded, it is not known.
+        let on_share = if unc.is_some() {
+            Some(true)
+        } else if !self.path.is_resolved() {
+            None
+        } else {
+            match self.volume {
+                Some(crate::unknown::VolumeKind::Network) => Some(true),
+                Some(_) => Some(false),
+                None => None,
+            }
+        };
+        match field {
+            Field::PathDriveType => PathLocation::Text(known(self.drive_type.as_ref())),
+            Field::PathBus => PathLocation::Text(known(self.bus.as_ref())),
+            Field::PathIsUnc => PathLocation::Bool(on_share),
+            Field::PathIsAds => PathLocation::Bool(Some(self.path.stream().is_some())),
+            Field::PathUserCanChangeAcl => PathLocation::Bool(self.user_can_change_acl),
+            Field::PathShare => match (unc, on_share) {
+                (Some(p), _) => PathLocation::Text(Some(p.root())),
+                (None, Some(false)) => PathLocation::None,
+                // A network volume whose UNC form is not recorded.
+                (None, _) => PathLocation::Text(None),
+            },
+            _ => PathLocation::Text(None),
+        }
+    }
+
     /// Whether the path can be trusted as an identity (#31, #328): the
     /// file is on a fixed local volume, and no non-administrative principal
     /// can write it or a directory above it. An ACL only protects a path on
@@ -191,6 +249,17 @@ impl PathFact {
         matches!(self.user_writable, Some(false))
             && matches!(self.volume, Some(crate::unknown::VolumeKind::Fixed))
     }
+}
+
+/// What a `path.*` location field reads from a [`PathFact`] (#328).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathLocation<'a> {
+    /// A text fact, or `None` if it is not known.
+    Text(Option<&'a str>),
+    /// A yes-or-no fact, or `None` if it is not known.
+    Bool(Option<bool>),
+    /// Known to have no value: a file on no share has no `path.share`.
+    None,
 }
 
 /// One signature on an object, with the facts about its signer.
@@ -432,11 +501,19 @@ pub enum PathVariable {
     Temp,
     /// `%PUBLIC%`: the shared user profile.
     Public,
+    /// `%REMOVABLE%`: the root of every volume on removable media, such
+    /// as an optical disc or a memory card (#31, #328). The agent sets one
+    /// value per such volume that is mounted.
+    Removable,
+    /// `%HOT%`: the root of every volume on a hot-pluggable disk, such as
+    /// a USB or eSATA disk (#31, #328). The agent sets one value per such
+    /// volume that is mounted.
+    Hot,
 }
 
 impl PathVariable {
     /// Every variable.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Windir,
         Self::System32,
         Self::ProgramFiles,
@@ -447,6 +524,8 @@ impl PathVariable {
         Self::LocalAppData,
         Self::Temp,
         Self::Public,
+        Self::Removable,
+        Self::Hot,
     ];
 
     /// The variable with this name, without the `%` signs, in any case.
@@ -465,6 +544,8 @@ impl PathVariable {
             "LOCALAPPDATA" => Self::LocalAppData,
             "TEMP" | "TMP" => Self::Temp,
             "PUBLIC" => Self::Public,
+            "REMOVABLE" => Self::Removable,
+            "HOT" => Self::Hot,
             _ => return None,
         })
     }

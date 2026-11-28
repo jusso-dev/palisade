@@ -820,6 +820,140 @@ fn every_action_that_runs_trusts_or_excludes_only_trusts_safe_paths() {
 }
 
 #[test]
+fn path_location_facts() {
+    use crate::unknown::VolumeKind;
+    let on = |raw: &str, volume: Option<VolumeKind>| {
+        let mut p = PathFact::new(raw, &VolumeMap::new());
+        p.volume = volume;
+        p.drive_type = Some("removable".to_owned());
+        p.bus = Some("usb".to_owned());
+        p.user_can_change_acl = Some(false);
+        ObjectFacts::new().with_path(p)
+    };
+    let usb = on("E:\\a.exe", Some(VolumeKind::Removable));
+    let share = on("\\\\srv\\Tools\\a.exe", Some(VolumeKind::Network));
+    let stream = on("C:\\x\\a.txt:payload", Some(VolumeKind::Fixed));
+    let unknown_volume = on("C:\\a.exe", None);
+    let check = |field, op, values: &[&str], facts: &ObjectFacts, want| {
+        assert_eq!(
+            eval(&compile(field, op, values), facts),
+            want,
+            "{field:?} {op:?} {values:?}"
+        );
+    };
+    check(
+        Field::PathDriveType,
+        Operator::Equals,
+        &["REMOVABLE"],
+        &usb,
+        Match,
+    );
+    check(Field::PathBus, Operator::Equals, &["usb"], &usb, Match);
+    check(Field::PathBus, Operator::NotEquals, &["usb"], &usb, NoMatch);
+    check(Field::PathIsUnc, Operator::IsTrue, &[], &share, Match);
+    check(Field::PathIsUnc, Operator::IsFalse, &[], &usb, Match);
+    // A drive path on a volume of unknown kind may be a mapped share.
+    check(
+        Field::PathIsUnc,
+        Operator::IsFalse,
+        &[],
+        &unknown_volume,
+        Unknown,
+    );
+    check(
+        Field::PathShare,
+        Operator::Equals,
+        &["\\\\SRV\\tools"],
+        &share,
+        Match,
+    );
+    // A file on no share has no share: `equals` cannot match, and the
+    // negation does.
+    check(
+        Field::PathShare,
+        Operator::Equals,
+        &["\\\\srv\\tools"],
+        &usb,
+        NoMatch,
+    );
+    check(
+        Field::PathShare,
+        Operator::NotEquals,
+        &["\\\\srv\\tools"],
+        &usb,
+        Match,
+    );
+    check(
+        Field::PathShare,
+        Operator::NotEquals,
+        &["\\\\x\\y"],
+        &unknown_volume,
+        Unknown,
+    );
+    check(Field::PathIsAds, Operator::IsTrue, &[], &stream, Match);
+    check(Field::PathIsAds, Operator::IsTrue, &[], &usb, NoMatch);
+    check(
+        Field::PathUserCanChangeAcl,
+        Operator::IsFalse,
+        &[],
+        &usb,
+        Match,
+    );
+    // A mapped drive's UNC alias is a share.
+    let mut mapped = PathFact::new("Z:\\a.exe", &VolumeMap::new());
+    mapped.alias = Some(palisade_core::path::normalize("\\\\srv\\share\\a.exe"));
+    let mapped = ObjectFacts::new().with_path(mapped);
+    check(Field::PathIsUnc, Operator::IsTrue, &[], &mapped, Match);
+    check(
+        Field::PathShare,
+        Operator::Equals,
+        &["\\\\srv\\share"],
+        &mapped,
+        Match,
+    );
+    // Unknown facts are unknown, never a match, and neither is their
+    // negation: an `unknown` drive type or bus is not known.
+    let mut bare = PathFact::new("C:\\a.exe", &VolumeMap::new());
+    bare.drive_type = Some("unknown".to_owned());
+    let bare = ObjectFacts::new().with_path(bare);
+    for (field, op, values) in [
+        (Field::PathDriveType, Operator::NotEquals, &["fixed"][..]),
+        (Field::PathBus, Operator::NotEquals, &["usb"][..]),
+        (Field::PathUserCanChangeAcl, Operator::IsFalse, &[][..]),
+    ] {
+        check(field, op, values, &bare, Unknown);
+        check(field, op, values, &ObjectFacts::new(), Unknown);
+    }
+    // These facts are read from the path, never stored by field.
+    let mut f = ObjectFacts::new();
+    assert!(!f.set(Field::PathBus, "usb"));
+    for field in Field::ALL.into_iter().filter(|f| f.is_path_location()) {
+        assert_eq!(field.strength(), Some(Strength::Weak), "{field:?}");
+    }
+}
+
+#[test]
+fn removable_and_hot_variables() {
+    use crate::facts::PathVariable;
+    assert_eq!(
+        PathVariable::from_name("removable"),
+        Some(PathVariable::Removable)
+    );
+    assert_eq!(PathVariable::from_name("HOT"), Some(PathVariable::Hot));
+    let c = compile(Field::PathFull, Operator::StartsWith, &["%HOT%"]);
+    let vars = PathVariables::new().with(PathVariable::Hot, &["E:\\", "F:\\"]);
+    let ctx = deny_ctx(&vars);
+    assert_eq!(c.eval(&at_path("F:\\setup.exe"), &ctx).result, Match);
+    assert_eq!(c.eval(&at_path("C:\\setup.exe"), &ctx).result, NoMatch);
+    // With no such volume mounted the agent sets no value: unknown.
+    let none = PathVariables::new();
+    assert_eq!(
+        c.eval(&at_path("F:\\setup.exe"), &deny_ctx(&none)).result,
+        Unknown
+    );
+}
+
+#[test]
 fn allow_rules_only_trust_paths_on_a_fixed_volume() {
     // #328: an ACL only protects a path on a local fixed disk.
     use crate::unknown::VolumeKind;
