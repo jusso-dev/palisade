@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-82f4a68f.js";
+            window.path_to_searchindex_js = "../../searchindex-babf030a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -235,6 +235,19 @@ image has every tool it checks for, and an xtask test fails if a CI step needs o
 lacks. Two exceptions: the Windows-only package and signing steps never run on Linux, and the
 <code>server-image</code> steps need podman, a container runtime the image does not nest; run those on the
 host, or use <code>--fast</code>, which skips them. The Postgres step runs because the container sets <code>PALISADE_TEST_DATABASE_ADMIN_URL</code>.</p>
+<p><strong>Proven in CI.</strong> The <a href="../ci.html#devcontaineryml-weekly-on-tuesday-at-0417-utc-on-demand-and-on-prs-that-change-devcontainer"><code>devcontainer.yml</code></a>
+workflow builds this image and its Postgres service from scratch on a GitHub-hosted runner and
+runs <code>cargo xtask ci --fast</code> inside it, weekly and on every PR that changes <code>.devcontainer/</code>.
+Its first green run is the evidence for #29 that <code>cargo xtask ci</code> passes in a clean
+environment. To run it yourself, start the workflow from the Actions tab (<strong>Run workflow</strong>), or
+do what it does:</p>
+<pre><code class="language-sh">docker compose --file .devcontainer/compose.yaml --project-name palisade-dev up --detach --build --wait
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev exec dev git config --global --add safe.directory /workspaces/palisade
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev exec --workdir /workspaces/palisade dev cargo xtask ci --fast
+docker compose --file .devcontainer/compose.yaml --project-name palisade-dev down --volumes
+</code></pre>
+<p>Behind a TLS-inspecting proxy the image build cannot pull or download anything until the proxy's
+CA is trusted by the container engine; never disable TLS verification to get round it.</p>
 <p>Optional: building the image with <code>--build-arg WITH_XWIN=1</code> adds <code>cargo-xwin</code>, which can check the
 <code>x86_64-pc-windows-msvc</code> target from Linux (<code>cargo xwin check --target x86_64-pc-windows-msvc</code>).
 On first use it downloads the Windows SDK and C runtime headers, under their own licence terms,

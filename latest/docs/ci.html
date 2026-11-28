@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-82f4a68f.js";
+            window.path_to_searchindex_js = "../searchindex-babf030a.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -468,6 +468,22 @@ checkout). Details:
 </tbody>
 </table>
 </div>
+<h3 id="devcontaineryml-weekly-on-tuesday-at-0417-utc-on-demand-and-on-prs-that-change-devcontainer"><a class="header" href="#devcontaineryml-weekly-on-tuesday-at-0417-utc-on-demand-and-on-prs-that-change-devcontainer"><code>devcontainer.yml</code> (weekly on Tuesday at 04:17 UTC, on demand, and on PRs that change <code>.devcontainer/</code>)</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Job</th><th>Runners</th><th>What it runs</th></tr>
+</thead>
+<tbody>
+<tr><td><code>devcontainer</code></td><td>ubuntu-latest</td><td>Builds <code>.devcontainer/</code> with <code>docker compose</code> (the image and its Postgres service, as a contributor gets them), then <code>cargo fetch --locked</code> and <code>cargo xtask ci --fast</code> inside the container. No secrets, read-only permissions</td></tr>
+</tbody>
+</table>
+</div>
+<p>It proves the dev container in a clean environment (#29): every tool <code>cargo xtask ci</code> needs is in
+the image at CI's version, and the checks pass there. Building the image compiles every cargo
+tool from source, so it does not run on every PR, only when the dev container or the workflow
+changes. It is a separate file from <code>ci.yml</code>, whose commands <code>cargo xtask ci</code> mirrors, so it is
+not part of that mirror. See <a href="dev/unix.html#the-dev-container">Developing on Linux</a>.</p>
 <h3 id="audityml-daily-at-0317-utc-and-on-demand"><a class="header" href="#audityml-daily-at-0317-utc-and-on-demand"><code>audit.yml</code> (daily at 03:17 UTC, and on demand)</a></h3>
 <p>Runs <code>cargo deny check advisories</code> and <code>cargo xtask audit</code> (cargo-audit with the same ignores) against <code>main</code>, for the root workspace and every fuzz workspace's lockfile. Both
 also run on every PR (the <code>deps</code> job). A new advisory can affect <code>main</code>
