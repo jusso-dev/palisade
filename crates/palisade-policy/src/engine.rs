@@ -406,7 +406,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Makes a policy loaded from a bundle ([`crate::bundle::load`])
+    /// Makes a policy loaded from a bundle ([`crate::bundle::load()`])
     /// current, as [`load`](Self::load) does: its indexes are already
     /// built, so this only swaps it in and purges the cache.
     pub fn install(&self, loaded: crate::bundle::LoadedPolicy) {

@@ -174,7 +174,8 @@ mod tests {
         let Some(local) = std::env::var_os("LOCALAPPDATA") else {
             return;
         };
-        let aliases = Path::new(&local).join("Microsoft").join("WindowsApps");
+        let [vendor, apps] = crate::package::os_ids::ALIAS_DIR;
+        let aliases = Path::new(&local).join(vendor).join(apps);
         let Ok(entries) = std::fs::read_dir(&aliases) else {
             eprintln!("no {}: skipped", aliases.display());
             return;

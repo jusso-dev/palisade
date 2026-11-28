@@ -1249,7 +1249,7 @@ pub struct PathInfo {
     /// directory (#332).
     pub rule_key: Option<String>,
     /// The components of the final path that are in case-sensitive
-    /// directories, as the OS read them, so [`Self::rule_path`] keeps
+    /// directories, as the OS read them, so `rule_path` keeps
     /// them. Not serialised: `rule_key` already reflects it.
     #[serde(skip)]
     pub final_case_sensitive: Vec<usize>,
