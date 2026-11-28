@@ -251,16 +251,19 @@ impl OpenFile for StdFile {
 
 /// The device and the agent's own process environment.
 ///
-/// Everything except the interface addresses is captured once, when this is
-/// built, so every lookup in one evaluation sees the same values, and a
-/// lookup is a map read. Variable names are case-insensitive, as on Windows.
+/// The variables, host name, domain and OS version are captured once, when
+/// this is built, so every lookup in one evaluation sees the same values,
+/// and a lookup is a map read. The interface addresses and the connection
+/// type are read live, on each call. Variable names are case-insensitive,
+/// as on Windows.
 ///
 /// On Windows the host name and domain come from the registry and the
-/// version from the OS (`platform::windows`). Elsewhere (development only)
-/// the host name comes from the environment or `/etc/hostname`, and the
-/// domain and version are [`ErrorKind::Unsupported`]. The connection type is
-/// always [`ConnectionType::Unknown`]: how a network location is classified
-/// is defined by the network-location scope work (#38).
+/// version from the OS (`platform::windows`), and the connection type from
+/// the IPv4 and IPv6 default routes (`platform::connection`). Elsewhere
+/// (development only) the host name comes from the environment or
+/// `/etc/hostname`, the domain and version are [`ErrorKind::Unsupported`],
+/// and the connection type is [`ConnectionType::Unknown`]. Whether a
+/// network is trusted is defined by the network-location scope (#38).
 #[derive(Clone, Debug)]
 pub struct StdEnvironment {
     vars: BTreeMap<String, String>,
@@ -378,7 +381,22 @@ impl Environment for StdEnvironment {
             .collect())
     }
 
+    /// The interfaces the OS routes internet-bound IPv4 and IPv6 traffic
+    /// through, as classified by `platform::connection` (Windows), read on
+    /// each call. `Unknown` elsewhere, and on Windows whenever the answer is
+    /// not clear (ADR 0018).
     fn connection_type(&self) -> Result<ConnectionType> {
+        #[cfg(windows)]
+        {
+            // Documentation addresses (RFC 5737, RFC 3849): never
+            // contacted, only routed, so each answer is that family's
+            // default route.
+            let v4 = crate::ffi::best_route(std::net::IpAddr::from([192, 0, 2, 1]));
+            let v6 =
+                crate::ffi::best_route(std::net::IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]));
+            Ok(super::connection::classify(v4, v6))
+        }
+        #[cfg(not(windows))]
         Ok(ConnectionType::Unknown)
     }
 
