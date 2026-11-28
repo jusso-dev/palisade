@@ -146,6 +146,8 @@ struct Entry {
     generator: String,
     context: String,
     path_as: Option<String>,
+    /// A crate feature the entry needs (`os-trust`); skipped without it.
+    requires: Option<String>,
     expected: BTreeMap<String, Yaml>,
 }
 
@@ -180,6 +182,7 @@ fn manifest() -> Vec<Entry> {
                 "description",
                 "context",
                 "path_as",
+                "requires",
                 "expected",
             ];
             for k in e.as_hash().unwrap().keys() {
@@ -198,6 +201,7 @@ fn manifest() -> Vec<Entry> {
                 generator: str_of(e, "generator", &id),
                 context: e["context"].as_str().unwrap_or("default").to_owned(),
                 path_as: e["path_as"].as_str().map(str::to_owned),
+                requires: e["requires"].as_str().map(str::to_owned),
                 expected,
                 id,
             }
@@ -362,6 +366,12 @@ impl Contexts {
 // Checking.
 
 fn identify_entry(e: &Entry, contexts: &Contexts) -> Option<FileIdentity> {
+    match e.requires.as_deref() {
+        None => {}
+        Some("os-trust") if cfg!(feature = "os-trust") => {}
+        Some("os-trust") => return None,
+        Some(other) => panic!("{}: unknown requirement {other}", e.id),
+    }
     let ctx = contexts.get(&e.context);
     let name = e.path_as.as_deref().unwrap_or(&e.file);
     match e.source.as_str() {
@@ -1428,12 +1438,11 @@ fn fs_context_on_windows_is_consistent() {
     );
     assert_ne!(recommend(&id).level, RuleLevel::Path);
     // A file in a folder every user can write is never Medium.
-    let dir = std::env::temp_dir().join(format!("palisade-fsctx-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("extool.exe");
+    let dir = common::ScratchDir::new("fsctx");
+    let file = dir.0.join("extool.exe");
     std::fs::write(&file, b"MZ").unwrap();
     let id = identify(&file, Tiers::ALL, &ctx).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
+    drop(dir);
     let path = id
         .strengths
         .iter()
@@ -1445,4 +1454,29 @@ fn fs_context_on_windows_is_consistent() {
         "{:?}",
         id.fs.user_writable
     );
+}
+
+/// #344 review: a named stream has no mark of the web of its own. Its
+/// record says so (`not_applicable`) and records no `motw_unreadable`
+/// error, while the host file keeps its own reading.
+#[cfg(all(windows, feature = "os-trust"))]
+#[test]
+fn a_stream_has_no_mark_of_the_web_of_its_own() {
+    let contexts = Contexts::new();
+    let ctx = contexts.get("default");
+    let dir = common::ScratchDir::new("stream-motw");
+    let host = dir.0.join("host.txt");
+    std::fs::write(&host, b"host").unwrap();
+    let mut stream = host.as_os_str().to_owned();
+    stream.push(":payload");
+    std::fs::write(&stream, b"MZ payload").unwrap();
+    let id = identify(Path::new(&stream), Tiers::ALL, &ctx).unwrap();
+    assert_eq!(id.fs.motw, Field::NotApplicable);
+    assert!(
+        !id.errors.iter().any(|e| e.code == "motw_unreadable"),
+        "{:?}",
+        id.errors
+    );
+    let host_id = identify(&host, Tiers::ALL, &ctx).unwrap();
+    assert_eq!(host_id.fs.motw, Field::Computed(None));
 }

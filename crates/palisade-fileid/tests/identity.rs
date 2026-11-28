@@ -544,12 +544,11 @@ fn review_minors_in_the_record() {
 fn path_strength_follows_proven_writability() {
     use palisade_fileid::identity::{IdentityStrength, WritableSummary, strength};
     let image = tool_image((1, 0, 0, 0));
-    let dir = std::env::temp_dir().join(format!("palisade-writable-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("extool.exe");
+    let dir = ScratchDir::new("writable");
+    let path = dir.0.join("extool.exe");
     std::fs::write(&path, &image).unwrap();
     let mut id = identify(&path, Tiers::ALL, &ctx()).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
+    drop(dir);
     let volume = |location: &str| {
         Field::Computed(palisade_fileid::identity::VolumeSummary {
             fs_type: Some("ntfs".to_owned()),
@@ -621,4 +620,38 @@ fn path_strength_follows_proven_writability() {
     }
     id.fs.volume = Field::Unavailable("not read".to_owned());
     assert_eq!(path_strength(&id), Some(IdentityStrength::Weak));
+}
+
+/// #344 review: merge compares each part of the file key on its own. A part
+/// only one record knows (no change journal on one side) does not refuse
+/// the merge; a known part that differs does.
+#[test]
+fn merging_compares_each_part_of_the_file_key() {
+    use palisade_fileid::identity::FileIdSummary;
+    let image = tool_image((1, 0, 0, 0));
+    let key = |usn: Option<i64>, journal: Option<u64>, file_id: &str| {
+        Field::Computed(FileIdSummary {
+            volume_serial: Some(7),
+            file_id: Some(file_id.to_owned()),
+            usn_journal_id: journal,
+            usn,
+            link_count: Some(1),
+            link_names: Vec::new(),
+        })
+    };
+    let with = |k: Field<FileIdSummary>, tiers: Tiers| {
+        let mut id = identify_bytes(&image, Some("extool.exe"), tiers, &ctx());
+        id.fs.file_id = k;
+        id
+    };
+    let early = Tiers::EXECUTION;
+    let late: Tiers = [Tier::Context, Tier::Deep].into_iter().collect();
+    // One side has no change journal: the USN is not compared.
+    let mut a = with(key(None, None, "01"), early);
+    assert!(a.merge(with(key(Some(5), Some(9), "01"), late), &ctx()));
+    // A known USN that differs, or another file ID, refuses.
+    let mut a = with(key(Some(4), Some(9), "01"), early);
+    assert!(!a.merge(with(key(Some(5), Some(9), "01"), late), &ctx()));
+    let mut a = with(key(None, None, "01"), early);
+    assert!(!a.merge(with(key(None, None, "02"), late), &ctx()));
 }

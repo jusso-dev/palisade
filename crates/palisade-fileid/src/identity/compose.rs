@@ -1075,7 +1075,14 @@ fn context_tier(
     // The stream is read for the opened file itself: by the handle's final
     // path, and kept only if that path still names the same file, so the
     // record never pairs this file's content with another file's mark.
-    id.fs.motw = read_motw(file);
+    // A named stream has no mark of its own: `Zone.Identifier` is a stream
+    // of the host file, and the host's mark would credit the stream with a
+    // download origin it may not share.
+    id.fs.motw = if id.name.stream.is_some() {
+        Field::NotApplicable
+    } else {
+        read_motw(file)
+    };
     if let Field::Unavailable(why) = &id.fs.motw
         && cfg!(all(windows, feature = "os-trust"))
     {
@@ -1111,6 +1118,11 @@ fn context_tier(
 
 #[cfg(all(windows, feature = "os-trust"))]
 fn read_motw(file: &std::fs::File) -> Field<Option<MotwSummary>> {
+    // The handle may name a stream though the path given did not (a link
+    // to one): its own final path decides.
+    if crate::win::links::final_path_of(file).is_ok_and(|p| p.stream().is_some()) {
+        return Field::NotApplicable;
+    }
     match crate::win::links::read_motw_of(file) {
         Ok(m) => Field::Computed(m.as_ref().map(motw_summary)),
         Err(e) => Field::Unavailable(e.to_string()),
@@ -1179,13 +1191,33 @@ fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
         Err(e) => Field::Unavailable(unavailable(&e)),
     };
 
+    // The access check reopens by path: its verdict is kept only if that
+    // path still names the opened file before and after it ran, so the
+    // record never pairs this file's ID and owner with another file's
+    // writability. Otherwise it is unavailable, and the path stays Weak.
+    let still_this_file = |p: &str| {
+        let opened = links::read_meta(file)
+            .ok()
+            .and_then(|m| m.file_id.zip(m.volume_serial));
+        let at_path = links::open_link_itself(Path::new(p))
+            .and_then(|f| links::read_meta(&f))
+            .ok()
+            .and_then(|m| m.file_id.zip(m.volume_serial));
+        opened.is_some() && opened == at_path
+    };
     id.fs.user_writable = match &final_path {
+        Ok(p) if !still_this_file(p) => {
+            Field::Unavailable("the file's final path no longer names the opened file".to_owned())
+        }
         Ok(p) => match access::assess_file(
             Path::new(p),
             &crate::fsctx::EvaluationOptions::default(),
             AssessOptions::default(),
             &mut WritabilityCache::default(),
         ) {
+            Ok(_) if !still_this_file(p) => Field::Unavailable(
+                "the file's final path changed while its writability was read".to_owned(),
+            ),
             Ok(w) => Field::Computed(super::record::WritableSummary {
                 path_user_writable: w.path_user_writable(),
                 file_user_writable: w.file_user_writable,
@@ -1230,6 +1262,34 @@ fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
         }
         None => Field::NotApplicable,
     };
+
+    // Every field that could not be read is an error of the tier, as the
+    // `Field::Unavailable` contract says.
+    let failures: Vec<(&'static str, String)> = [
+        ("file_id_unreadable", unavailable_reason(&id.fs.file_id)),
+        ("owner_unreadable", unavailable_reason(&id.fs.owner)),
+        (
+            "writability_unreadable",
+            unavailable_reason(&id.fs.user_writable),
+        ),
+        ("streams_unreadable", unavailable_reason(&id.fs.streams)),
+        ("reparse_unreadable", unavailable_reason(&id.fs.reparse)),
+    ]
+    .into_iter()
+    .filter_map(|(code, why)| why.map(|w| (code, w)))
+    .collect();
+    for (code, why) in failures {
+        id.error(Tier::Context, code, why);
+    }
+}
+
+/// The reason of an unavailable field.
+#[cfg(all(windows, feature = "os-trust"))]
+fn unavailable_reason<T>(f: &Field<T>) -> Option<String> {
+    match f {
+        Field::Unavailable(why) => Some(why.clone()),
+        _ => None,
+    }
 }
 
 #[cfg(not(all(windows, feature = "os-trust")))]

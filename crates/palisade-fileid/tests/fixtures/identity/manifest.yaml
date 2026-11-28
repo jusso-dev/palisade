@@ -554,7 +554,8 @@
   source: "os"
   licence: "OS component: referenced by path, never copied"
   generator: "C:\\Windows\\System32\\notepad.exe"
-  description: "The file system context of an OS binary on the Windows runners (#54): a file with an ID on an NTFS volume, not a reparse point. The location, owner class and writability depend on the runner's disk and are checked for consistency by fs_context_on_windows_is_consistent."
+  description: "The file system context of an OS binary on the Windows runners (#54): a file with an ID on an NTFS volume, not a reparse point. The location, owner class and writability depend on the runner's disk and are checked for consistency by fs_context_on_windows_is_consistent. Read through the OS file system API, so only in builds with the os-trust feature."
+  requires: "os-trust"
   expected:
     fs_has_file_id: true
     fs_file_system: "ntfs"

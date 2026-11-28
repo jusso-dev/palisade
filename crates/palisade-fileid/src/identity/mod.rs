@@ -130,11 +130,24 @@ impl FileIdentity {
         }
         let final_path = |id: &Self| id.fs.path.computed().and_then(|p| p.final_path.clone());
         let times = |id: &Self| id.timestamps.computed().copied();
-        let file_key = |id: &Self| {
-            id.fs
-                .file_id
-                .computed()
-                .map(|f| (f.volume_serial, f.file_id.clone(), f.usn_journal_id, f.usn))
+        let fid = |id: &Self| id.fs.file_id.computed().cloned();
+        let (a_id, b_id) = (fid(self), fid(&other));
+        // Each part of the file key is compared on its own: a part only one
+        // record knows is not compared, and a known part that differs
+        // refuses the merge.
+        let key_differs = {
+            let a = a_id.as_ref();
+            let b = b_id.as_ref();
+            differ(
+                a.and_then(|f| f.volume_serial),
+                b.and_then(|f| f.volume_serial),
+            ) || differ(
+                a.and_then(|f| f.file_id.clone()),
+                b.and_then(|f| f.file_id.clone()),
+            ) || differ(
+                a.and_then(|f| f.usn_journal_id),
+                b.and_then(|f| f.usn_journal_id),
+            ) || differ(a.and_then(|f| f.usn), b.and_then(|f| f.usn))
         };
         // Attributes derived from the content (classify, hash, trust) are
         // joined only when both records carry the digest of the content
@@ -157,7 +170,7 @@ impl FileIdentity {
             || differ(self.content_sha256.as_ref(), other.content_sha256.as_ref())
             || content_unproven
             || differ(final_path(self), final_path(&other))
-            || differ(file_key(self), file_key(&other))
+            || key_differs
             || differ(
                 times(self).and_then(|t| t.modified),
                 times(&other).and_then(|t| t.modified),
