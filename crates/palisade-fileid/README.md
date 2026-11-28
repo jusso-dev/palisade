@@ -805,7 +805,17 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
   an archive without ZIP64 end records, which the OS rejects whatever its
   digest (Windows CI: the OS signing tool always writes them). A bundle's block map lists
   only its bundle manifest; each payload package must be a stored member at
-  the offset and of the size the bundle manifest gives. On Windows,
+  the offset and of the size the bundle manifest gives.
+  `PackageSignature::status()` gives the package-level verdict
+  (`PackageSignatureStatus`: `Valid`, `Rejected(issue)` by a package check,
+  or `Invalid` by the signatures themselves); the shared report keeps
+  `DigestMismatch` for both kinds of rejection. A digest input that is
+  present but unreadable (an over-limit `[Content_Types].xml`, a broken
+  code integrity catalog) is named as `DigestInput`.
+  `tests/package_signed.rs` signs packages at test time with a per-run key,
+  so a package changed **before** signing (a block map that leaves a file
+  out, a bundle manifest with a wrong payload offset) has a matching digest
+  and only the package check rejects it. On Windows,
   `tests/package_os.rs` checks the family names against the OS package
   identity API and the signature verdicts against the OS trust-verification
   API, on the committed fixtures and on a package and bundle that the OS
