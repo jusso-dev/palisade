@@ -103,11 +103,16 @@ pub enum FindingCode {
     RegexCost,
     /// `approved_at`, `created_at` or `last_reviewed_at` is in the future.
     FutureDatedMetadata,
+    /// A rule that requires a strong file hash also requires another
+    /// identity criterion (#31, #328). The hash already names one file;
+    /// the rest only narrows, and stops the rule matching that file if the
+    /// other fact changes or is unknown.
+    HashWithOtherCriteria,
 }
 
 impl FindingCode {
     /// Every code.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::WeakIdentity,
         Self::UserWritablePathAllow,
         Self::RestrictedPublisherBroad,
@@ -128,6 +133,7 @@ impl FindingCode {
         Self::TooManyHashRules,
         Self::RegexCost,
         Self::FutureDatedMetadata,
+        Self::HashWithOtherCriteria,
     ];
 
     /// The stable `snake_case` name.
@@ -154,6 +160,7 @@ impl FindingCode {
             Self::TooManyHashRules => "too_many_hash_rules",
             Self::RegexCost => "regex_cost",
             Self::FutureDatedMetadata => "future_dated_metadata",
+            Self::HashWithOtherCriteria => "hash_with_other_criteria",
         }
     }
 
@@ -167,7 +174,9 @@ impl FindingCode {
             | Self::VulnerableVersionAllowed
             | Self::MissingJustification
             | Self::ExceptionWithoutExpiry => FindingSeverity::Error,
-            Self::ExpiringSoon | Self::TooManyHashRules => FindingSeverity::Info,
+            Self::ExpiringSoon | Self::TooManyHashRules | Self::HashWithOtherCriteria => {
+                FindingSeverity::Info
+            }
             _ => FindingSeverity::Warning,
         }
     }
@@ -560,6 +569,14 @@ impl Analyser<'_> {
                 }
                 Guaranteed::Strong => {}
             }
+        }
+        if let Some(other) = hash_with_other(&rule.match_) {
+            self.push(
+                FindingCode::HashWithOtherCriteria,
+                me.clone(),
+                format!("this rule already names one file by its hash; `{other}` only narrows it, and stops the rule matching that file if it changes or is unknown"),
+                None,
+            );
         }
         self.signers(e);
         self.patterns(e);
@@ -1735,6 +1752,30 @@ pub fn publish_gate(findings: &[Finding], admin: Option<&Override>) -> Gate {
 #[must_use]
 pub fn due(rule: &Rule) -> Option<Date> {
     review_by(&rule.metadata, Some(rule.action.kind()))
+}
+
+/// The name of the first other identity field a tree requires beside a
+/// positive strong file hash, if it requires both (#31). Only criteria
+/// every match must satisfy count: under the root `all`, nested `all`
+/// nodes, or a one-child `any`. Context criteria (the user, device or
+/// session) say who or where, not which file, so they are not counted.
+fn hash_with_other(tree: &Match) -> Option<String> {
+    let required = identity::required_all(tree);
+    let strong_hash = |c: &&Criterion| {
+        c.operator == Operator::Equals
+            && !c.field.is_signer()
+            && !c.field.is_weak_hash()
+            && matches!(c.field.class(), FieldClass::Hash { .. })
+            && c.field.strength() == Some(crate::model::Strength::Strong)
+    };
+    if !required.iter().any(strong_hash) {
+        return None;
+    }
+    required
+        .iter()
+        .find(|c| !strong_hash(c) && !c.field.is_context())
+        .and_then(|c| serde_json::to_value(c.field).ok())
+        .and_then(|v| v.as_str().map(str::to_owned))
 }
 
 #[cfg(test)]
