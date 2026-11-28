@@ -39,6 +39,8 @@
 #![forbid(unsafe_code)]
 
 pub mod builtin;
+pub mod events;
+pub mod protect;
 pub mod store;
 mod subsystem;
 pub mod verify;
@@ -56,12 +58,11 @@ use palisade_policy::{
     bundle::{self, BundleLimits, Header},
     engine::{self, Engine, EngineConfig, Outcome, Request},
     scope::CompiledProfiles,
-    unknown::SystemBaseline,
 };
 use palisade_proto::{
     events::{Sha256Hex, Timestamp},
     policy_bundle::{
-        BundleMeta, EffectiveMode, Examined, Rejection, Target,
+        BundleMeta, EffectiveMode, Examined, Rejection, Target, content_hash,
         envelope::{self, RebuildError},
         record::{Record, RecordCopies, RecordKey},
         select::{self, CacheFile, Finding, Load, PendingOutcome, Startup},
@@ -69,9 +70,13 @@ use palisade_proto::{
     },
 };
 
-pub use builtin::Builtin;
-pub use store::{FileRecordStore, PolicyStore, RecordStore};
-pub use subsystem::{PolicyCacheSubsystem, STATUS_INTERVAL, health_of};
+pub use builtin::{AgentFacts, Builtin, Enforcement, SelfPin};
+pub use events::{BoundedSink, Detail, PolicyEvent, PolicyEventSink, Tamper};
+pub use protect::{MemoryProtector, Protector};
+pub use store::{
+    FileRecordStore, FileSlot, PolicyStore, ProtectedRecordStore, RecordSlot, RecordStore, Sealer,
+};
+pub use subsystem::{PolicyCacheSubsystem, REVERIFY_INTERVAL, STATUS_INTERVAL, health_of};
 pub use verify::{EnvelopeVerifier, Examination, SharedTrust, SignedEnvelopes};
 
 /// What an enrolled device's cache needs.
@@ -87,9 +92,12 @@ pub struct CacheSetup {
     pub key: RecordKey,
     /// Reads the envelope of a cache file (#325): [`SignedEnvelopes`].
     pub verifier: Box<dyn EnvelopeVerifier>,
-    /// The agent's `system_baseline` facts (#39), added to every bundle
-    /// it loads. `None` until the agent reports them.
-    pub baseline: Option<SystemBaseline>,
+    /// What the agent measured about itself and the device: the
+    /// `system_baseline` facts (#39) added to every bundle it loads, and
+    /// what the emergency policy is built from.
+    pub facts: AgentFacts,
+    /// Where policy-integrity events go (#63 later).
+    pub events: Arc<dyn PolicyEventSink>,
     /// The signature mode in force, after its gate.
     pub mode: EffectiveMode,
     /// `policy.stale_after`.
@@ -113,12 +121,21 @@ pub struct Active {
 }
 
 impl Active {
-    fn builtin(which: Builtin, config: EngineConfig) -> Self {
-        #[expect(
-            clippy::expect_used,
-            reason = "fixed policies with no rules; `builtins_validate_and_build` tests them"
-        )]
-        let engine = Engine::new(which.policy(), config).expect("the built-in policies build");
+    fn builtin(which: Builtin, facts: &AgentFacts, config: EngineConfig) -> Self {
+        let engine = Engine::new(which.policy(facts), config).unwrap_or_else(|e| {
+            // Validation rules this out; if it happened, the policy with
+            // no rules (block everything) runs instead.
+            tracing::error!(error = %e, "the built-in policy does not compile; it runs with no rules");
+            #[expect(
+                clippy::expect_used,
+                reason = "a fixed policy with no rules; `builtins_validate_and_build` tests it"
+            )]
+            Engine::new(which.policy(&AgentFacts {
+                enforcement: facts.enforcement,
+                ..AgentFacts::default()
+            }), config)
+            .expect("the built-in policies build")
+        });
         Self {
             engine,
             load: match which {
@@ -281,6 +298,30 @@ pub struct PolicyStatus {
     pub staleness: Option<Staleness>,
     /// The last bundle refused since startup, if any.
     pub last_rejection: Option<Rejection>,
+    /// Who enforces; with [`Load::Emergency`] under
+    /// [`Enforcement::NativeOnly`], the health is
+    /// `PolicyEmergencyUnenforced`.
+    pub enforcement: Enforcement,
+}
+
+/// What [`PolicyCache::reverify`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reverified {
+    /// A built-in policy runs, or the device is not enrolled: nothing to
+    /// check.
+    Builtin,
+    /// The running bundle and its cache file are as verified.
+    Intact,
+    /// The cache file changed, went missing or cannot be read; it was
+    /// rewritten from the verified bytes in memory, which keep running.
+    FileRestored(CacheFile),
+    /// The cache file changed and could not be rewritten. The verified
+    /// policy keeps running; the next check tries again.
+    FileNotRestored(CacheFile),
+    /// The running bundle no longer matches its hash, or no longer passes
+    /// the checks (for example its signing key left the trust set). The
+    /// cache was loaded again as at startup.
+    Reloaded(StartupReport),
 }
 
 /// State changed only under the activation lock.
@@ -305,6 +346,8 @@ pub struct PolicyCache {
     setup: Option<CacheSetup>,
     engine: EngineConfig,
     stale_after: StaleAfter,
+    facts: AgentFacts,
+    events: Arc<dyn PolicyEventSink>,
 }
 
 impl PolicyCache {
@@ -314,19 +357,33 @@ impl PolicyCache {
     pub fn new(setup: CacheSetup) -> Self {
         let engine = setup.engine;
         let stale_after = setup.stale_after;
-        Self::with(Some(setup), engine, stale_after)
+        let facts = setup.facts.clone();
+        let events = Arc::clone(&setup.events);
+        Self::with(Some(setup), engine, stale_after, facts, events)
     }
 
     /// A cache for a device that is not enrolled: it runs the first-install
     /// policy and refuses every bundle. Enrolment (#62) replaces it with
     /// [`Self::new`].
-    pub fn unenrolled(engine: EngineConfig) -> Self {
-        Self::with(None, engine, StaleAfter::DEFAULT)
+    pub fn unenrolled(engine: EngineConfig, events: Arc<dyn PolicyEventSink>) -> Self {
+        Self::with(
+            None,
+            engine,
+            StaleAfter::DEFAULT,
+            AgentFacts::default(),
+            events,
+        )
     }
 
-    fn with(setup: Option<CacheSetup>, engine: EngineConfig, stale_after: StaleAfter) -> Self {
+    fn with(
+        setup: Option<CacheSetup>,
+        engine: EngineConfig,
+        stale_after: StaleAfter,
+        facts: AgentFacts,
+        events: Arc<dyn PolicyEventSink>,
+    ) -> Self {
         Self {
-            active: ArcSwap::from_pointee(Active::builtin(Builtin::Emergency, engine)),
+            active: ArcSwap::from_pointee(Active::builtin(Builtin::Emergency, &facts, engine)),
             locked: Mutex::new(Locked {
                 record: None,
                 loadable_active: None,
@@ -336,7 +393,21 @@ impl PolicyCache {
             setup,
             engine,
             stale_after,
+            facts,
+            events,
         }
+    }
+
+    /// Where the cache's events go.
+    pub fn events(&self) -> &Arc<dyn PolicyEventSink> {
+        &self.events
+    }
+
+    fn emit(&self, detail: Detail) {
+        let _ = self.events.emit(PolicyEvent {
+            detail,
+            load: self.current().load,
+        });
     }
 
     /// The policy deciding now. Hold the returned `Arc` for the whole of one
@@ -361,6 +432,7 @@ impl PolicyCache {
         let Some(setup) = &self.setup else {
             self.active.store(Arc::new(Active::builtin(
                 Builtin::FirstInstall,
+                &self.facts,
                 self.engine,
             )));
             return StartupReport {
@@ -370,6 +442,29 @@ impl PolicyCache {
                 io_errors: Vec::new(),
             };
         };
+        let report = self.startup_locked(setup, &mut locked, now);
+        drop(locked);
+        self.emit_findings(&report);
+        report
+    }
+
+    fn emit_findings(&self, report: &StartupReport) {
+        for finding in &report.findings {
+            self.emit(match finding {
+                Finding::EmergencyLoaded => Detail::Emergency {
+                    enforced: self.facts.enforcement == Enforcement::Palisade,
+                },
+                other => Detail::Finding(*other),
+            });
+        }
+    }
+
+    fn startup_locked(
+        &self,
+        setup: &CacheSetup,
+        locked: &mut Locked,
+        now: Timestamp,
+    ) -> StartupReport {
         let mut io_errors = Vec::new();
         if let Err(e) = setup.store.remove(CacheFile::Pending) {
             io_errors.push(format!("deleting pending: {e}"));
@@ -410,7 +505,7 @@ impl PolicyCache {
             let Some(c) = candidate.as_mut() else {
                 break (selection, None);
             };
-            match c.compile(self.engine, setup.baseline.as_ref()) {
+            match c.compile(self.engine, setup.facts.baseline.as_ref()) {
                 Ok(compiled) => break (selection, Some((compiled, c.clone_file()))),
                 Err(()) => c.refuse_schema(),
             }
@@ -430,6 +525,7 @@ impl PolicyCache {
                 } else {
                     Builtin::Emergency
                 },
+                &self.facts,
                 self.engine,
             ),
         };
@@ -473,6 +569,12 @@ impl PolicyCache {
         if let Err(ActivateError::Rejected(r)) = &result {
             locked.last_rejection = Some(*r);
         }
+        drop(locked);
+        match &result {
+            Ok(Activated::Activated(meta)) => self.emit(Detail::Applied(*meta)),
+            Err(ActivateError::Rejected(r)) => self.emit(Detail::Rejected(*r)),
+            Ok(Activated::AlreadyCurrent) | Err(_) => {}
+        }
         result
     }
 
@@ -505,7 +607,7 @@ impl PolicyCache {
         // Compiled before anything is written, so a bundle that does not
         // build never reaches the disk.
         let compiled = candidate
-            .compile(self.engine, setup.baseline.as_ref())
+            .compile(self.engine, setup.facts.baseline.as_ref())
             .map_err(|()| ActivateError::Rejected(Rejection::SchemaUnsupported))?;
 
         let io = ActivateError::Io;
@@ -606,6 +708,80 @@ impl PolicyCache {
             load: current.load,
             staleness,
             last_rejection: locked.last_rejection,
+            enforcement: self.facts.enforcement,
+        }
+    }
+
+    /// Re-verifies the running bundle (#326): its bytes in memory against
+    /// the hash it was loaded with, its envelope against the trust set at
+    /// `now`, and its cache file on disk against the bytes in memory. Run it
+    /// periodically, and whenever a cache file may have changed.
+    ///
+    /// It fails closed. If the bundle in memory no longer matches or no
+    /// longer passes the checks, the cache is loaded again as at startup,
+    /// which may fall back to `previous` or the emergency policy. If only
+    /// the file changed, the verified bytes keep running and are written
+    /// back. Each finding raises an event. Blocking I/O: call it from a
+    /// blocking thread.
+    pub fn reverify(&self, now: Timestamp) -> Reverified {
+        let Some(setup) = &self.setup else {
+            return Reverified::Builtin;
+        };
+        let mut locked = self.lock();
+        let current = self.current();
+        let (Some(meta), Some((bytes, range))) = (current.bundle(), current.file.as_ref()) else {
+            return Reverified::Builtin;
+        };
+        let signed = matches!(
+            current.load,
+            Load::Active { signed: true, .. } | Load::Previous(_)
+        );
+        let examination = setup.verifier.examine(bytes, now, setup.mode);
+        let memory_intact = bytes
+            .get(range.clone())
+            .is_some_and(|b| content_hash(b) == meta.sha256)
+            && examination.bundle == *range;
+        let still_passes = match examination.examined {
+            Examined::Parsed {
+                meta: m,
+                signature_valid,
+                agent_supported,
+                schema_supported,
+            } => {
+                m == meta
+                    && agent_supported
+                    && schema_supported
+                    && (signature_valid || !signed)
+                    && (signature_valid || setup.mode.tolerates_invalid_signature())
+            }
+            Examined::Unreadable => false,
+        };
+        if !memory_intact || !still_passes {
+            let report = self.startup_locked(setup, &mut locked, now);
+            drop(locked);
+            if !memory_intact {
+                self.emit(Detail::Tamper(Tamper::Memory));
+            }
+            self.emit_findings(&report);
+            return Reverified::Reloaded(report);
+        }
+        let file = match current.load {
+            Load::Previous(_) => CacheFile::Previous,
+            _ => CacheFile::Active,
+        };
+        let on_disk = setup.store.read(file);
+        if matches!(&on_disk, Ok(Some(d)) if d.as_slice() == &bytes[..]) {
+            return Reverified::Intact;
+        }
+        let restored = setup.store.write(file, bytes);
+        drop(locked);
+        self.emit(Detail::Tamper(Tamper::File(file)));
+        match restored {
+            Ok(()) => Reverified::FileRestored(file),
+            Err(e) => {
+                tracing::error!(error = %e, ?file, "the policy cache file could not be restored");
+                Reverified::FileNotRestored(file)
+            }
         }
     }
 }
@@ -658,7 +834,7 @@ impl Candidate {
     fn compile(
         &self,
         config: EngineConfig,
-        baseline: Option<&SystemBaseline>,
+        baseline: Option<&palisade_policy::unknown::SystemBaseline>,
     ) -> Result<Compiled, ()> {
         let bytes = self
             .file

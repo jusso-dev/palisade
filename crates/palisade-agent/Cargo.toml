@@ -68,6 +68,9 @@ windows-sys = { workspace = true, features = [
     "Win32_NetworkManagement_NetManagement",
     "Win32_Networking_WinSock",
     "Win32_Security",
+    # Machine-scope DPAPI for the policy cache's data keys and
+    # anti-rollback record copies (#326).
+    "Win32_Security_Cryptography",
     # `MoveFileExW`, for the policy cache's durable rename (#61), and the
     # process monitor's drive-to-device map (#59).
     "Win32_Storage_FileSystem",
