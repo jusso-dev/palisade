@@ -575,6 +575,8 @@ pub const KEYS: &[Key] = &[
     k(524, "path.is_ads"),
     k(525, "path.share"),
     k(526, "path.user_can_change_acl"),
+    k(527, "meta.detected_type"),
+    k(528, "meta.extension_type"),
     k(-1, "description"),
     k(-2, "hidden"),
     k(-3, "category_path"),

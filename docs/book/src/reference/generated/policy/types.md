@@ -237,6 +237,8 @@ matcher.
 | `path.is_ads` | Whether the object is an alternate data stream of a file (#328). |
 | `path.share` | The `\\server\share` a file on a network share is under (#328), from its UNC path. A file on no share has none, so `equals` does not match it. |
 | `path.user_can_change_acl` | Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328). |
+| `meta.detected_type` | What the file's content is, from its bytes (#30, #328): `pe`, `msi`, `script`, `zip`, `lnk`, `text` and so on, in `palisade-fileid`'s names. `unknown` is a missing fact. |
+| `meta.extension_type` | What the file's name claims it is, from its extension (#30, #328): one of the `Self::MetaDetectedType` names, or `none` (no extension), `inert` (a document or media extension) or `other`. A PE renamed to `.pdf` has `meta.detected_type` `pe` and `meta.extension_type` `inert`. |
 
 ## FindingSeverity
 

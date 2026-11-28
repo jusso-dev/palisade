@@ -174,3 +174,29 @@ name = "a malformed msi product_version is unknown"
 criterion = { field = "msi.product_version", operator = "version_lt", values = ["2.1"] }
 fact = "two"
 expect = "unknown"
+
+# Content and extension types (#30): a PE renamed to look like a document.
+
+[[case]]
+name = "detected_type equals pe"
+criterion = { field = "meta.detected_type", operator = "equals", values = ["pe"] }
+fact = "pe"
+expect = "match"
+
+[[case]]
+name = "extension_type inert on a renamed PE"
+criterion = { field = "meta.extension_type", operator = "equals", values = ["inert"] }
+fact = "inert"
+expect = "match"
+
+[[case]]
+name = "an unknown detected_type is unknown, so its negation cannot match"
+criterion = { field = "meta.detected_type", operator = "not_equals", values = ["pe"] }
+fact = "unknown"
+expect = "unknown"
+
+[[case]]
+name = "an empty extension_type is unknown"
+criterion = { field = "meta.extension_type", operator = "equals", values = ["none"] }
+fact = ""
+expect = "unknown"
