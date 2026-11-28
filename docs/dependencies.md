@@ -110,8 +110,11 @@ with its Postgres driver, migration support and the rustls-based TLS with the OS
 exempted with a note that names #127, and raised 31 baseline exemptions (`syn`, `url`, the
 Unicode and ICU crates and their helpers) to `safe-to-deploy` the same way. App package
 identity (#53) added 2 more (`miniz_oxide`, raw DEFLATE for package members, and its checksum
-crate `adler2`), exempted with a note that names #53. The
-exemptions are the backlog.
+crate `adler2`), exempted with a note that names #53. Dependabot PRs #308 (`proptest`, `sha2`) and #309
+(`criterion` 0.8) were merged before `cargo vet` passed; the follow-up moved their exemptions to the
+new versions and exempted the 6 crates they added (`core_detect`, and for criterion `alloca`,
+`page_size` and `winapi` with its two import-library crates), all dev-only except `sha2`, with a
+note that names the PR. The exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (`cargo vet prune` removes exemptions that are no longer needed).
 
