@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-a76370ef.js";
+            window.path_to_searchindex_js = "../searchindex-50d710d5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -289,8 +289,11 @@ with its Postgres driver, migration support and the rustls-based TLS with the OS
 exempted with a note that names #127, and raised 31 baseline exemptions (<code>syn</code>, <code>url</code>, the
 Unicode and ICU crates and their helpers) to <code>safe-to-deploy</code> the same way. App package
 identity (#53) added 2 more (<code>miniz_oxide</code>, raw DEFLATE for package members, and its checksum
-crate <code>adler2</code>), exempted with a note that names #53. The
-exemptions are the backlog.
+crate <code>adler2</code>), exempted with a note that names #53. Dependabot PRs #308 (<code>proptest</code>, <code>sha2</code>) and #309
+(<code>criterion</code> 0.8) were merged before <code>cargo vet</code> passed; the follow-up moved their exemptions to the
+new versions and exempted the 6 crates they added (<code>core_detect</code>, and for criterion <code>alloca</code>,
+<code>page_size</code> and <code>winapi</code> with its two import-library crates), all dev-only except <code>sha2</code>, with a
+note that names the PR. The exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (<code>cargo vet prune</code> removes exemptions that are no longer needed).</p>
 <p>A new crate, or a version bump, fails <code>cargo vet</code> until one of these is done:</p>
