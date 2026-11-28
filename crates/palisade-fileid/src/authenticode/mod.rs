@@ -195,6 +195,7 @@ pub use verify::{
     MAX_CERTIFICATE_ENTRIES, MAX_CERTIFICATE_TABLE_SIZE, MAX_NESTING_DEPTH, MAX_SIGNATURES,
     verify_certificate_table, verify_pe, verify_signatures,
 };
+pub(crate) use x509::signature_digest;
 pub use x509::{
     AttributeKind, BasicConstraints, CertSummary, CertificateError, DistinguishedName, KeyUsage,
     NameAttribute,

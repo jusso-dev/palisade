@@ -289,6 +289,85 @@ impl DistinguishedName {
         }
         out
     }
+
+    /// The value of the only attribute of `kind`, when there is exactly
+    /// one and it is clean ([`NameAttribute::is_clean`]). `None` when there
+    /// is none, more than one (which one a rule means is ambiguous), or the
+    /// value is not an exact, control-free decoding.
+    #[must_use]
+    pub fn single(&self, kind: AttributeKind) -> Option<&str> {
+        let mut values = self.values(kind);
+        let first = values.next()?;
+        (values.next().is_none() && first.is_clean()).then_some(first.value.as_str())
+    }
+
+    /// The name as RFC 4514 writes it: RDNs in reverse encoded order,
+    /// separated by `,` with no space, the attributes of a multi-valued RDN
+    /// joined by `+`, each `LABEL=value` with the RFC 4514 labels (`CN`,
+    /// `L`, `ST`, `O`, `OU`, `C`, `STREET`, `DC`) or the dotted OID, and
+    /// the special characters escaped with `\`. `None` for an empty name,
+    /// or when any value is not an exact, control-free decoding: such a
+    /// string could match a pattern meant for another name.
+    #[must_use]
+    pub fn rfc4514(&self) -> Option<String> {
+        if self.rdns.is_empty()
+            || self
+                .attributes()
+                .any(|a| a.lossy || a.value.chars().any(char::is_control))
+        {
+            return None;
+        }
+        let mut out = String::new();
+        for (i, rdn) in self.rdns.iter().rev().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            for (j, attr) in rdn.iter().enumerate() {
+                if j > 0 {
+                    out.push('+');
+                }
+                match attr.kind.and_then(AttributeKind::rfc4514_label) {
+                    Some(label) => out.push_str(label),
+                    None => out.push_str(&attr.oid.to_string()),
+                }
+                out.push('=');
+                push_rfc4514_escaped(&mut out, &attr.value);
+            }
+        }
+        Some(out)
+    }
+}
+
+impl AttributeKind {
+    /// The short name RFC 4514 (section 3) gives the attribute, if any.
+    const fn rfc4514_label(self) -> Option<&'static str> {
+        Some(match self {
+            Self::CommonName => "CN",
+            Self::Locality => "L",
+            Self::State => "ST",
+            Self::Organization => "O",
+            Self::OrganizationalUnit => "OU",
+            Self::Country => "C",
+            Self::Street => "STREET",
+            Self::DomainComponent => "DC",
+            _ => return None,
+        })
+    }
+}
+
+/// RFC 4514 section 2.4: `"` `+` `,` `;` `<` `>` `\` anywhere, `#` or a
+/// space at the start and a space at the end are escaped with `\`.
+fn push_rfc4514_escaped(out: &mut String, value: &str) {
+    let last = value.chars().count().saturating_sub(1);
+    for (i, c) in value.chars().enumerate() {
+        let special = matches!(c, '"' | '+' | ',' | ';' | '<' | '>' | '\\')
+            || (i == 0 && matches!(c, '#' | ' '))
+            || (i == last && c == ' ');
+        if special {
+            out.push('\\');
+        }
+        out.push(c);
+    }
 }
 
 impl fmt::Display for DistinguishedName {
@@ -1218,6 +1297,84 @@ mod tests {
             DistinguishedName::render(&rdns),
             "OID.1.3.6.1.4.1.311.60.2.1.3=\" x\", CN=A + OU=\"\", O=\"Tests, \"\"Pty\"\"\", C=AU"
         );
+    }
+
+    #[test]
+    fn rfc4514_rendering_and_single_attributes() {
+        let attr = |kind, oid: &[u8], value: &str, lossy| NameAttribute {
+            oid: ObjectId::from_der(oid),
+            kind: Some(kind),
+            value: value.into(),
+            lossy,
+        };
+        let name = |rdns: Vec<Vec<NameAttribute>>| DistinguishedName {
+            der: Vec::new(),
+            canonical: DistinguishedName::render(&rdns),
+            rdns,
+        };
+        let dn = name(vec![
+            vec![attr(AttributeKind::Country, oid::AT_COUNTRY, "AU", false)],
+            vec![attr(AttributeKind::State, oid::AT_STATE, "NSW", false)],
+            vec![attr(
+                AttributeKind::Organization,
+                oid::AT_ORGANIZATION,
+                "Tests, \"Pty\"",
+                false,
+            )],
+            vec![
+                attr(AttributeKind::CommonName, oid::AT_COMMON_NAME, "#A ", false),
+                attr(AttributeKind::Email, oid::AT_EMAIL, "a+b@x", false),
+            ],
+        ]);
+        assert_eq!(
+            dn.rfc4514().as_deref(),
+            Some(r#"CN=\#A\ +1.2.840.113549.1.9.1=a\+b@x,O=Tests\, \"Pty\",ST=NSW,C=AU"#)
+        );
+        assert_eq!(dn.single(AttributeKind::Country), Some("AU"));
+        // Not clean: a value that starts with `#` is fine, one that is only
+        // whitespace is not; two attributes of a kind are ambiguous.
+        assert_eq!(dn.single(AttributeKind::CommonName), Some("#A "));
+        assert_eq!(dn.single(AttributeKind::Surname), None);
+        let two = name(vec![
+            vec![attr(
+                AttributeKind::CommonName,
+                oid::AT_COMMON_NAME,
+                "A",
+                false,
+            )],
+            vec![attr(
+                AttributeKind::CommonName,
+                oid::AT_COMMON_NAME,
+                "B",
+                false,
+            )],
+        ]);
+        assert_eq!(two.single(AttributeKind::CommonName), None);
+        assert_eq!(two.rfc4514().as_deref(), Some("CN=B,CN=A"));
+        let lossy = name(vec![vec![attr(
+            AttributeKind::CommonName,
+            oid::AT_COMMON_NAME,
+            "A",
+            true,
+        )]]);
+        assert_eq!(lossy.single(AttributeKind::CommonName), None);
+        assert_eq!(lossy.rfc4514(), None);
+        let control = name(vec![vec![attr(
+            AttributeKind::CommonName,
+            oid::AT_COMMON_NAME,
+            "A\u{0}B",
+            false,
+        )]]);
+        assert_eq!(control.rfc4514(), None);
+        assert_eq!(name(Vec::new()).rfc4514(), None);
+        let blank = name(vec![vec![attr(
+            AttributeKind::CommonName,
+            oid::AT_COMMON_NAME,
+            " ",
+            false,
+        )]]);
+        assert_eq!(blank.single(AttributeKind::CommonName), None);
+        assert_eq!(blank.rfc4514().as_deref(), Some(r"CN=\ "));
     }
 
     #[test]

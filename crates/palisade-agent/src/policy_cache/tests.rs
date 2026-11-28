@@ -1600,3 +1600,66 @@ fn a_sealed_cache_activates_restarts_and_falls_back_like_a_plain_one() {
         report.findings
     );
 }
+
+/// The facts bridge's request decides through the cache's evaluator: a
+/// hash allow on a file identified by `palisade_fileid` lets it run, and
+/// the same file with its hashes not computed yet asks for them.
+#[test]
+fn bridged_facts_decide_through_the_active_policy() {
+    use palisade_fileid::identity::{IdentityContext, Tier, Tiers, identify_bytes};
+    let bytes = b"MZ not really a program";
+    let id = identify_bytes(
+        bytes,
+        Some("a.exe"),
+        Tiers::ALL,
+        &IdentityContext::untrusted(0),
+    );
+    let bridged = crate::facts::from_identity(&id, &VolumeMap::new());
+    let sha = bridged
+        .facts
+        .get(palisade_policy::model::Field::HashSha256)
+        .unwrap()
+        .to_owned();
+    let policy = palisade_policy::test_util::PolicyBuilder::new()
+        .rule_set(
+            palisade_policy::test_util::RuleSetBuilder::allowlist(1).rule(
+                palisade_policy::test_util::RuleBuilder::allow(
+                    1,
+                    palisade_policy::test_util::criterion(
+                        palisade_policy::model::Field::HashSha256,
+                        palisade_policy::model::Operator::Equals,
+                        &[&sha],
+                    ),
+                ),
+            ),
+        )
+        .validate();
+    let engine = palisade_policy::engine::Engine::new(policy, EngineConfig::default()).unwrap();
+    let snapshot = engine.snapshot();
+    let state = DeviceState::of(&snapshot.policy().document().policy);
+    let (vars, ctx) = (PathVariables::new(), EvaluationContext::new());
+    let ask = |b: &crate::facts::Bridged| {
+        engine.evaluate(
+            &b.request(
+                ObjectType::Executable,
+                &vars,
+                &ctx,
+                &state,
+                TraceId([2; 16]),
+            ),
+            &SystemClock::new(),
+        )
+    };
+    let Outcome::Decided(Some(d)) = ask(&bridged) else {
+        panic!("not decided");
+    };
+    assert_eq!(d.outcome(), Verdict2::Allowed);
+    let stat = identify_bytes(
+        bytes,
+        Some("a.exe"),
+        Tier::Stat.into(),
+        &IdentityContext::untrusted(0),
+    );
+    let early = crate::facts::from_identity(&stat, &VolumeMap::new());
+    assert!(matches!(ask(&early), Outcome::NeedFacts(_)));
+}

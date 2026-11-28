@@ -1346,6 +1346,7 @@ dependencies = [
  "palisade-fileid",
  "palisade-policy",
  "palisade-proto",
+ "proptest",
  "serde",
  "serde_json",
  "sha2",

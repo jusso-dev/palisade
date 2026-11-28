@@ -857,6 +857,8 @@ fn trust_tier(
                         .and_then(|i| i.publisher_name.as_ref())
                         .map(|p| p.value.clone()),
                     signer: chain.and_then(ChainReport::leaf_cert).map(cert_brief),
+                    signer_chain: chain.map(chain_briefs).unwrap_or_default(),
+                    signer_chain_complete: chain.is_some_and(|c| c.chain_complete),
                 });
             }
             if found.truncated {
@@ -946,6 +948,10 @@ fn trust_tier(
                 validity_error: v.map_or(VerificationError::Generic, |v| v.error),
                 trusted_signing_time: v.and_then(|v| v.signing_time),
                 timestamps: sig.timestamp_tokens.len(),
+                rfc3161_timestamp: v.and_then(|v| rfc3161_verified(&v.timestamps)),
+                expired_now: t
+                    .and_then(|t| t.chain.as_ref())
+                    .map(|c| chain_expired_at(c, validity.effective_now)),
                 chain: t.and_then(|t| t.chain.as_ref()).map(chain_summary),
             });
         }
@@ -1709,6 +1715,7 @@ fn version_summary(v: &VersionInfo) -> VersionSummary {
         file_version_quad: v.file_version().map(|q| q.to_string()),
         product_version_quad: v.product_version().map(|q| q.to_string()),
         language: v.selected_table().map(|t| t.key.clone()),
+        legal_copyright: get(VersionField::LegalCopyright),
     }
 }
 
@@ -2126,6 +2133,7 @@ const fn status_name(s: &SignatureStatus) -> &'static str {
 }
 
 fn cert_brief(c: &CertSummary) -> CertBrief {
+    use crate::authenticode::AttributeKind;
     CertBrief {
         subject: c.subject.canonical.clone(),
         issuer: c.issuer.canonical.clone(),
@@ -2137,12 +2145,38 @@ fn cert_brief(c: &CertSummary) -> CertBrief {
         tbs_hash: c.tbs_hash.clone(),
         tbs_hash_alg: c.tbs_hash_alg,
         tbs_hash_sha256: c.tbs_hash_sha256.clone(),
+        spki_sha256: c.spki_sha256.clone(),
+        subject_cn: c
+            .subject
+            .single(AttributeKind::CommonName)
+            .map(str::to_owned),
+        subject_o: c
+            .subject
+            .single(AttributeKind::Organization)
+            .map(str::to_owned),
+        issuer_cn: c
+            .issuer
+            .single(AttributeKind::CommonName)
+            .map(str::to_owned),
+        subject_rfc4514: c.subject.rfc4514(),
+        extended_key_usage: c
+            .extended_key_usage
+            .as_ref()
+            .map(|list| list.iter().map(|e| e.oid.to_string()).collect()),
+        key_alg: c.public_key_alg.clone(),
+        key_bits: c.key_bits,
+        signature_digest: crate::authenticode::signature_digest(&c.sig_alg),
     }
 }
 
 /// The last certificate of the full chain.
 fn full_root(c: &ChainReport) -> Option<&CertSummary> {
     c.full_chain.certs.last().and_then(|i| c.cert(*i))
+}
+
+/// Every certificate of the full chain, leaf first.
+fn chain_briefs(c: &ChainReport) -> Vec<CertBrief> {
+    c.full_chain_certs().map(cert_brief).collect()
 }
 
 fn chain_summary(c: &ChainReport) -> ChainSummary {
@@ -2155,7 +2189,40 @@ fn chain_summary(c: &ChainReport) -> ChainSummary {
         anchored_to: c.anchored_to.as_ref().map(|a| a.label.clone()),
         well_known_root_id: c.well_known_root_id,
         issues: c.issues.len(),
+        certs: chain_briefs(c),
+        complete: c.chain_complete,
     }
+}
+
+/// Whether an RFC 3161 timestamp of a signature verifies: `Some(true)` if
+/// one does; `Some(false)` if every RFC 3161 token was checked (or there is
+/// none) and none verified; `None` if one was left unchecked.
+fn rfc3161_verified(timestamps: &[crate::authenticode::TimestampInfo]) -> Option<bool> {
+    use crate::authenticode::{TimestampKind, TimestampStatus};
+    let tokens = timestamps
+        .iter()
+        .filter(|t| t.kind == TimestampKind::Rfc3161);
+    let mut unchecked = false;
+    for t in tokens {
+        if t.valid {
+            return Some(true);
+        }
+        unchecked |= t.status == TimestampStatus::NotChecked;
+    }
+    (!unchecked).then_some(false)
+}
+
+/// Whether a certificate of `chain` whose validity period counts had
+/// expired at `now`: the full chain, without a configured anchor at its
+/// top, as #50 judges expiry.
+fn chain_expired_at(chain: &ChainReport, now: i64) -> bool {
+    let certs: Vec<&CertSummary> = chain.full_chain_certs().collect();
+    let take = if chain.full_chain.anchored && certs.len() > 1 {
+        certs.len().saturating_sub(1)
+    } else {
+        certs.len()
+    };
+    certs.iter().take(take).any(|c| now > c.not_after)
 }
 
 /// The signing verdict from its evidence. `revoked` is a revoked file hash,

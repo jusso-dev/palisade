@@ -579,6 +579,8 @@ pub struct VersionSummary {
     pub product_version_quad: Option<String>,
     /// The selected block's key (language and code page).
     pub language: Option<String>,
+    /// `LegalCopyright`.
+    pub legal_copyright: Option<String>,
 }
 
 /// The #45 elevation heuristic.
@@ -816,6 +818,15 @@ pub struct SignatureSummary {
     pub trusted_signing_time: Option<i64>,
     /// How many timestamps it carries.
     pub timestamps: usize,
+    /// Whether an RFC 3161 timestamp on it verifies: `Some(false)` only
+    /// when every RFC 3161 token it carries was checked and none verified
+    /// (or it carries none); `None` when one was left unchecked (a limit)
+    /// and none verified.
+    pub rfc3161_timestamp: Option<bool>,
+    /// Whether a certificate whose validity period counts (the full chain,
+    /// without a configured anchor at its top) had expired at the time
+    /// judged against. `None` without a chain.
+    pub expired_now: Option<bool>,
     /// The chain of its signer certificate.
     pub chain: Option<ChainSummary>,
 }
@@ -839,6 +850,11 @@ pub struct ChainSummary {
     pub well_known_root_id: Option<u8>,
     /// How many issues chain building found.
     pub issues: usize,
+    /// Every certificate of the full chain, leaf first.
+    pub certs: Vec<CertBrief>,
+    /// The full chain ends at a self-signed certificate or a trust anchor:
+    /// nothing is missing above it.
+    pub complete: bool,
 }
 
 /// The content tags of a file (#44).
@@ -1149,6 +1165,29 @@ pub struct CertBrief {
     pub tbs_hash_alg: Option<DigestAlgorithm>,
     /// The SHA-256 of the TBS certificate.
     pub tbs_hash_sha256: String,
+    /// The SHA-256 of the DER `SubjectPublicKeyInfo`: the key, whatever
+    /// certificate carries it (#318).
+    pub spki_sha256: String,
+    /// The subject's common name, when it has exactly one and it is an
+    /// exact, control-free decoding.
+    pub subject_cn: Option<String>,
+    /// The subject's organisation (`O`), the same way.
+    pub subject_o: Option<String>,
+    /// The issuer's common name, the same way.
+    pub issuer_cn: Option<String>,
+    /// The subject as RFC 4514 writes it. `None` for an empty subject, or
+    /// one with a value that is not an exact, control-free decoding.
+    pub subject_rfc4514: Option<String>,
+    /// The `extKeyUsage` extension's OIDs, dotted, in encoded order.
+    /// `None` when the extension is absent.
+    pub extended_key_usage: Option<Vec<String>>,
+    /// The subject key's algorithm.
+    pub key_alg: KeyAlgorithm,
+    /// The subject key's size in bits: the RSA modulus, or the curve size.
+    pub key_bits: Option<u32>,
+    /// The digest the issuer signed this certificate with. `None` when its
+    /// signature algorithm names none (Ed25519, or an unknown algorithm).
+    pub signature_digest: Option<DigestAlgorithm>,
 }
 
 /// A catalog that lists the file (#51).
@@ -1181,6 +1220,12 @@ pub struct CatalogMatchSummary {
     pub publisher_name: Option<String>,
     /// The catalog's signer certificate, trusted or not.
     pub signer: Option<CertBrief>,
+    /// Every certificate of the catalog signer's full chain, leaf first.
+    /// Empty when no chain was built.
+    pub signer_chain: Vec<CertBrief>,
+    /// The catalog signer's full chain ends at a self-signed certificate or
+    /// a trust anchor.
+    pub signer_chain_complete: bool,
 }
 
 /// File system context (#54).
