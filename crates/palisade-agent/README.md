@@ -39,8 +39,13 @@ The policy-delivered and local-override layers come with the policy cache (#61).
 - `subsystem`: the `Subsystem` trait (`name`, `criticality`, `dependencies`, `run`, `health`, `start_timeout`, `stop_timeout`). A run calls `set_ready` once initialised, works until `stopped()` resolves, and returns by the given deadline.
 - `supervisor`: starts subsystems in dependency order, which must be acyclic. A subsystem's dependents wait until it is ready. A run that fails is restarted with exponential backoff from 1 s to 5 min. Failure means an error, an early exit, a panic or a start timeout. A panic is contained in that subsystem's task. Three panics within 10 minutes mark the subsystem `Failed`. Shutdown runs in reverse order within a budget, and subsystems that miss their deadline are aborted.
 - `lifecycle`: the agent states (`Starting`, `Running`, `Degraded`, `SafeMode`, `Updating`, `Stopping`, `Stopped`, `FailSafe`) and the legal transitions between them. A permanently failed critical subsystem forces `FailSafe`, and only stopping leaves it.
-- `host`: the tokio runtime (ADR 0009), logging to standard error, the panic hook and the console run loop.
-- `service` (Windows): the service control manager integration. It handles `STOP` (20 s budget) and `PRESHUTDOWN`/`SHUTDOWN` (10 s budget).
+- `host`: the tokio runtime (ADR 0009), logging to standard error with a level that can change at run time, the panic hook, the `config` subsystem and the console run loop.
+- `control`: OS notifications as `HostEvent`s (session, power, parameter and time changes), which every subsystem can follow through `SubsystemContext::host_events`, and the `TamperGuard` trait that decides whether `STOP` is offered (#220 implements it; until then `STOP` is always allowed).
+- `service` (Windows): the service control manager integration. It handles `STOP` (20 s budget, offered only while the tamper guard allows it), `PRESHUTDOWN`/`SHUTDOWN` (10 s budget), and turns `POWEREVENT`, `SESSIONCHANGE`, `PARAMCHANGE` and `TIMECHANGE` into host events. `PARAMCHANGE` makes the `config` subsystem read the configuration again; a reload that fails keeps the current configuration.
+
+### Adding a subsystem
+
+Implement `Subsystem`, give it a stable `name`, choose its `criticality` and list the names it depends on in `dependencies` (usually at least `config`). Construct it in `host::builtin_subsystems` with what it needs, such as a `ConfigSubsystem::subscribe` receiver, after the subsystems it depends on. In `run`, subscribe to `ctx.host_events()` if it needs OS notifications, call `ctx.set_ready()` once initialised, and return by the deadline `ctx.stopped()` gives.
 
 ## Platform layer
 

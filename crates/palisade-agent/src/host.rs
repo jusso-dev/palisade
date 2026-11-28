@@ -7,17 +7,22 @@ use std::{
     future::Future,
     io,
     process::ExitCode,
-    sync::{Arc, Once},
+    sync::{Arc, Once, OnceLock},
     time::Duration,
 };
 
-use tokio::runtime::Runtime;
+use tokio::{
+    runtime::Runtime,
+    sync::{broadcast, mpsc, watch},
+};
+use tracing_subscriber::filter::LevelFilter;
 
 use crate::{
     cli::Args,
     config::{self, AgentConfig, LoadedConfig, LogLevel, RuntimeConfig},
+    control::{Control, HostEvent, TamperGuard},
     subsystem::{BoxFuture, Criticality, Subsystem, SubsystemContext, SubsystemError},
-    supervisor::{RestartPolicy, ShutdownReport, Supervisor, SupervisorError},
+    supervisor::{HostEvents, RestartPolicy, ShutdownReport, Supervisor, SupervisorError},
 };
 
 /// Budget for a requested stop (service `STOP`, Ctrl-C).
@@ -82,22 +87,46 @@ pub fn build_runtime(runtime: &RuntimeConfig) -> io::Result<Runtime> {
         .build()
 }
 
+/// The handle that changes the log level of the subscriber
+/// [`init_logging`] installed.
+static LOG_LEVEL: OnceLock<
+    tracing_subscriber::reload::Handle<LevelFilter, tracing_subscriber::Registry>,
+> = OnceLock::new();
+
+fn level_filter(level: LogLevel) -> LevelFilter {
+    match level {
+        LogLevel::Error => LevelFilter::ERROR,
+        LogLevel::Warn => LevelFilter::WARN,
+        LogLevel::Info => LevelFilter::INFO,
+        LogLevel::Debug => LevelFilter::DEBUG,
+        LogLevel::Trace => LevelFilter::TRACE,
+    }
+}
+
 /// Sends `tracing` records at or above `level` to standard error. Rotating
 /// log files and the event-log channel are still to come (#56). Safe to call
-/// more than once; only the first call has an effect.
+/// more than once; only the first call has an effect. The level can be
+/// changed later with [`set_log_level`].
 pub fn init_logging(level: LogLevel) {
-    let filter = match level {
-        LogLevel::Error => tracing::Level::ERROR,
-        LogLevel::Warn => tracing::Level::WARN,
-        LogLevel::Info => tracing::Level::INFO,
-        LogLevel::Debug => tracing::Level::DEBUG,
-        LogLevel::Trace => tracing::Level::TRACE,
-    };
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(filter)
-        .with_writer(io::stderr)
-        .with_ansi(false)
-        .try_init();
+    use tracing_subscriber::{layer::SubscriberExt, reload};
+    let (filter, handle) = reload::Layer::new(level_filter(level));
+    let subscriber = tracing_subscriber::registry().with(filter).with(
+        tracing_subscriber::fmt::layer()
+            .with_writer(io::stderr)
+            .with_ansi(false),
+    );
+    if tracing::subscriber::set_global_default(subscriber).is_ok() {
+        let _ = LOG_LEVEL.set(handle);
+    }
+}
+
+/// Changes the level of the subscriber [`init_logging`] installed, at run
+/// time (a reloaded configuration, and later IPC or policy). Returns `false`
+/// if this process's subscriber was not installed by [`init_logging`].
+pub fn set_log_level(level: LogLevel) -> bool {
+    LOG_LEVEL
+        .get()
+        .is_some_and(|handle| handle.reload(level_filter(level)).is_ok())
 }
 
 /// Routes panics to the log, with a backtrace. Panics inside subsystem tasks
@@ -118,12 +147,24 @@ pub fn install_panic_hook() {
     });
 }
 
-/// The `config` subsystem: holds the effective configuration that other
-/// subsystems read. Reloading on `PARAMCHANGE` and the policy-delivered and
-/// local-override layers come with the policy cache (#61).
+/// The `config` subsystem: holds the effective configuration and publishes
+/// every change of it.
+///
+/// Other subsystems get a receiver from [`ConfigSubsystem::subscribe`] when
+/// they are registered, and declare a dependency on [`ConfigSubsystem::NAME`].
+///
+/// On [`HostEvent::ParamChange`] (the service's `PARAMCHANGE` control), it
+/// reads the configuration again from where it was first read: the same
+/// file, or the default path if the agent started on built-in defaults. A
+/// reload that fails keeps the current configuration and logs the error;
+/// it never falls back to the defaults, which could be weaker (ADR 0018).
+/// The log level applies at once. Runtime sizes apply at the next start.
+///
+/// The policy-delivered and local-override layers come with the policy
+/// cache (#61).
 #[derive(Debug)]
 pub struct ConfigSubsystem {
-    loaded: LoadedConfig,
+    current: watch::Sender<LoadedConfig>,
 }
 
 impl ConfigSubsystem {
@@ -132,12 +173,44 @@ impl ConfigSubsystem {
 
     /// Wraps a loaded configuration.
     pub fn new(loaded: LoadedConfig) -> Self {
-        Self { loaded }
+        Self {
+            current: watch::channel(loaded).0,
+        }
     }
 
-    /// The effective configuration.
-    pub fn config(&self) -> &AgentConfig {
-        &self.loaded.config
+    /// The effective configuration now.
+    pub fn config(&self) -> AgentConfig {
+        self.current.borrow().config.clone()
+    }
+
+    /// A receiver that sees every change of the effective configuration.
+    pub fn subscribe(&self) -> watch::Receiver<LoadedConfig> {
+        self.current.subscribe()
+    }
+
+    /// Reads the configuration again and applies it if it loaded. Returns
+    /// whether it changed.
+    pub fn reload(&self) -> Result<bool, config::ConfigError> {
+        let source = self.current.borrow().source.clone();
+        let next = config::load(source.as_deref())?;
+        let previous = self.current.borrow().clone();
+        if next == previous {
+            return Ok(false);
+        }
+        if next.config.runtime != previous.config.runtime {
+            tracing::warn!("runtime sizes changed; they apply when the agent restarts");
+        }
+        if next.config.log_level != previous.config.log_level {
+            set_log_level(next.config.log_level);
+        }
+        tracing::info!(
+            fail_mode = ?next.config.fail_mode,
+            safe_mode_behaviour = ?next.config.safe_mode_behaviour,
+            log_level = ?next.config.log_level,
+            "configuration reloaded"
+        );
+        self.current.send_replace(next);
+        Ok(true)
     }
 }
 
@@ -152,25 +225,53 @@ impl Subsystem for ConfigSubsystem {
 
     fn run(self: Arc<Self>, ctx: SubsystemContext) -> BoxFuture<Result<(), SubsystemError>> {
         Box::pin(async move {
-            let config = &self.loaded.config;
-            tracing::info!(
-                source = %self.loaded.source.as_ref().map_or("built-in defaults".into(), |p| p.display().to_string()),
-                fail_mode = ?config.fail_mode,
-                safe_mode_behaviour = ?config.safe_mode_behaviour,
-                "configuration loaded"
-            );
+            let mut events = ctx.host_events();
+            {
+                let loaded = self.current.borrow();
+                tracing::info!(
+                    source = %loaded.source.as_ref().map_or("built-in defaults".into(), |p| p.display().to_string()),
+                    fail_mode = ?loaded.config.fail_mode,
+                    safe_mode_behaviour = ?loaded.config.safe_mode_behaviour,
+                    "configuration loaded"
+                );
+            }
             ctx.set_ready();
-            ctx.stopped().await;
-            Ok(())
+            loop {
+                tokio::select! {
+                    _ = ctx.stopped() => return Ok(()),
+                    event = events.recv() => match event {
+                        // A lagged receiver may have missed a reload request.
+                        Ok(HostEvent::ParamChange) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let this = Arc::clone(&self);
+                            match tokio::task::spawn_blocking(move || this.reload()).await {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => tracing::error!(
+                                    error = %e,
+                                    "configuration reload failed; keeping the current configuration"
+                                ),
+                                Err(e) => tracing::error!(error = %e, "configuration reload did not finish"),
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(broadcast::error::RecvError::Closed) => {
+                            ctx.stopped().await;
+                            return Ok(());
+                        }
+                    },
+                }
+            }
         })
     }
 }
 
 /// The subsystems the host registers. Subsystems from later issues (policy
 /// cache #61, server comms #62, ETW #59 and others) are added here as they
-/// land.
+/// land: construct them with what they need (for example a
+/// [`ConfigSubsystem::subscribe`] receiver), declare their dependencies, and
+/// push them after the subsystems they depend on.
 pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
-    vec![Arc::new(ConfigSubsystem::new(loaded.clone()))]
+    let config = Arc::new(ConfigSubsystem::new(loaded.clone()));
+    vec![config]
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the
@@ -190,6 +291,51 @@ pub async fn run_until(
         tracing::info!(subsystem = name, ?outcome, "subsystem stopped");
     }
     (request, report)
+}
+
+/// Serves the controls the service control handler sends, until a stop.
+///
+/// [`Control::Event`]s are published to the subsystems through `events`.
+/// Every change of the `guard`'s stop permission, and its value at the
+/// start, is passed to `on_permission`, which re-reports the accepted
+/// controls. A guard that goes away leaves the last permission in place.
+/// Returns the stop request, or a [`StopReason::ChannelClosed`] stop if the
+/// handler has gone away.
+pub async fn serve_controls(
+    mut controls: mpsc::UnboundedReceiver<Control>,
+    events: HostEvents,
+    guard: &dyn TamperGuard,
+    mut on_permission: impl FnMut(bool),
+) -> StopRequest {
+    let mut permission = guard.stop_permission();
+    on_permission(*permission.borrow_and_update());
+    let mut guard_open = true;
+    loop {
+        tokio::select! {
+            control = controls.recv() => match control {
+                Some(Control::Stop(request)) => return request,
+                Some(Control::Event(event)) => {
+                    events.publish(event);
+                }
+                None => {
+                    return StopRequest {
+                        reason: StopReason::ChannelClosed,
+                        budget: STOP_BUDGET,
+                    };
+                }
+            },
+            changed = permission.changed(), if guard_open => {
+                if changed.is_ok() {
+                    let allowed = *permission.borrow_and_update();
+                    tracing::info!(allowed, "service stop permission changed");
+                    on_permission(allowed);
+                } else {
+                    tracing::warn!("the tamper guard has gone away; keeping the last stop permission");
+                    guard_open = false;
+                }
+            }
+        }
+    }
 }
 
 /// Grace period for blocking-pool threads after the supervisor has stopped.
