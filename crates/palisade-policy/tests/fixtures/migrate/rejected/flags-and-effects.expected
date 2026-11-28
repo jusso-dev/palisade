@@ -1,0 +1,1 @@
+cannot migrate from version 0: /rule_sets/0/rules/0/flags: a rule has `flags` (v0) and `effects` (v1); keep one
