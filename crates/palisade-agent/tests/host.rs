@@ -20,7 +20,7 @@ async fn run_until_starts_then_stops_on_request() {
         source: None,
     };
     let supervisor = host::supervisor(&loaded).unwrap();
-    assert_eq!(supervisor.start_order(), ["config"]);
+    assert_eq!(supervisor.start_order(), ["config", "clock"]);
     let mut started = false;
     let (request, report) = host::run_until(supervisor, || started = true, async {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -30,7 +30,13 @@ async fn run_until_starts_then_stops_on_request() {
     assert!(started);
     assert_eq!(request.reason, StopReason::SystemShutdown);
     assert_eq!(request.budget, host::SHUTDOWN_BUDGET);
-    assert_eq!(report.outcomes, [("config", StopOutcome::Clean)]);
+    assert_eq!(
+        report.outcomes,
+        [
+            ("clock", StopOutcome::Clean),
+            ("config", StopOutcome::Clean)
+        ]
+    );
 }
 
 #[test]
@@ -471,5 +477,130 @@ mod controls {
     fn set_log_level_needs_the_agent_subscriber() {
         // Test binaries do not install it, so there is nothing to change.
         assert!(!host::set_log_level(LogLevel::Debug));
+    }
+}
+
+mod boot_and_clock {
+    use std::sync::{Arc, Mutex};
+
+    use palisade_agent::{
+        boot::BootMode,
+        clock::{ClockMonitor, SAMPLE_INTERVAL},
+        control::{HostEvent, PowerChange},
+        supervisor::{RestartPolicy, Supervisor},
+    };
+    use palisade_core::platform::{Clock, MonotonicTime, UtcTime};
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_safe_mode_boot_reports_safe_mode() {
+        let loaded = LoadedConfig {
+            config: AgentConfig::default(),
+            source: None,
+        };
+        for (mode, expected) in [
+            (BootMode::Normal, AgentState::Running),
+            (BootMode::SafeMinimal, AgentState::SafeMode),
+            (BootMode::SafeNetwork, AgentState::SafeMode),
+        ] {
+            let handle = host::supervisor_for(&loaded, mode).unwrap().start();
+            let state = handle
+                .subscribe()
+                .wait_for(|s| *s != AgentState::Starting)
+                .await
+                .unwrap()
+                .clone();
+            assert_eq!(state, expected, "{mode:?}");
+            // Every subsystem still runs in safe mode.
+            assert!(
+                handle
+                    .report()
+                    .subsystems
+                    .iter()
+                    .all(|r| r.status == palisade_agent::supervisor::SubsystemStatus::Running)
+            );
+            assert!(handle.shutdown(Duration::from_secs(5)).await.is_clean());
+        }
+    }
+
+    /// A clock the test moves; shared with the monitor.
+    #[derive(Clone, Default)]
+    struct SharedClock(Arc<Mutex<(i64, u64)>>);
+
+    impl SharedClock {
+        fn advance(&self, secs: u64) {
+            let mut t = self.0.lock().unwrap();
+            t.0 += i64::try_from(secs).unwrap() * 1_000_000;
+            t.1 += secs * 1_000_000;
+        }
+
+        fn set_wall_by(&self, secs: i64) {
+            self.0.lock().unwrap().0 += secs * 1_000_000;
+        }
+    }
+
+    impl Clock for SharedClock {
+        fn now_utc(&self) -> UtcTime {
+            UtcTime(self.0.lock().unwrap().0)
+        }
+
+        fn monotonic(&self) -> MonotonicTime {
+            MonotonicTime(self.0.lock().unwrap().1)
+        }
+    }
+
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_clock_monitor_reports_jumps_and_ignores_sleep() {
+        let clock = SharedClock::default();
+        let monitor = Arc::new(ClockMonitor::new(clock.clone()));
+        let mut jumps = monitor.subscribe();
+        let supervisor = Supervisor::new(vec![monitor.clone()], RestartPolicy::default()).unwrap();
+        let events = supervisor.host_events();
+        let handle = supervisor.start();
+        handle
+            .subscribe()
+            .wait_for(|s| *s == AgentState::Running)
+            .await
+            .unwrap();
+
+        // Time passing normally is not a jump.
+        clock.advance(60);
+        tokio::time::sleep(SAMPLE_INTERVAL).await;
+        settle().await;
+        assert_eq!(monitor.jumps(), 0);
+
+        // Setting the clock back an hour is reported on TIMECHANGE.
+        clock.set_wall_by(-3600);
+        events.publish(HostEvent::TimeChange);
+        jumps.changed().await.unwrap();
+        let jump = jumps.borrow_and_update().unwrap();
+        assert_eq!(jump.skew_micros, -3600 * 1_000_000);
+        assert_eq!(monitor.jumps(), 1);
+
+        // A suspend: the wall clock moves a day while the monotonic clock
+        // stood still. Not a jump.
+        events.publish(HostEvent::Power(PowerChange::Suspend));
+        settle().await;
+        clock.set_wall_by(86_400);
+        events.publish(HostEvent::Power(PowerChange::Resume));
+        settle().await;
+        tokio::time::sleep(SAMPLE_INTERVAL).await;
+        settle().await;
+        assert_eq!(monitor.jumps(), 1);
+
+        // A forward jump found by the periodic sample.
+        clock.set_wall_by(600);
+        tokio::time::sleep(SAMPLE_INTERVAL).await;
+        jumps.changed().await.unwrap();
+        assert_eq!(monitor.jumps(), 2);
+        assert!(format!("{monitor:?}").contains("jumps: 2"));
+        assert!(handle.shutdown(Duration::from_secs(5)).await.is_clean());
     }
 }

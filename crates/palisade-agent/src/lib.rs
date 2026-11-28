@@ -4,7 +4,9 @@
 // cannot be relaxed, so it keeps the workspace's `deny`, and every other
 // module forbids it at its own root.
 
+pub mod boot;
 pub mod cli;
+pub mod clock;
 pub mod config;
 pub mod control;
 #[cfg(windows)]

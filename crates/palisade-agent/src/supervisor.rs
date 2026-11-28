@@ -26,6 +26,8 @@
 //!   `Starting` until every subsystem has had its first outcome, then
 //!   `Degraded` if any subsystem is not running, and `Running` if all are. A
 //!   dependency that fails or restarts does not stop its running dependents.
+//!   In a safe-mode boot ([`Supervisor::safe_mode`]), `Running` and
+//!   `Degraded` are reported as `SafeMode` instead; `FailSafe` still wins.
 //! - **Shutdown** first stops every subsystem that is not running (waiting,
 //!   restarting or failed), so nothing starts during shutdown. It then stops
 //!   the running subsystems in reverse start order, so dependents stop
@@ -271,6 +273,7 @@ impl Supervisor {
             SupervisorError::DependencyCycle(stuck.into_iter().map(|i| names[i]).collect())
         })?;
         let shared = Shared {
+            safe_mode: false,
             lifecycle: Lifecycle::new(),
             slots: slots.iter().map(|_| SlotState::default()).collect(),
         };
@@ -294,6 +297,15 @@ impl Supervisor {
             .iter()
             .map(|&i| self.inner.slots[i].subsystem.name())
             .collect()
+    }
+
+    /// Marks this as a safe-mode boot: once started, the agent reports
+    /// [`AgentState::SafeMode`] instead of `Running` or `Degraded`, for the
+    /// rest of the run. Subsystems still run and are still supervised.
+    #[must_use]
+    pub fn safe_mode(self, safe: bool) -> Self {
+        self.inner.lock().safe_mode = safe;
+        self
     }
 
     /// The publisher of [`HostEvent`]s to every running subsystem. It can be
@@ -467,6 +479,8 @@ impl Default for SlotState {
 }
 
 struct Shared {
+    /// A safe-mode boot: see [`Supervisor::safe_mode`].
+    safe_mode: bool,
     lifecycle: Lifecycle,
     slots: Vec<SlotState>,
 }
@@ -524,7 +538,10 @@ impl Inner {
             return;
         }
         let starting = *shared.lifecycle.state() == AgentState::Starting;
-        let next = self.derive(&shared.slots, starting);
+        let mut next = self.derive(&shared.slots, starting);
+        if shared.safe_mode && matches!(next, AgentState::Running | AgentState::Degraded(_)) {
+            next = AgentState::SafeMode;
+        }
         self.apply(&mut shared, next);
     }
 
