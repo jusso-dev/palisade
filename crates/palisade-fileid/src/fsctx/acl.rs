@@ -21,6 +21,12 @@
 //! inherited ACEs are already materialised in the DACL and count like any
 //! other.
 //!
+//! The DACL is indexed by trustee once per descriptor: for each SID, the
+//! first applicable ACE that grants or denies each right. A token's rights
+//! are then the earliest entry among its SIDs, right by right, which is
+//! what the ordered walk gives, without walking the DACL once per token
+//! (#332). A property test checks the index against the ordered walk.
+//!
 //! The tokens evaluated are:
 //!
 //! - one per distinct non-administrator SID named by an applicable allow ACE,
@@ -81,7 +87,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use super::sid::{Sid, SidError, well_known};
@@ -1020,9 +1026,118 @@ enum Walk {
     Definite,
 }
 
-/// Walks the DACL in stored order for a token and returns the bits granted.
-fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, mode: Walk) -> u32 {
+/// What one applicable ACE does to a token holding its SID, in one walk
+/// mode: the bits it grants and the bits it denies. At most one is
+/// non-zero.
+fn ace_effect(ace: &Ace, sid: &Sid, mode: Walk) -> (u32, u32) {
     let possible = mode == Walk::Possible;
+    match ace.kind {
+        AceKind::Allow if possible => (map_generic_allow(ace.mask), 0),
+        AceKind::Allow => (ace.mask, 0),
+        AceKind::AllowConditional | AceKind::AllowObject if possible => {
+            (map_generic_allow(ace.mask), 0)
+        }
+        // A deny for `OWNER RIGHTS` is ignored when working out what may be
+        // held, so that whether or not the OS applies it to the owner,
+        // rights can only be over-reported.
+        AceKind::Deny if !possible || *sid != well_known::OWNER_RIGHTS => (0, ace.mask),
+        AceKind::DenyConditional | AceKind::DenyObject if !possible => (0, ace.mask),
+        _ => (0, 0),
+    }
+}
+
+/// The bits of [`WriteRights::ALL`], one at a time.
+const TRACKED_BITS: [u32; 8] = [
+    mask::FILE_WRITE_DATA,
+    mask::FILE_APPEND_DATA,
+    mask::FILE_WRITE_EA,
+    mask::FILE_DELETE_CHILD,
+    mask::FILE_WRITE_ATTRIBUTES,
+    mask::DELETE,
+    mask::WRITE_DAC,
+    mask::WRITE_OWNER,
+];
+
+/// For one SID and one walk mode: for each tracked bit, the position of
+/// the first applicable ACE naming the SID that grants or denies the bit,
+/// and whether it grants.
+type FirstTouch = [Option<(usize, bool)>; TRACKED_BITS.len()];
+
+/// A DACL indexed by trustee, built in one pass.
+///
+/// Walking the DACL in stored order, as the OS does, a bit ends up granted
+/// to a token exactly when the first applicable ACE that names a SID in the
+/// token and grants or denies the bit grants it: a grant is never taken
+/// back, and a deny is never overridden. So for each SID the index keeps
+/// the first ACE that touches each bit, and a token's rights are the
+/// earliest of its SIDs' entries, bit by bit. That is linear in the DACL
+/// plus a constant per SID in a token, where walking the whole DACL once
+/// per candidate principal was quadratic in the number of trustees.
+struct DaclIndex {
+    /// `[Definite, Possible]` entries for each SID.
+    by_sid: HashMap<Sid, [FirstTouch; 2]>,
+}
+
+impl DaclIndex {
+    fn new(aces: &[Ace]) -> Self {
+        let mut by_sid: HashMap<Sid, [FirstTouch; 2]> = HashMap::new();
+        for (pos, ace) in aces.iter().enumerate() {
+            if !ace.applies_to_object() {
+                continue;
+            }
+            let Some(sid) = &ace.sid else { continue };
+            let entry = by_sid.entry(*sid).or_default();
+            for (mode, touch) in [Walk::Definite, Walk::Possible].into_iter().zip(entry) {
+                let (grant, deny) = ace_effect(ace, sid, mode);
+                for (bit, first) in TRACKED_BITS.iter().zip(touch.iter_mut()) {
+                    if first.is_none() {
+                        if grant & bit != 0 {
+                            *first = Some((pos, true));
+                        } else if deny & bit != 0 {
+                            *first = Some((pos, false));
+                        }
+                    }
+                }
+            }
+        }
+        Self { by_sid }
+    }
+
+    /// The tracked bits a token holding exactly `token` is granted, as the
+    /// ordered walk in `mode` would grant them.
+    fn granted(&self, token: &[Sid], mode: Walk) -> u32 {
+        let m = usize::from(mode == Walk::Possible);
+        let mut out = 0;
+        for (i, bit) in TRACKED_BITS.iter().enumerate() {
+            let first = token
+                .iter()
+                .filter_map(|s| self.by_sid.get(s))
+                .filter_map(|e| e.get(m).and_then(|t| t.get(i)).copied().flatten())
+                .min_by_key(|&(pos, _)| pos);
+            if let Some((_, true)) = first {
+                out |= bit;
+            }
+        }
+        out
+    }
+
+    /// Rights for one token: (all, uncertain).
+    fn token_rights(&self, token: &[Sid], relevant: WriteRights) -> (WriteRights, WriteRights) {
+        let definite =
+            WriteRights::from_mask(self.granted(token, Walk::Definite)).intersection(relevant);
+        let possible =
+            WriteRights::from_mask(self.granted(token, Walk::Possible)).intersection(relevant);
+        // `possible` is a superset of `definite`: the possible walk applies
+        // more allow ACEs and fewer deny ACEs, so it grants each bit no
+        // later.
+        (possible.union(definite), possible.difference(definite))
+    }
+}
+
+/// Walks the DACL in stored order for a token and returns the bits
+/// granted: the reference [`DaclIndex`] is checked against.
+#[cfg(test)]
+fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, mode: Walk) -> u32 {
     let mut granted = 0u32;
     let mut denied = 0u32;
     for ace in aces.iter().filter(|a| a.applies_to_object()) {
@@ -1030,40 +1145,11 @@ fn walk(aces: &[Ace], in_token: &dyn Fn(&Sid) -> bool, mode: Walk) -> u32 {
         if !in_token(sid) {
             continue;
         }
-        let deny_applies = match ace.kind {
-            // A deny for `OWNER RIGHTS` is ignored when working out what may
-            // be held, so that whether or not the OS applies it to the
-            // owner, rights can only be over-reported.
-            AceKind::Deny => !possible || *sid != well_known::OWNER_RIGHTS,
-            AceKind::DenyConditional | AceKind::DenyObject => !possible,
-            _ => false,
-        };
-        match ace.kind {
-            AceKind::Allow if possible => granted |= map_generic_allow(ace.mask) & !denied,
-            AceKind::Allow => granted |= ace.mask & !denied,
-            AceKind::AllowConditional | AceKind::AllowObject if possible => {
-                granted |= map_generic_allow(ace.mask) & !denied;
-            }
-            _ if deny_applies => denied |= ace.mask & !granted,
-            _ => {}
-        }
+        let (grant, deny) = ace_effect(ace, sid, mode);
+        granted |= grant & !denied;
+        denied |= deny & !granted;
     }
     granted
-}
-
-/// Rights for one token: (all, uncertain).
-fn token_rights(
-    aces: &[Ace],
-    in_token: &dyn Fn(&Sid) -> bool,
-    relevant: WriteRights,
-) -> (WriteRights, WriteRights) {
-    let definite =
-        WriteRights::from_mask(walk(aces, in_token, Walk::Definite)).intersection(relevant);
-    let possible =
-        WriteRights::from_mask(walk(aces, in_token, Walk::Possible)).intersection(relevant);
-    // `possible` is a superset of `definite`: the possible walk applies more
-    // allow ACEs and fewer deny ACEs, so it grants each bit no later.
-    (possible.union(definite), possible.difference(definite))
 }
 
 fn is_non_canonical(aces: &[Ace]) -> bool {
@@ -1141,6 +1227,7 @@ pub fn evaluate(
         candidates.insert(o);
     }
 
+    let index = DaclIndex::new(aces);
     let mut principals = Vec::new();
     for sid in candidates {
         let is_owner = owner == Some(sid);
@@ -1158,12 +1245,14 @@ pub fn evaluate(
         let mut rights = WriteRights::NONE;
         let mut definite = WriteRights::NONE;
         for &with_everyone in everyone_variants {
-            let in_token = |s: &Sid| {
-                *s == sid
-                    || (with_everyone && *s == well_known::EVERYONE)
-                    || (is_owner && *s == well_known::OWNER_RIGHTS)
-            };
-            let (r, u) = token_rights(aces, &in_token, relevant);
+            let mut token = vec![sid];
+            if with_everyone {
+                token.push(well_known::EVERYONE);
+            }
+            if is_owner {
+                token.push(well_known::OWNER_RIGHTS);
+            }
+            let (r, u) = index.token_rights(&token, relevant);
             rights = rights.union(r);
             definite = definite.union(r.difference(u));
         }
@@ -1193,8 +1282,7 @@ pub fn evaluate(
         // Only `OWNER RIGHTS`: the unknown owner might not hold `Everyone`,
         // so a deny for `Everyone` is not assumed to stop it, and grants to
         // `Everyone` are already reported for `Everyone`.
-        let in_owner_token = |s: &Sid| *s == well_known::OWNER_RIGHTS;
-        let (r, _) = token_rights(aces, &in_owner_token, relevant);
+        let (r, _) = index.token_rights(&[well_known::OWNER_RIGHTS], relevant);
         unknown = r.union(if owner_rights_ace {
             WriteRights::NONE
         } else {
@@ -1222,11 +1310,15 @@ pub fn evaluate(
     // SID in a token.
     let standard: BTreeSet<Sid> = options.standard_user.iter().copied().collect();
     let standard_is_owner = owner.is_some_and(|o| standard.contains(&o));
-    let in_standard = |s: &Sid| {
-        (standard.contains(s) && !admins.contains(s))
-            || (standard_is_owner && *s == well_known::OWNER_RIGHTS)
-    };
-    let (mut standard_user, mut standard_uncertain) = token_rights(aces, &in_standard, relevant);
+    let mut standard_token: Vec<Sid> = standard
+        .iter()
+        .copied()
+        .filter(|s| !admins.contains(s))
+        .collect();
+    if standard_is_owner {
+        standard_token.push(well_known::OWNER_RIGHTS);
+    }
+    let (mut standard_user, mut standard_uncertain) = index.token_rights(&standard_token, relevant);
     if standard_is_owner && !owner_rights_ace {
         standard_user = standard_user.union(WriteRights::WRITE_DAC);
         standard_uncertain = standard_uncertain.difference(WriteRights::WRITE_DAC);
@@ -1838,6 +1930,119 @@ mod tests {
         assert_eq!(w.rights, WriteRights::relevant(ObjectKind::File));
         assert_eq!(w.uncertain, w.rights);
         assert_eq!(w.principals[0].principal, Principal::Unknown);
+    }
+
+    /// SIDs the generated DACLs and tokens draw from.
+    const POOL: [Sid; 6] = [
+        wk::EVERYONE,
+        wk::USERS,
+        wk::AUTHENTICATED_USERS,
+        wk::OWNER_RIGHTS,
+        wk::GUESTS,
+        wk::NETWORK,
+    ];
+
+    fn arb_ace() -> impl proptest::strategy::Strategy<Value = Ace> {
+        use proptest::prelude::*;
+        let kinds = prop_oneof![
+            Just(AceKind::Allow),
+            Just(AceKind::Deny),
+            Just(AceKind::AllowConditional),
+            Just(AceKind::DenyConditional),
+            Just(AceKind::AllowObject),
+            Just(AceKind::DenyObject),
+            Just(AceKind::Unknown(0x04)),
+        ];
+        // Masks built from the tracked bits and the generic bits, so the
+        // walks overlap often.
+        let bits = prop::collection::vec(
+            prop::sample::select(vec![
+                mask::FILE_WRITE_DATA,
+                mask::FILE_APPEND_DATA,
+                mask::FILE_WRITE_EA,
+                mask::FILE_DELETE_CHILD,
+                mask::FILE_WRITE_ATTRIBUTES,
+                mask::DELETE,
+                mask::WRITE_DAC,
+                mask::WRITE_OWNER,
+                mask::GENERIC_WRITE,
+                mask::GENERIC_ALL,
+            ]),
+            0..4,
+        );
+        (
+            kinds,
+            prop::sample::select(vec![0u8, ace_flags::INHERIT_ONLY, ace_flags::INHERITED]),
+            bits,
+            prop::sample::select(POOL.to_vec()),
+        )
+            .prop_map(|(kind, flags, bits, sid)| Ace {
+                kind,
+                flags,
+                mask: if matches!(kind, AceKind::Unknown(_)) {
+                    0
+                } else {
+                    bits.into_iter().fold(0, |m, b| m | b)
+                },
+                sid: (!matches!(kind, AceKind::Unknown(_))).then_some(sid),
+            })
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+        /// The index grants exactly what the ordered walk grants, for any
+        /// DACL and any token, in both modes (#332).
+        #[test]
+        fn index_matches_the_ordered_walk(
+            aces in proptest::collection::vec(arb_ace(), 0..24),
+            token in proptest::sample::subsequence(POOL.to_vec(), 0..=POOL.len()),
+        ) {
+            let index = DaclIndex::new(&aces);
+            for mode in [Walk::Definite, Walk::Possible] {
+                let in_token = |s: &Sid| token.contains(s);
+                proptest::prop_assert_eq!(
+                    index.granted(&token, mode) & WriteRights::ALL.bits(),
+                    walk(&aces, &in_token, mode) & WriteRights::ALL.bits(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn index_handles_duplicate_and_absent_sids() {
+        let aces = vec![
+            Ace::deny(wk::GUESTS, mask::FILE_WRITE_DATA),
+            Ace::allow(wk::USERS, mask::FILE_WRITE_DATA | mask::DELETE),
+            Ace::allow(wk::GUESTS, mask::DELETE),
+        ];
+        let index = DaclIndex::new(&aces);
+        // A SID no ACE names grants nothing; listing a SID twice changes
+        // nothing.
+        assert_eq!(index.granted(&[wk::NETWORK], Walk::Possible), 0);
+        assert_eq!(
+            index.granted(&[wk::USERS, wk::USERS], Walk::Possible),
+            mask::FILE_WRITE_DATA | mask::DELETE
+        );
+        // The earlier deny wins over the later allow from another SID.
+        assert_eq!(
+            index.granted(&[wk::USERS, wk::GUESTS], Walk::Definite),
+            mask::DELETE
+        );
+    }
+
+    #[test]
+    fn large_dacls_evaluate_in_linear_time() {
+        // 2,000 distinct trustees (close to what fits in 64 KiB). The old
+        // walk evaluated the whole DACL per trustee; the index must not.
+        let aces: Vec<Ace> = (0..2000)
+            .map(|rid| Ace::allow(user(1000 + rid), mask::FILE_WRITE_DATA))
+            .collect();
+        let d = sd(wk::ADMINISTRATORS, aces);
+        let w = eval_file(&d);
+        assert_eq!(w.principals.len(), 2000);
+        assert_eq!(w.rights, WriteRights::WRITE_DATA);
+        assert!(w.standard_user.is_empty());
     }
 
     #[test]
