@@ -2,7 +2,7 @@
 //!
 //! Each rendered record goes through these steps:
 //!
-//! 1. [`decode`](super::decode::decode): XML to a mapping `Record`. A
+//! 1. [`decode`]: XML to a mapping `Record`. A
 //!    record that does not decode is counted.
 //! 2. The [`RateLimiter`]: at most 2,000 records a second by default. Over
 //!    the rate, records are dropped and counted, never silently.
