@@ -11,7 +11,7 @@ Appears at: `/policy/settings`.
 
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
-| `advanced` | map of [`AdvancedValue`](types.md#advancedvalue) | no |  | at most 256 entries; keys: matches `^[a-z][a-z0-9_.-]{0,127}$` | 1.0.0 | Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless `allow_unknown_advanced` is set. |
+| `advanced` | map of [`AdvancedValue`](types.md#advancedvalue) | no |  | at most 256 entries; keys: matches `^[a-z][a-z0-9_.-]{0,127}$` | 1.0.0 | Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless `allow_unknown_advanced` is set. Keys are added only with the feature that reads them (#330), and never relax a decision. |
 | `allow_unknown_advanced` | boolean | no | `false` |  | 1.0.0 | Accept keys in `advanced` that the registry does not know. |
 | `capture_command_line` | boolean | no | `false` |  | 1.0.0 | Whether the agent records process command lines. Off by default for privacy (#18). |
 | `decision_cache_ttl_secs` | integer | no | `300` | 0 to 86400; format `uint32` | 1.0.0 | How long a decision may be cached, in seconds. `0` disables the cache. |

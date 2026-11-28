@@ -37,9 +37,9 @@ fn to_v0(doc: &PolicyDocument, version: &str) -> Value {
 
 #[test]
 fn every_major_below_the_current_one_has_one_step_in_order() {
-    let froms: Vec<u64> = STEPS.iter().map(|s| s.from).collect();
+    let sources: Vec<u64> = STEPS.iter().map(|s| s.from).collect();
     let expected: Vec<u64> = (0..CURRENT.major).collect();
-    assert_eq!(froms, expected);
+    assert_eq!(sources, expected);
 }
 
 #[test]

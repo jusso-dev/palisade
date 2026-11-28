@@ -2434,7 +2434,7 @@
           "additionalProperties": {
             "$ref": "#/$defs/AdvancedValue"
           },
-          "description": "Engineering settings, checked against a registry of known keys. The\nregistry is empty in this version, so any key is rejected unless\n`allow_unknown_advanced` is set.",
+          "description": "Engineering settings, checked against a registry of known keys. The\nregistry is empty in this version, so any key is rejected unless\n`allow_unknown_advanced` is set. Keys are added only with the feature\nthat reads them (#330), and never relax a decision.",
           "maxProperties": 256,
           "propertyNames": {
             "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
