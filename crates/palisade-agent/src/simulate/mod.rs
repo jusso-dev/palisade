@@ -167,6 +167,7 @@ impl Producer {
             restriction: None,
             probe: None,
             fim: None,
+            aggregate: None,
         };
         Ok(event)
     }

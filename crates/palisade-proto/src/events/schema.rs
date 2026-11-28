@@ -109,6 +109,28 @@ fn cross_field_rules() -> Vec<Value> {
         }
     }));
     rules.extend(version_rules());
+    let summarisable: Vec<&str> = EventType::ALL
+        .iter()
+        .filter(|t| t.summarisable())
+        .map(|t| t.as_str())
+        .collect();
+    rules.push(json!({
+        "if": {
+            "properties": {
+                "aggregate": {
+                    "properties": { "kind": { "const": "summary" } },
+                    "required": ["kind"]
+                }
+            },
+            "required": ["aggregate"]
+        },
+        "then": {
+            "properties": {
+                "outcome": { "const": "allowed" },
+                "event_type": { "enum": summarisable }
+            }
+        }
+    }));
     rules.push(json!({
         "properties": {
             "source": {

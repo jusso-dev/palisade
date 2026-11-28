@@ -429,8 +429,9 @@ fn agent() -> BoxedStrategy<AgentInfo> {
         of(any::<u64>()),
         of(any::<u64>()),
         of(any::<u64>()),
+        vec(loss(), 0..3),
     )
-        .prop_map(|(health, cache, t, d, ta)| AgentInfo {
+        .prop_map(|(health, cache, t, d, ta, losses)| AgentInfo {
             health,
             cache: cache.map(|(entries, hits, misses)| CacheStats {
                 entries,
@@ -440,6 +441,65 @@ fn agent() -> BoxedStrategy<AgentInfo> {
             throttled_count: t,
             dropped_count: d,
             tamper_attempts: ta,
+            losses: BoundedVec::new(losses).unwrap(),
+        })
+        .boxed()
+}
+
+fn loss() -> BoxedStrategy<Loss> {
+    (
+        select(vec![
+            LossClass::Diagnostic,
+            LossClass::Summary,
+            LossClass::Allowed,
+            LossClass::Info,
+            LossClass::Audit,
+            LossClass::Blocked,
+            LossClass::Security,
+        ]),
+        select(vec![
+            LossReason::QueueFull,
+            LossReason::Throttled,
+            LossReason::SpoolFull,
+            LossReason::Expired,
+            LossReason::Corrupt,
+        ]),
+        1u64..,
+        of(any::<u64>()),
+        of(any::<u64>()),
+    )
+        .prop_map(|(class, reason, count, from_seq, to_seq)| Loss {
+            class,
+            reason,
+            count: core::num::NonZeroU64::new(count).unwrap(),
+            from_seq,
+            to_seq,
+        })
+        .boxed()
+}
+
+/// A repeat count, or a summary when `summary` is set.
+fn aggregate(summary: bool) -> BoxedStrategy<Aggregate> {
+    (
+        1u64..,
+        timestamp(),
+        timestamp(),
+        of(any::<u32>()),
+        any::<bool>(),
+        vec(long(), 0..=3),
+    )
+        .prop_map(move |(count, a, b, window, partial, samples)| Aggregate {
+            kind: if summary {
+                AggregateKind::Summary
+            } else {
+                AggregateKind::Repeat
+            },
+            count: core::num::NonZeroU64::new(count).unwrap(),
+            first_seen: a.min(b),
+            last_seen: a.max(b),
+            window_secs: window,
+            partial,
+            cmdline_samples: BoundedVec::new(samples).unwrap(),
         })
         .boxed()
 }
@@ -1235,7 +1295,13 @@ pub fn event() -> BoxedStrategy<Event> {
             native(),
             agent(),
         ),
-        (sets_11(false), sets_11(true), of(long()), any::<bool>()),
+        (
+            sets_11(false),
+            sets_11(true),
+            of(long()),
+            any::<bool>(),
+            of(prop_oneof![aggregate(true), aggregate(false)]),
+        ),
     )
         .prop_map(
             |(
@@ -1244,7 +1310,7 @@ pub fn event() -> BoxedStrategy<Event> {
                 (seq, prev, labels, source),
                 (user, policy, process, file, script, native, agent),
                 (u2, p2, pr2, f2, s2, n2, a2),
-                (sets, full, script_text, label_oldest),
+                (sets, full, script_text, label_oldest, aggregate),
             )| {
                 let mut event = Event {
                     schema_version: CURRENT,
@@ -1284,7 +1350,21 @@ pub fn event() -> BoxedStrategy<Event> {
                     restriction: sets.restriction,
                     probe: sets.probe,
                     fim: sets.fim,
+                    aggregate,
                 };
+                // Only allowed decisions of a summarisable type are
+                // summarised.
+                if event
+                    .aggregate
+                    .as_ref()
+                    .is_some_and(|a| a.kind == AggregateKind::Summary)
+                {
+                    if event_type.summarisable() {
+                        event.outcome = Outcome::Allowed;
+                    } else if let Some(a) = event.aggregate.as_mut() {
+                        a.kind = AggregateKind::Repeat;
+                    }
+                }
                 if let Some(s) = event.script.as_mut() {
                     s.text = script_text;
                 }

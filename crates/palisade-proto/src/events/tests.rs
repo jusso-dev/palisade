@@ -358,10 +358,12 @@ fn versions_are_checked_before_fields() {
         Err(LoadError::UnsupportedSchemaVersion(_))
     ));
     assert!(matches!(
-        read("1.4.0"),
+        read("1.5.0"),
         Err(LoadError::NewerMinorVersion(_))
     ));
-    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7", "1.2.0", "1.3.0"] {
+    for older_or_same in [
+        "1.0.0", "1.0.1", "1.1.0", "1.1.7", "1.2.0", "1.3.0", "1.4.0",
+    ] {
         assert!(
             matches!(read(older_or_same), Err(LoadError::Json(_))),
             "{older_or_same}: read, and the extra field fails"
@@ -915,6 +917,15 @@ fn every_added_pointer_raises_the_minimum_version() {
         let keys: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
         let mut value = with(serde_json::json!({ "schema_version": "1.1.0" }));
         let leaf = match keys.as_slice() {
+            ["aggregate"] => {
+                value["aggregate"] = serde_json::json!({
+                    "kind": "repeat",
+                    "count": 2,
+                    "first_seen": "2026-11-24T03:15:22.123456Z",
+                    "last_seen": "2026-11-24T03:15:22.123456Z"
+                });
+                "aggregate"
+            }
             [set] => {
                 value[*set] = serde_json::json!({});
                 *set
@@ -935,6 +946,12 @@ fn every_added_pointer_raises_the_minimum_version() {
                 value["policy"] = serde_json::json!({ "kid": "06e3fd8fda29bb60ab59557de61edb0a" });
                 "kid"
             }
+            ["agent", "losses"] => {
+                value["agent"] = serde_json::json!({
+                    "losses": [{ "class": "allowed", "reason": "spool_full", "count": 1 }]
+                });
+                "losses"
+            }
             other => panic!("add a case for {other:?}"),
         };
         let event =
@@ -952,4 +969,107 @@ fn json_pointer_schema_pattern_is_unambiguous() {
         schema["$defs"]["JsonPointer"]["pattern"],
         "^(/([^~/]|~[01])*)+$"
     );
+}
+
+#[test]
+fn the_pipeline_counts_need_a_1_4_label() {
+    // #63, #197: `aggregate` and `agent.losses` are the 1.4 additions.
+    let added: Vec<&str> = ADDED
+        .iter()
+        .filter(|(_, v)| *v == V1_4)
+        .map(|(p, _)| *p)
+        .collect();
+    assert_eq!(added, ["/aggregate", "/agent/losses"]);
+    assert!(EventType::ALL.iter().all(|t| t.since() < V1_4));
+    let mut summary = Event::from_json(
+        &with(serde_json::json!({
+            "schema_version": "1.4.0",
+            "event_type": "exec.decision",
+            "category": "execution",
+            "action": "execute",
+            "outcome": "allowed",
+            "file": { "path": "C:\\a.exe" },
+            "aggregate": {
+                "kind": "summary",
+                "count": 41,
+                "first_seen": "2026-11-24T03:00:00.000000Z",
+                "last_seen": "2026-11-24T03:59:00.000000Z",
+                "window_secs": 3600,
+                "partial": true,
+                "cmdline_samples": ["a.exe /x", "a.exe /y"]
+            }
+        }))
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(summary.min_version(), V1_4);
+    assert_eq!(summary.validate(), Ok(()));
+    let json = summary.to_canonical_json().unwrap();
+    assert_eq!(Event::from_json(&json).unwrap(), summary);
+    summary.schema_version = V1_3;
+    assert_eq!(codes(&summary), [EventErrorCode::NewerThanVersion]);
+    summary.schema_version = V1_4;
+    // Only allowed decisions of a summarisable type are summarised.
+    summary.outcome = Outcome::Blocked;
+    assert_eq!(codes(&summary), [EventErrorCode::SummaryNotAllowed]);
+    let err = summary.validate().unwrap_err().remove(0);
+    assert!(err.to_string().contains("summarisable"), "{err}");
+    // A blocked event may carry a repeat count.
+    if let Some(a) = summary.aggregate.as_mut() {
+        a.kind = AggregateKind::Repeat;
+    }
+    assert_eq!(summary.validate(), Ok(()));
+    summary.aggregate = None;
+    assert_eq!(summary.min_version(), V1_0);
+
+    let losses = Event::from_json(
+        &with(serde_json::json!({
+            "schema_version": "1.4.0",
+            "event_type": "agent.dropped",
+            "category": "agent",
+            "outcome": "info",
+            "agent": {
+                "dropped_count": 7,
+                "losses": [{
+                    "class": "allowed",
+                    "reason": "spool_full",
+                    "count": 7,
+                    "from_seq": 10,
+                    "to_seq": 16
+                }]
+            }
+        }))
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(losses.min_version(), V1_4);
+    assert_eq!(losses.validate(), Ok(()));
+}
+
+#[test]
+fn pipeline_counts_reject_bad_values() {
+    let aggregate = |patch: serde_json::Value| {
+        let mut a = serde_json::json!({
+            "kind": "repeat",
+            "count": 2,
+            "first_seen": "2026-11-24T03:15:22.123456Z",
+            "last_seen": "2026-11-24T03:15:22.123456Z"
+        });
+        for (k, v) in patch.as_object().unwrap() {
+            a[k] = v.clone();
+        }
+        Event::from_json(
+            &with(serde_json::json!({ "schema_version": "1.4.0", "aggregate": a })).to_string(),
+        )
+    };
+    assert!(aggregate(serde_json::json!({})).is_ok());
+    for bad in [
+        serde_json::json!({ "count": 0 }),
+        serde_json::json!({ "partial": false }),
+        serde_json::json!({ "cmdline_samples": ["a", "b", "c", "d"] }),
+        serde_json::json!({ "kind": "rollup" }),
+        serde_json::json!({ "extra": 1 }),
+    ] {
+        assert!(aggregate(bad.clone()).is_err(), "{bad}");
+    }
 }
