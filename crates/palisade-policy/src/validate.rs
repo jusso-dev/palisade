@@ -999,6 +999,18 @@ impl Validator {
                 "`safety_critical` only applies in a mandatory blocklist",
             );
         }
+        // A cold criterion needs a cadence (#33, #329): it may wait on a
+        // disk or the network, so it is never collected per decision.
+        if c.field.cost_class() == crate::model::CostClass::Cold && c.evaluate.is_none() {
+            self.push(
+                ErrorCode::InvalidValue,
+                &format!("{base}/evaluate"),
+                format!(
+                    "`{}` is a cold criterion: set `evaluate` to `once_per_session`, `once_per_boot` or `on_policy_change`",
+                    serde_name(&c.field)
+                ),
+            );
+        }
         // A probed field needs a valid target (#329).
         if c.field.is_probe() {
             match c
@@ -1187,6 +1199,13 @@ impl Validator {
             s.group_cache_max_age_secs.into(),
             ranges::GROUP_CACHE_MAX_AGE_MIN.into(),
             ranges::GROUP_CACHE_MAX_AGE_MAX.into(),
+        );
+        range(
+            self,
+            "condition_budget_ms",
+            s.condition_budget_ms.into(),
+            ranges::CONDITION_BUDGET_MIN.into(),
+            ranges::CONDITION_BUDGET_MAX.into(),
         );
         for (field, value, max) in [
             (

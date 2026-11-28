@@ -1089,6 +1089,11 @@ impl<'p> Tracer<'p> {
                         .or_default()
                         .insert(r.reference.rule_id, r.reference);
                 }
+                if lr.notes.contains(Note::ConditionTimeout) {
+                    warn.entry(WarningCode::ConditionTimeout)
+                        .or_default()
+                        .insert(r.reference.rule_id, r.reference);
+                }
                 if lr.notes.contains(Note::ShortNameUnresolved) {
                     warn.entry(WarningCode::ShortNameUnresolved)
                         .or_default()

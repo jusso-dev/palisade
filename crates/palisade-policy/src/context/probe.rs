@@ -27,7 +27,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Criterion, Field, Match};
+use crate::model::{Cadence, CostClass, Criterion, Field, Match};
 
 /// What the agent found at one target.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -45,6 +45,10 @@ pub enum Probe {
     /// A value of another type, such as `REG_BINARY`: it exists, but no
     /// comparison applies, so each is `Unknown`.
     Other,
+    /// The agent ran out of the rule's budget (`condition_budget_ms`)
+    /// before it looked: every criterion on it is `Unknown`, with the
+    /// note `condition_timeout`, and the decision is not cached.
+    TimedOut,
 }
 
 /// The probed facts of one evaluation, by field and canonical target.
@@ -167,6 +171,13 @@ pub struct ProbeTarget {
     /// For `reg.value`, the value's name, lowercase; `None` is the
     /// default value.
     pub value_name: Option<String>,
+    /// How costly the probe is (#329): `warm` or `cold`.
+    pub cost: CostClass,
+    /// When to refresh it. `None` means for every decision; a `cold`
+    /// probe always has one. When criteria name one target with several
+    /// cadences, the most frequent wins: `on_policy_change` is the least
+    /// frequent, then `once_per_boot`, then `once_per_session`.
+    pub cadence: Option<Cadence>,
 }
 
 /// Every target the criteria of `trees` probe, each once, in order. The
@@ -174,7 +185,9 @@ pub struct ProbeTarget {
 /// valid is left out; validation rejects it.
 #[must_use]
 pub fn probe_targets<'t>(trees: impl IntoIterator<Item = &'t Match>) -> Vec<ProbeTarget> {
-    let mut out = std::collections::BTreeSet::new();
+    // By target; the most frequent cadence, where `None` (every decision)
+    // is the most frequent of all.
+    let mut out: BTreeMap<(Field, String, Option<String>), Option<Cadence>> = BTreeMap::new();
     for tree in trees {
         let mut stack = vec![tree];
         while let Some(node) = stack.pop() {
@@ -185,15 +198,38 @@ pub fn probe_targets<'t>(trees: impl IntoIterator<Item = &'t Match>) -> Vec<Prob
                     .as_deref()
                     .and_then(|t| parts(c.field, t, c.value_name.as_deref()))
             {
-                out.insert(ProbeTarget {
-                    field,
-                    target,
-                    value_name,
-                });
+                let frequency = |c: Option<Cadence>| match c {
+                    None => 0,
+                    Some(Cadence::OncePerSession) => 1,
+                    Some(Cadence::OncePerBoot) => 2,
+                    Some(Cadence::OnPolicyChange) => 3,
+                };
+                out.entry((field, target, value_name))
+                    .and_modify(|c| {
+                        if frequency(*c) > frequency(evaluate_of(node)) {
+                            *c = evaluate_of(node);
+                        }
+                    })
+                    .or_insert_with(|| evaluate_of(node));
             }
         }
     }
-    out.into_iter().collect()
+    out.into_iter()
+        .map(|((field, target, value_name), cadence)| ProbeTarget {
+            cost: field.cost_class(),
+            field,
+            target,
+            value_name,
+            cadence,
+        })
+        .collect()
+}
+
+fn evaluate_of(node: &Match) -> Option<Cadence> {
+    match node {
+        Match::Criterion(c) => c.evaluate,
+        _ => None,
+    }
 }
 
 /// The registry hives a target may start with, long name first, each with

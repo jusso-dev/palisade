@@ -87,10 +87,24 @@ fn probe_targets_lists_each_target_once() {
             Vec::<String>::new(),
         ))
     };
+    let cold = |target: &str, cadence| {
+        Match::Criterion(Criterion {
+            evaluate: Some(cadence),
+            ..Criterion::probe(
+                Field::FsFile,
+                Operator::Exists,
+                target,
+                Vec::<String>::new(),
+            )
+        })
+    };
     let tree = Match::All(vec![
         c(Field::RegKey, r"HKLM\Software\A"),
         Match::Not(Box::new(c(Field::RegKey, r"hklm\software\a"))),
-        c(Field::FsFile, r"C:\flag"),
+        // One file with two cadences: the more frequent one is kept.
+        cold(r"C:\flag", crate::model::Cadence::OnPolicyChange),
+        cold(r"c:\FLAG", crate::model::Cadence::OncePerSession),
+        cold(r"C:\flag", crate::model::Cadence::OncePerBoot),
         c(Field::FsFile, "not a path"),
         Match::Criterion(Criterion::new(
             Field::UserSid,
@@ -105,12 +119,16 @@ fn probe_targets_lists_each_target_once() {
             ProbeTarget {
                 field: Field::RegKey,
                 target: r"HKLM\software\a".to_owned(),
-                value_name: None
+                value_name: None,
+                cost: crate::model::CostClass::Warm,
+                cadence: None,
             },
             ProbeTarget {
                 field: Field::FsFile,
                 target: r"C:\FLAG".to_owned(),
-                value_name: None
+                value_name: None,
+                cost: crate::model::CostClass::Cold,
+                cadence: Some(crate::model::Cadence::OncePerSession),
             },
         ]
     );

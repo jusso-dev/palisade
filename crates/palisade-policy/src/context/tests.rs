@@ -160,6 +160,8 @@ fn sample(field: Field) -> Criterion {
         };
         return Criterion {
             target: Some(target.to_owned()),
+            evaluate: (field.cost_class() == crate::model::CostClass::Cold)
+                .then_some(crate::model::Cadence::OncePerBoot),
             ..crit(field, operator, values)
         };
     }
@@ -1297,4 +1299,18 @@ fn ordered_operators_compare_in_the_right_direction() {
             assert_eq!(eval(&c, &ctx), expected, "{field:?} between {range:?}");
         }
     }
+}
+
+#[test]
+fn cost_classes() {
+    use crate::model::CostClass;
+    for field in Field::ALL {
+        let expected = match field {
+            Field::EnvVar | Field::RegKey | Field::RegValue => CostClass::Warm,
+            Field::FsFile | Field::FsFolder => CostClass::Cold,
+            _ => CostClass::Hot,
+        };
+        assert_eq!(field.cost_class(), expected, "{field:?}");
+    }
+    assert!(CostClass::Hot < CostClass::Warm && CostClass::Warm < CostClass::Cold);
 }

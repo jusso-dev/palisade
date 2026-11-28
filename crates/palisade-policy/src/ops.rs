@@ -330,11 +330,14 @@ pub enum Note {
     /// A fact is not in the form its field needs, such as a digest of the
     /// wrong length.
     FactMalformed = 8,
+    /// The agent ran out of the rule's budget before it collected a probed
+    /// fact (#33, #329).
+    ConditionTimeout = 9,
 }
 
 impl Note {
     /// Every note, in code order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::FactMissing,
         Self::PathAclUnsafe,
         Self::ShortNameUnresolved,
@@ -344,6 +347,7 @@ impl Note {
         Self::VersionSuffixStripped,
         Self::SignerNotTrusted,
         Self::FactMalformed,
+        Self::ConditionTimeout,
     ];
 
     /// The stable `snake_case` name.
@@ -359,6 +363,7 @@ impl Note {
             Self::VersionSuffixStripped => "version_suffix_stripped",
             Self::SignerNotTrusted => "signer_not_trusted",
             Self::FactMalformed => "fact_malformed",
+            Self::ConditionTimeout => "condition_timeout",
         }
     }
 }
@@ -995,6 +1000,12 @@ impl CompiledCriterion {
     fn eval_probe(&self, probe: &crate::context::Probe, notes: &mut Notes) -> Tri {
         use crate::context::Probe;
         match (probe, &self.values) {
+            // The budget ran out before the agent looked: unknown, and so
+            // is every negation (ADR 0018).
+            (Probe::TimedOut, _) => {
+                notes.insert(Note::ConditionTimeout);
+                Tri::Unknown
+            }
             (Probe::Absent, Values::Exists) => Tri::NoMatch,
             (_, Values::Exists) => Tri::Match,
             // Nothing to compare: no comparison holds, so its negation does.
@@ -1392,6 +1403,12 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
         out.push(CompileErrorKind::OptionNotApplicable(
             "target",
             "`env.var`, `reg.key`, `reg.value`, `fs.file` and `fs.folder`",
+        ));
+    }
+    if c.evaluate.is_some() && !c.field.is_probe() {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "evaluate",
+            "`env.*`, `reg.*` and `fs.*` fields",
         ));
     }
     if c.arg_index.is_some() && c.field != Field::ProcessArgv {

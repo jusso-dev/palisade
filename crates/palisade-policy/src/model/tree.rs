@@ -158,6 +158,39 @@ pub struct Criterion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = -255, max = 255))]
     pub arg_index: Option<i16>,
+    /// When the agent refreshes what this criterion probes (#33, #329).
+    /// Required on a `cold` field (`fs.*`), allowed on a `warm` one
+    /// (`env.*`, `reg.*`), and not applicable to a `hot` one. Unset on a
+    /// warm field means every decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluate: Option<Cadence>,
+}
+
+/// How costly a field's fact is to collect at decision time (#33, #329).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CostClass {
+    /// Already in memory when a decision starts: the object's identity,
+    /// the token, the device and session, the time and the command line.
+    Hot,
+    /// A cached lookup: an environment block or the registry.
+    Warm,
+    /// A lookup that may wait on a disk or the network: the file system.
+    Cold,
+}
+
+/// When the agent refreshes a probed fact (#33, #329). The result is cached
+/// in the context until then.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Cadence {
+    /// Once in each logon session.
+    OncePerSession,
+    /// Once after each boot.
+    OncePerBoot,
+    /// Each time a new policy is applied.
+    OnPolicyChange,
 }
 
 impl Criterion {
@@ -182,6 +215,7 @@ impl Criterion {
             target: None,
             value_name: None,
             arg_index: None,
+            evaluate: None,
         }
     }
 
@@ -986,6 +1020,16 @@ impl Field {
     #[must_use]
     pub const fn has_position(self) -> bool {
         matches!(self, Self::SignerTbsHash | Self::SignerSpkiSha256)
+    }
+
+    /// How costly this field's fact is to collect (#33, #329).
+    #[must_use]
+    pub const fn cost_class(self) -> CostClass {
+        match self {
+            Self::EnvVar | Self::RegKey | Self::RegValue => CostClass::Warm,
+            Self::FsFile | Self::FsFolder => CostClass::Cold,
+            _ => CostClass::Hot,
+        }
     }
 
     /// Whether the field probes the system at a `target` (#329): an
