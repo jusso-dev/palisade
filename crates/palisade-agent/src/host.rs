@@ -310,6 +310,7 @@ pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
     let policy = Arc::new(crate::policy_cache::PolicyCacheSubsystem::new(
         Arc::new(crate::policy_cache::PolicyCache::unenrolled(
             palisade_policy::engine::EngineConfig::default(),
+            Arc::new(crate::policy_cache::BoundedSink::default()),
         )),
         Arc::new(SystemClock),
     ));
