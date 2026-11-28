@@ -47,6 +47,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# Wipes the enrolment token from memory once it is stored (#57).
+zeroize = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 # Account names and the file-system context through `palisade_fileid::win`

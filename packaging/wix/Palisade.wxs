@@ -206,6 +206,25 @@
     </InstallExecuteSequence>
 <?endif?>
 
+    <!-- The enrolment token (#57). It is never written as a registry value
+         or file row, which a verbose log would record. The installed agent
+         protects it with machine-scope data protection and stores it in
+         the SYSTEM-only data folder (its stash-enroll-token switch, see
+         crates/palisade-agent/src/bootstrap.rs), run deferred, as SYSTEM,
+         with its target hidden from the log. The agent refuses to store
+         it if the folder is not SYSTEM- and Administrators-only, and a
+         failure fails the install. It runs after the folder ACLs are
+         applied and before the service starts. The token is already on
+         the msiexec command line, so the child process adds no new
+         exposure. Removing the product leaves a token not yet used in the
+         SYSTEM-only data folder, like the agent's other state; removing
+         data on uninstall is #222. -->
+    <CustomAction Id="StashEnrollToken" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check" HideTarget="yes"
+                  ExeCommand="&quot;[INSTALLFOLDER]palisade-agent.exe&quot; --stash-enroll-token=[ENROLL_TOKEN]" />
+    <InstallExecuteSequence>
+      <Custom Action="StashEnrollToken" Before="StartServices" Condition="ENROLL_TOKEN AND NOT (REMOVE ~= &quot;ALL&quot;)" />
+    </InstallExecuteSequence>
+
     <Component Id="Tray" Directory="INSTALLFOLDER">
       <File Id="TrayExe" Source="$(var.BinDir)\palisade-tray.exe" KeyPath="yes" />
     </Component>
@@ -255,8 +274,8 @@
          agent's enrolment bootstrap (#57). SYSTEM and Administrators only.
          The enrolment token is not among them: a verbose installer log records
          every registry value written, hidden property or not, so the
-         package never writes the token anywhere. Handing it to the agent,
-         stored with machine-scoped data protection, is #57. -->
+         package never writes the token anywhere. The agent stores it
+         protected instead (StashEnrollToken). -->
     <Component Id="Settings" Directory="INSTALLFOLDER" Guid="A64E8849-FD5C-4FB8-BE18-3B0F2C5AE112">
       <!-- The ACL is set through the value row: Windows Installer secures
            the key that holds a value, and does not apply one given on the

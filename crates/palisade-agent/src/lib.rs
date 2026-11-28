@@ -5,6 +5,7 @@
 // module forbids it at its own root.
 
 pub mod boot;
+pub mod bootstrap;
 pub mod cli;
 pub mod clock;
 pub mod config;
