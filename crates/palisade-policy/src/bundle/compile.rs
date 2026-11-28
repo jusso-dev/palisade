@@ -22,8 +22,10 @@ use super::format::{
     Body, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent, SourceRevisions,
 };
 use super::serial;
+use crate::analysis::{self, Facts, Finding, Gate, Override};
 use crate::hierarchy::EffectivePolicy;
 use crate::library::{Catalogue, LibraryId, Pin, Visibility};
+use crate::model::Timestamp;
 use crate::scope::{Schedule, ScopeLibrary, SetRef};
 use crate::validate::{Severity, ValidatedPolicy};
 
@@ -39,6 +41,12 @@ pub struct Source<'a> {
     /// The source policies and library versions, for the evidence record
     /// (ISM-1582). An effective policy gives its own ([`Source::effective`]).
     pub sources: SourceRevisions,
+    /// What the policy assistant (#40) knows beyond the policy, for the
+    /// analysis [`compile`] runs.
+    pub facts: Facts,
+    /// A tenant administrator's override of the analysis's `error`
+    /// findings, if any. Without one, an `error` finding stops compilation.
+    pub admin: Option<Override>,
 }
 
 impl<'a> Source<'a> {
@@ -61,6 +69,8 @@ impl<'a> Source<'a> {
                 policies: vec![(p.id, p.revision)],
                 libraries: effective.libraries().iter().copied().collect(),
             },
+            facts: Facts::default(),
+            admin: None,
         })
     }
 }
@@ -82,6 +92,9 @@ pub enum CompileError {
         /// The pin.
         pin: Pin,
     },
+    /// The policy assistant (#40) found `error` findings and no
+    /// administrator overrode them.
+    Blocked(Vec<Finding>),
     /// The bundle does not encode.
     Encode(serial::Error),
     /// The bundle is larger than the limit.
@@ -101,6 +114,17 @@ impl fmt::Display for CompileError {
                 f,
                 "library set {id} at {pin} is not in the catalogue as a set a scope can read"
             ),
+            Self::Blocked(findings) => {
+                write!(
+                    f,
+                    "the policy assistant found {} error finding(s); fix them or have a tenant administrator override them with a reason",
+                    findings.len()
+                )?;
+                if let Some(first) = findings.first() {
+                    write!(f, ": {}: {}", first.code.as_str(), first.message)?;
+                }
+                Ok(())
+            }
             Self::Encode(e) => write!(f, "the bundle does not encode: {e}"),
             Self::TooLarge { size, limit } => write!(
                 f,
@@ -126,19 +150,27 @@ impl std::error::Error for CompileError {}
 /// invalid (two tags that differ only in normal form, or a name that grows
 /// past its limit in NFC).
 ///
+/// Before anything is built, the policy assistant's static analysis
+/// (#40) runs on the policy, as of the header's `generated_at`. An `error`
+/// finding stops compilation ([`CompileError::Blocked`]) unless
+/// `source.admin` overrides it with a reason; the override and the
+/// findings it covers are returned in [`Compiled::gate`] for the caller to
+/// record.
+///
 /// The same inputs always give the same bytes, on every platform: the body
 /// is canonical ([`Body::new`]) and the encoding deterministic.
 ///
 /// # Errors
 ///
-/// [`CompileError`] if a set does not resolve, the header and the policy
-/// disagree on the schema version, the bundle is over `limits`, or the
-/// bundle an agent would read is not valid.
+/// [`CompileError`] if the analysis has `error` findings that are not
+/// overridden, a set does not resolve, the header and the policy disagree
+/// on the schema version, the bundle is over `limits`, or the bundle an
+/// agent would read is not valid.
 pub fn compile(
     source: &Source<'_>,
     header: Header,
     limits: &BundleLimits,
-) -> Result<(PolicyBundle, Vec<u8>), CompileError> {
+) -> Result<Compiled, CompileError> {
     if let Some(e) = source
         .policy
         .warnings()
@@ -147,6 +179,7 @@ pub fn compile(
     {
         return Err(CompileError::Invalid(e.to_string()));
     }
+    let gate = analyse(source, &header)?;
     let mut doc = source.policy.document().clone();
     if doc
         .rule_sets
@@ -226,7 +259,43 @@ pub fn compile(
             errors.len()
         )));
     }
-    Ok((bundle, bytes))
+    Ok(Compiled {
+        bundle,
+        bytes,
+        gate,
+    })
+}
+
+/// A compiled bundle.
+#[derive(Clone, Debug)]
+pub struct Compiled {
+    /// The bundle.
+    pub bundle: PolicyBundle,
+    /// Its canonical bytes.
+    pub bytes: Vec<u8>,
+    /// The outcome of the policy assistant's gate: [`Gate::Pass`], or
+    /// [`Gate::Overridden`] with who overrode which `error` findings and
+    /// why, for the audit record. Never [`Gate::Blocked`].
+    pub gate: Gate,
+}
+
+/// Runs the policy assistant (#40) on the source policy as of the header's
+/// `generated_at`, and applies the publish gate.
+fn analyse(source: &Source<'_>, header: &Header) -> Result<Gate, CompileError> {
+    // `generated_at` is in microseconds, the assistant's clock in seconds.
+    // A time it cannot represent fails rather than skipping the
+    // time-dependent checks.
+    let now = Timestamp::checked(header.generated_at.div_euclid(1_000_000)).ok_or_else(|| {
+        CompileError::Invalid(format!(
+            "the header's generated_at ({}) is not a time the policy assistant can check against",
+            header.generated_at
+        ))
+    })?;
+    let findings = analysis::analyse(source.policy.document(), &source.facts, now);
+    match analysis::publish_gate(&findings, source.admin.as_ref()) {
+        Gate::Blocked(errors) => Err(CompileError::Blocked(errors)),
+        gate => Ok(gate),
+    }
 }
 
 /// The library sets inlined in a bundle, as a scope library. [`compile`]
