@@ -6,9 +6,11 @@
 //! into canonical events. [`process_fields`] builds the canonical
 //! `process` field set from the tree, so that translation is shared.
 //!
-//! Until the pipeline exists, [`ChannelSink`] is the seam: a bounded
-//! channel that never blocks the producer. A full channel drops the event
-//! and counts it ([`Counters::dropped`]); a drop is never silent.
+//! The host connects the monitor to the pipeline's intake
+//! (`crate::pipeline::intake::Intake`), a bounded queue that never blocks
+//! the producer. A full queue refuses the event, which the monitor counts
+//! ([`Counters::dropped`]) and the pipeline reports; a drop is never
+//! silent. [`ChannelSink`] and [`DiscardSink`] remain for tests and fuzzing.
 
 #![forbid(unsafe_code)]
 
@@ -121,7 +123,7 @@ pub trait TelemetrySink: Send + Sync {
     fn offer(&self, event: TelemetryEvent) -> bool;
 }
 
-/// A bounded channel: the seam for the event pipeline (#63).
+/// A bounded channel, for tests.
 #[derive(Debug, Clone)]
 pub struct ChannelSink {
     tx: SyncSender<TelemetryEvent>,
@@ -149,9 +151,8 @@ impl TelemetrySink for ChannelSink {
     }
 }
 
-/// A sink that accepts nothing: every event counts as dropped. The host
-/// uses it until the event pipeline (#63) consumes the monitor's events,
-/// so the counters show the volume that will flow.
+/// A sink that accepts nothing: every event counts as dropped. For fuzzing
+/// and tests.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DiscardSink;
 
@@ -212,6 +213,33 @@ fn parent_fields(p: &ProcInfo) -> ParentProcess {
         token_elevation_type: p.token.elevation.map(elevation),
         owner_sid: p.token.user_sid.as_deref().and_then(|s| s.parse().ok()),
         ..ParentProcess::default()
+    }
+}
+
+/// The canonical `process` field set of a process start, from the record
+/// the monitor emitted: the process, and its parent's key and ID when
+/// known. The pipeline (#63) uses it for `process.created`; the monitor's
+/// tree, with the full parent record, is [`process_fields`].
+#[must_use]
+pub fn start_fields(p: &ProcInfo, parent: Option<ProcessKey>) -> Process {
+    let own = parent_fields(p);
+    Process {
+        pid: own.pid,
+        process_key: own.process_key,
+        image_path: own.image_path,
+        image_path_normalised: own.image_path_normalised,
+        cmdline: own.cmdline,
+        integrity_level: own.integrity_level,
+        token_elevation_type: own.token_elevation_type,
+        owner_sid: own.owner_sid,
+        parent: parent.map(|k| {
+            Box::new(ParentProcess {
+                pid: Some(k.pid),
+                process_key: Name::new(key_text(k)).ok(),
+                ..ParentProcess::default()
+            })
+        }),
+        ..Process::default()
     }
 }
 

@@ -13,6 +13,7 @@ Appears at: `/agent`.
 | `cache` | [`CacheStats`](cache-stats.md) | no |  |  | 1.0.0 | Identity cache counters. |
 | `dropped_count` | integer | no |  | at least 0; format `uint64` | 1.0.0 | Events dropped since the last report. Drops are always counted, never silent. |
 | `health` | [`HealthStatus`](types.md#healthstatus) | no |  |  | 1.0.0 | The overall health. |
+| `losses` | array of [`Loss`](loss.md) | no |  | at most 16 items | 1.4.0 | What was lost since the last report, by class and reason, at most 16 entries. Every loss the agent knows of is listed, so a gap in `seq` is never unexplained. Since 1.4. |
 | `tamper_attempts` | integer | no |  | at least 0; format `uint64` | 1.0.0 | Tamper attempts since the last report. |
 | `throttled_count` | integer | no |  | at least 0; format `uint64` | 1.0.0 | Events throttled since the last report. |
 

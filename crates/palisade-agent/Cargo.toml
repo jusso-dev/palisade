@@ -19,7 +19,6 @@ path = "src/main.rs"
 # release build (#29).
 test-util = [
     "palisade-core/test-util",
-    "dep:sha2",
 ]
 
 [dependencies]
@@ -41,8 +40,8 @@ arc-swap = { workspace = true }
 # decision-trace redactor (#59).
 palisade-policy = { workspace = true }
 serde = { workspace = true }
-# The simulator's placeholder event chain.
-sha2 = { workspace = true, optional = true }
+# The event pipeline's hash chain (#63) and the simulator's event chain.
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true }
 tracing = { workspace = true }

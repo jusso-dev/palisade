@@ -95,3 +95,83 @@ fn write_spool_fuzz_seeds() {
     empty.extend_from_slice(&MAGIC);
     std::fs::write(dir.join("seed-empty"), &empty).unwrap();
 }
+
+mod subsystem {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use palisade_agent::pipeline::segment::Class;
+    use palisade_agent::pipeline::spool::{SegmentSpool, Spool, SpoolLimits};
+    use palisade_agent::pipeline::storage::FileStorage;
+    use palisade_agent::pipeline::subsystem::EventPipeline;
+    use palisade_agent::pipeline::upload::{RecordingUploader, Uploader};
+    use palisade_agent::platform::SystemClock;
+    use palisade_agent::policy_cache::{Detail, PolicyEvent, PolicyEventSink, Tamper};
+    use palisade_agent::subsystem::{Health, Subsystem};
+    use palisade_agent::supervisor::{RestartPolicy, StopOutcome, Supervisor};
+    use palisade_proto::events::{Event, EventType};
+    use palisade_proto::policy_bundle::select::Load;
+
+    use super::TempDir;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn events_flow_from_producers_to_the_spool_and_the_uploader() {
+        let dir = TempDir::new("subsystem");
+        let uploader = Arc::new(RecordingUploader::default());
+        uploader.set_offline(true);
+        let pipeline = Arc::new(EventPipeline::new(
+            SystemClock,
+            Some(dir.0.clone()),
+            Arc::clone(&uploader) as Arc<dyn Uploader>,
+        ));
+        assert_eq!(pipeline.name(), "event-pipeline");
+        let sink = pipeline.policy_sink();
+        // Offered before the pipeline runs: it waits in the queue.
+        assert!(sink.emit(PolicyEvent {
+            detail: Detail::Tamper(Tamper::Memory),
+            load: Load::Emergency,
+        }));
+        let subsystems: Vec<Arc<dyn Subsystem>> = vec![
+            Arc::new(palisade_agent::host::ConfigSubsystem::new(
+                palisade_agent::config::LoadedConfig {
+                    config: palisade_agent::config::AgentConfig::default(),
+                    source: None,
+                },
+            )),
+            Arc::clone(&pipeline) as Arc<dyn Subsystem>,
+        ];
+        let handle = Supervisor::new(subsystems, RestartPolicy::default())
+            .unwrap()
+            .start();
+        // Wait for the tamper event to be spooled.
+        let mut spooled = false;
+        for _ in 0..200 {
+            if pipeline.stats().0.spooled >= 1 {
+                spooled = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(spooled, "{:?}", pipeline.stats());
+        assert_eq!(pipeline.health(), Health::Healthy);
+        let report = handle.shutdown(Duration::from_secs(10)).await;
+        assert!(
+            report
+                .outcomes
+                .iter()
+                .all(|(_, o)| *o == StopOutcome::Clean),
+            "{report:?}"
+        );
+        // The spool on disk holds the event, numbered from 0.
+        let (mut spool, recovery) =
+            SegmentSpool::open(FileStorage::open(&dir.0).unwrap(), SpoolLimits::default()).unwrap();
+        assert!(recovery.damaged.is_empty());
+        let records = spool
+            .pending(Class::Security, None, 10, usize::MAX)
+            .unwrap();
+        let event = Event::from_json(std::str::from_utf8(&records[0].payload).unwrap()).unwrap();
+        assert_eq!(event.event_type, EventType::AgentTamper);
+        assert_eq!((event.seq, event.prev_hash), (0, None));
+        assert_eq!(event.validate(), Ok(()));
+    }
+}

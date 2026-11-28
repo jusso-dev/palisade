@@ -8,9 +8,8 @@
 //!   time, so a reused process ID never corrupts ancestry.
 //! - [`cmdline`] captures, redacts and truncates command lines.
 //! - [`monitor`] is the state machine that turns records into events.
-//! - [`output`] is what it emits, and the seam to the event pipeline
-//!   (#63): a [`TelemetrySink`](output::TelemetrySink), with a bounded,
-//!   non-blocking [`ChannelSink`](output::ChannelSink).
+//! - [`output`] is what it emits: a [`TelemetrySink`](output::TelemetrySink),
+//!   which the event pipeline's intake (#63) implements.
 //!
 //! On Windows, `windows` is the subsystem that runs the ETW session
 //! through `ffi::etw` (the agent's allowlisted unsafe module, ADR 0011)
@@ -40,21 +39,21 @@ pub const NAME: &str = "process-monitor";
 pub const SESSION_NAME: &str = "Palisade-Agent-Trace";
 
 /// The subsystems that read the OS, for the console and service runs. On
-/// Windows, the process monitor. Its events go to a
-/// [`DiscardSink`](output::DiscardSink) until the event pipeline (#63)
-/// takes them, so the sink-drop counter in its health shows the volume
-/// waiting for the pipeline.
+/// Windows, the process monitor, whose events go into the event pipeline
+/// (#63) through `intake`; events its queue cannot take are counted in the
+/// monitor's health and by the pipeline.
 #[must_use]
-pub fn os_subsystems() -> Vec<Arc<dyn Subsystem>> {
+pub fn os_subsystems(intake: crate::pipeline::intake::Intake) -> Vec<Arc<dyn Subsystem>> {
     #[cfg(windows)]
     {
         vec![Arc::new(windows::EtwProcessMonitor::new(
-            Arc::new(output::DiscardSink),
+            Arc::new(intake),
             monitor::MonitorSettings::default(),
         ))]
     }
     #[cfg(not(windows))]
     {
+        drop(intake);
         Vec::new()
     }
 }
@@ -100,7 +99,8 @@ mod tests {
 
     #[test]
     fn other_oses_have_no_os_subsystems() {
-        assert_eq!(os_subsystems().len(), usize::from(cfg!(windows)));
+        let (intake, _outlet) = crate::pipeline::intake::channel(1, 1);
+        assert_eq!(os_subsystems(intake).len(), usize::from(cfg!(windows)));
     }
 
     #[test]
