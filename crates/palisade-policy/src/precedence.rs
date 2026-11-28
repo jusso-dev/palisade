@@ -74,7 +74,12 @@ use crate::model::{
 /// most specific to the least, so the smaller tier is the more specific.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Tier {
-    /// 1: a file hash (`hash.*`).
+    /// 1: a file hash (`hash.*`), including the compatibility hashes
+    /// (SHA-1, MD5, the page hashes). They are not ranked lower (#329):
+    /// validation already rejects a rule that lets an object run on one
+    /// alone (`weak_hash_only_allow`, ADR 0008), so in this tier they only
+    /// strengthen a deny, and ranking them lower would let a publisher or
+    /// path allow beat a deny of a known-bad SHA-1, which fails open.
     Hash,
     /// 2: a signer with a file name and a version, tested together.
     SignerFileVersion,
