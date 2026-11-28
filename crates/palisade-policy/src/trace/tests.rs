@@ -3565,3 +3565,28 @@ fn a_timeout_in_an_unconsulted_attribute_rule_is_not_warned() {
     let t = trace_of(&p, &o, &enforce(&p), TraceLevel::Full);
     assert!(timeout(&t), "{:?}", t.warnings);
 }
+
+#[test]
+fn a_path_draft_is_offered_only_when_it_matches_its_own_subject() {
+    // Rule values are NFC-normalised when compiled; path facts are not
+    // (#399). A decomposed spelling would give a draft that does not match
+    // the object it came from, so no path draft is offered for it.
+    let p = validated(policy_doc("enforce", vec![(1, "blocklist", false, vec![])]));
+    let draft = |path: &str| {
+        let o = Obj {
+            facts: ObjectFacts::new().with_path(
+                PathFact::new(path, &VolumeMap::new())
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
+            ),
+            context: EvaluationContext::default(),
+        };
+        trace_of(&p, &o, &enforce(&p), TraceLevel::Standard).allow_suggestion
+    };
+    let composed = draft("C:\\Apps\\caf\u{e9}.exe").unwrap();
+    assert_eq!(composed.identity, DraftIdentity::Path);
+    assert!(
+        draft("C:\\Apps\\cafe\u{301}.exe").is_none(),
+        "a decomposed path gets no path draft"
+    );
+}

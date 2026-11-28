@@ -1693,10 +1693,14 @@ fn suggest(
             _ => (DraftIdentity::Publisher, p),
         }
     } else {
+        // A rule value is NFC-normalised when compiled but a path fact is
+        // not (#399), so a spelling NFC changes would give a draft that
+        // does not match its own subject: offer no path draft for it.
         let p = facts
             .path
             .as_ref()
-            .filter(|p| p.acl_proven() && p.keys_reliable())?;
+            .filter(|p| p.acl_proven() && p.keys_reliable())
+            .filter(|p| unicode_normalization::is_nfc(p.path.as_str()))?;
         (
             DraftIdentity::Path,
             criterion(Field::PathFull, Operator::Equals, p.path.as_str())?,
