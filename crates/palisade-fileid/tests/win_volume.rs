@@ -332,4 +332,21 @@ fn case_sensitive_folders_are_reported() {
     assert_eq!(std::fs::read(cs.join("a.exe")).unwrap(), b"1");
     assert!(!is_case_sensitive_dir(&dir.0).unwrap());
     assert!(is_case_sensitive_dir(&dir.0.join("missing")).is_err());
+
+    // The final path of a file there gets no rule key, and a prefix match
+    // into it compares the name exactly (#332).
+    let f = File::open(cs.join("a.exe")).unwrap();
+    let fp = palisade_fileid::win::links::final_path_of(&f).unwrap();
+    assert!(fp.case_sensitivity_checked());
+    assert_eq!(fp.case_sensitive_components(), [fp.components().len() - 1]);
+    assert!(matches!(
+        fp.match_key(),
+        Err(palisade_fileid::fsctx::PathError::CaseSensitiveDirectory(n)) if n == "a.exe"
+    ));
+    // A file in an ordinary folder still has one.
+    std::fs::write(dir.0.join("b.exe"), b"3").unwrap();
+    let g = File::open(dir.0.join("b.exe")).unwrap();
+    let gp = palisade_fileid::win::links::final_path_of(&g).unwrap();
+    assert!(gp.case_sensitive_components().is_empty());
+    assert!(gp.match_key().is_ok());
 }

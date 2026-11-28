@@ -17,11 +17,13 @@
 //!
 //! Folder matching compares names case-insensitively, as on an ordinary
 //! NTFS directory. A directory can be made case-sensitive, and then
-//! `C:\Parent\Temp` and `C:\Parent\temp` are different folders; this
-//! module does not know which directories are, so it matches both. Reading
-//! the per-directory flag needs the OS and is left to the OS backend (#54).
-//! Until then, a match here is not proof that a path is inside the folder
-//! on a case-sensitive directory.
+//! `C:\Parent\Temp` and `C:\Parent\temp` are different folders. Matching
+//! goes through [`NormalizedPath::starts_with`], which compares a component
+//! exactly when either path has read its directory's flag and found it
+//! case-sensitive (or unreadable). Final paths from the Windows backend
+//! carry the flags (#332); a path whose flags were never read
+//! ([`NormalizedPath::case_sensitivity_checked`]) is still folded
+//! throughout.
 
 #![forbid(unsafe_code)]
 
@@ -212,6 +214,29 @@ mod tests {
                 p(r"C:\Windows\Temp"),
             ],
         }
+    }
+
+    struct SensitiveUsers;
+
+    impl super::super::path::CaseSensitivityResolver for SensitiveUsers {
+        fn is_case_sensitive(&self, dir: &NormalizedPath) -> Option<bool> {
+            Some(dir.case_folded() == r"C:\USERS")
+        }
+    }
+
+    #[test]
+    fn case_sensitive_folders_match_exactly() {
+        let f = folders();
+        // `C:\Users` is case-sensitive, so `ALICE` is not `alice` there.
+        let mut other = p(r"C:\Users\ALICE\x.exe");
+        other.resolve_case_sensitivity(&SensitiveUsers);
+        let vars = path_variables_matched(&other, &f, None).unwrap();
+        assert!(!vars.contains(&PathVariable::UserProfile), "{vars:?}");
+        assert!(vars.contains(&PathVariable::OsDrive));
+        let mut same = p(r"C:\Users\alice\x.exe");
+        same.resolve_case_sensitivity(&SensitiveUsers);
+        let vars = path_variables_matched(&same, &f, None).unwrap();
+        assert!(vars.contains(&PathVariable::UserProfile), "{vars:?}");
     }
 
     #[test]
