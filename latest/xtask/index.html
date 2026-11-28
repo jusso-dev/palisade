@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-babf030a.js";
+            window.path_to_searchindex_js = "../searchindex-68f16415.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -219,18 +219,21 @@ the pinned toolchain and needs no other tools.</p>
 <tr><td><code>check-fuzz-locks</code></td><td>Runs <code>cargo metadata --locked</code> on every <code>crates/*/fuzz/Cargo.toml</code> and fails, with the minimal re-lock command, if a fuzz workspace's committed lockfile is out of date. Code: <code>src/fuzz_locks.rs</code>.</td></tr>
 <tr><td><code>coverage-gate --base &lt;commit&gt;</code></td><td>Measures <code>palisade-policy</code> line coverage at <code>&lt;commit&gt;</code> (in a temporary worktree) and at the working tree, and fails if it decreased. Needs cargo-llvm-cov and cargo-nextest. Code: <code>src/coverage_gate.rs</code>.</td></tr>
 <tr><td><code>bench-compare --base &lt;commit&gt;</code></td><td>Runs every criterion bench at <code>&lt;commit&gt;</code> and at the working tree (twice each, alternating, keeping the faster), writes a comparison table to the job summary, and fails if a median is more than 10% slower with non-overlapping confidence intervals. Code: <code>src/bench_compare.rs</code>.</td></tr>
-<tr><td><code>fuzz [--seconds N] [--target NAME]</code></td><td>Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for <code>N</code> seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz <code>Cargo.toml</code> and <code>fuzz.yml</code>. Code: <code>src/fuzz.rs</code>; see <code>docs/testing.md</code>.</td></tr>
+<tr><td><code>fuzz [--seconds N] [--target NAME | --shard I/N]</code></td><td>Builds every cargo-fuzz target, seeds its corpus from the test fixtures, runs it for <code>N</code> seconds (default 60) and writes the results, with a base64 reproducer for each finding, to the job summary. Needs the pinned nightly and cargo-fuzz. Its tests keep the target list in step with each fuzz <code>Cargo.toml</code> and <code>fuzz.yml</code>. Code: <code>src/fuzz.rs</code>; see <code>docs/testing.md</code>.</td></tr>
 </tbody>
 </table>
 </div>
 <p>Each command prints one line per violation and exits non-zero if there are
 any. Each rule set has unit tests with passing and failing fixtures:
 <code>cargo test -p xtask</code>.</p>
-<p><code>cargo xtask help</code> lists every command, and <code>cargo xtask &lt;command&gt; --help</code>
-(or <code>-h</code>) prints that command's entry, or for a group such as <code>docs</code> every
-command in it. The list in <code>src/help.rs</code> is the one source of both; its tests
-snapshot the list and every command's help (<code>src/snapshots/</code>, checked by the
-<code>snapshots</code> CI job) and fail if a command <code>main</code> dispatches has no entry.</p>
+<p>The command line is declared once with clap (<code>src/cli.rs</code>): <code>cargo xtask help</code> (or <code>--help</code>) lists every command, and <code>cargo xtask &lt;command&gt; --help</code>,
+<code>-h</code> or <code>cargo xtask help &lt;command&gt;</code> prints its usage and options. A wrong
+command line exits with status 2 and clap's message. Values with rules of
+their own (a target triple, a signer, a shard, the fuzz time) are still
+checked by the command's module. Tests in <code>src/help.rs</code> snapshot the help of
+every command and sub-command (<code>src/snapshots/</code>, checked by the
+<code>snapshots</code> CI job), fail if any command or argument has no help text, and
+parse every command line the workflows and scripts use.</p>
 <p>Commands that need an external tool check for it first through
 <code>src/tools.rs</code>, which reads the version from the tool's version command:
 a missing tool stops the command with the install line for CI's version,
@@ -246,7 +249,8 @@ probe for each case: present, missing and at another version. The workspace rule
 <h2 id="allowed-dependencies"><a class="header" href="#allowed-dependencies">Allowed dependencies</a></h2>
 <p>No workspace crates: no product crate may depend on <code>xtask</code>, and <code>xtask</code>
 reads the workspace through <code>cargo metadata</code> instead of linking it. Third-party:
-<code>serde_json</code>, <code>toml</code> and <code>yaml-rust2</code>, to read <code>cargo metadata</code> output,
+<code>clap</code>, for the command line (the workspace's version, as <code>pal</code> and the
+server use); <code>serde_json</code>, <code>toml</code> and <code>yaml-rust2</code>, to read <code>cargo metadata</code> output,
 manifests, workflow files and JSON Schemas; <code>proc-macro2</code>, to tokenise Rust
 source; and <code>sha2</code>, for the term digests in <code>check-workflows</code> and
 <code>check-banned-terms</code>, and the WiX package checksum in <code>dist</code>.</p>
