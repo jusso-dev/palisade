@@ -16,6 +16,8 @@
 //!   (#54).
 //! - [`security`]: security descriptors, account names and the OS access
 //!   check (#54).
+//! - [`packages`]: installed packages of a family for the current user,
+//!   and app execution alias resolution against them (#333).
 //! - [`trust`]: the OS trust-verification cross-check (#48).
 //! - [`volume`]: the volume a file is on (drive, bus, hot-plug, OS volume)
 //!   and the per-directory case-sensitivity flag (#54).
@@ -32,6 +34,7 @@ pub mod access;
 pub mod file;
 pub mod fsctx;
 pub mod links;
+pub mod packages;
 pub mod paths;
 pub mod security;
 mod sys;
