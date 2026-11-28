@@ -647,6 +647,18 @@ pub enum Field {
     /// owner of the file or a directory above it (#328).
     #[serde(rename = "path.user_can_change_acl")]
     PathUserCanChangeAcl,
+    /// What the file's content is, from its bytes (#30, #328): `pe`,
+    /// `msi`, `script`, `zip`, `lnk`, `text` and so on, in
+    /// `palisade-fileid`'s names. `unknown` is a missing fact.
+    #[serde(rename = "meta.detected_type")]
+    MetaDetectedType,
+    /// What the file's name claims it is, from its extension (#30, #328):
+    /// one of the [`Self::MetaDetectedType`] names, or `none` (no
+    /// extension), `inert` (a document or media extension) or `other`. A
+    /// PE renamed to `.pdf` has `meta.detected_type` `pe` and
+    /// `meta.extension_type` `inert`.
+    #[serde(rename = "meta.extension_type")]
+    MetaExtensionType,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -745,7 +757,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 90] = [
+    pub const ALL: [Self; 92] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -836,6 +848,8 @@ impl Field {
         Self::PathIsAds,
         Self::PathShare,
         Self::PathUserCanChangeAcl,
+        Self::MetaDetectedType,
+        Self::MetaExtensionType,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -969,7 +983,11 @@ impl Field {
             Self::MetaIsDotnet => FieldClass::Bool,
             Self::MsiProductCode | Self::MsiUpgradeCode | Self::MsiPackageCode => FieldClass::Guid,
             Self::MsiProductVersion => FieldClass::Version,
-            Self::PathDriveType | Self::PathBus | Self::PathShare => FieldClass::Text,
+            Self::PathDriveType
+            | Self::PathBus
+            | Self::PathShare
+            | Self::MetaDetectedType
+            | Self::MetaExtensionType => FieldClass::Text,
             Self::PathIsUnc | Self::PathIsAds | Self::PathUserCanChangeAcl => FieldClass::Bool,
             Self::SignerEku => FieldClass::OidSet,
         }
@@ -1050,7 +1068,9 @@ impl Field {
             | Self::PathIsUnc
             | Self::PathIsAds
             | Self::PathShare
-            | Self::PathUserCanChangeAcl => Strength::Weak,
+            | Self::PathUserCanChangeAcl
+            | Self::MetaDetectedType
+            | Self::MetaExtensionType => Strength::Weak,
             Self::UserSid
             | Self::UserName
             | Self::UserGroups

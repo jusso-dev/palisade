@@ -1283,6 +1283,16 @@
           "const": "path.user_can_change_acl",
           "description": "Whether some non-administrator may change the permissions or the\nowner of the file or a directory above it (#328).",
           "type": "string"
+        },
+        {
+          "const": "meta.detected_type",
+          "description": "What the file's content is, from its bytes (#30, #328): `pe`,\n`msi`, `script`, `zip`, `lnk`, `text` and so on, in\n`palisade-fileid`'s names. `unknown` is a missing fact.",
+          "type": "string"
+        },
+        {
+          "const": "meta.extension_type",
+          "description": "What the file's name claims it is, from its extension (#30, #328):\none of the [`Self::MetaDetectedType`] names, or `none` (no\nextension), `inert` (a document or media extension) or `other`. A\nPE renamed to `.pdf` has `meta.detected_type` `pe` and\n`meta.extension_type` `inert`.",
+          "type": "string"
         }
       ]
     },

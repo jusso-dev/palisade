@@ -944,6 +944,15 @@ impl CompiledCriterion {
     /// not one is malformed, so unknown; anything else is a hash, text or
     /// version fact.
     fn eval_stored(&self, fact: &str, notes: &mut Notes) -> Tri {
+        // A type the classifier could not tell is not known (#328).
+        if matches!(
+            self.field,
+            Field::MetaDetectedType | Field::MetaExtensionType
+        ) && (fact.is_empty() || fact.eq_ignore_ascii_case("unknown"))
+        {
+            notes.insert(Note::FactMissing);
+            return Tri::Unknown;
+        }
         match self.field.class() {
             FieldClass::Number => match number(fact) {
                 Some(n) => self.ordered(Ordinal::Number(n)),

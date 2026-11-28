@@ -15,7 +15,7 @@ Specified in [#31](https://github.com/jusso-dev/palisade/issues/31) (identity cr
 | Path | `path.full`, `path.directory`, `path.file_name`, `path.extension` | medium, and only where users cannot write |
 | Path location | `path.drive_type`, `path.bus`, `path.is_unc`, `path.is_ads`, `path.share`, `path.user_can_change_acl`; the `%REMOVABLE%` and `%HOT%` variables (the roots of mounted removable and hot-pluggable volumes) | weak: say where a file is, never which file; for denies and scoping, such as "block anything on a USB disk" |
 | Metadata | `meta.original_filename`, `meta.product_name`, `meta.file_version`, `meta.legal_copyright`, `meta.language`, `meta.file_name_fallback`, ... | weak: easy to copy into another file |
-| File and image | `meta.file_size` (a number), `meta.pe_machine`, `meta.pe_subsystem`, `meta.is_dotnet` (yes or no) | weak: describe a file, never name one |
+| File and image | `meta.file_size` (a number), `meta.pe_machine`, `meta.pe_subsystem`, `meta.is_dotnet` (yes or no), `meta.detected_type` (from the content) and `meta.extension_type` (from the name), so a rule can block a PE renamed to `.pdf` | weak: describe a file, never name one |
 | Windows Installer | `msi.product_code`, `msi.upgrade_code`, `msi.package_code` (GUIDs, compared with or without braces, in either case), `msi.product_name`, `msi.manufacturer`, `msi.product_version` | weak: the package's author writes them all |
 
 The strength matters. Validation warns about an allow rule whose only identity is weak, and an

@@ -63,7 +63,36 @@ fn each_new_field() -> Vec<Match> {
         crit(Field::MsiManufacturer, Operator::Equals, &["Example"]),
         crit(Field::MsiProductVersion, Operator::VersionGe, &["1.0"]),
         crit(Field::MsiPackageCode, Operator::Equals, &[CODE]),
+        crit(Field::MetaDetectedType, Operator::Equals, &["pe"]),
+        crit(Field::MetaExtensionType, Operator::Equals, &["inert"]),
     ]
+}
+
+#[test]
+fn a_deny_blocks_a_pe_renamed_to_a_document() {
+    let p = || {
+        PolicyBuilder::new()
+            .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, hash('a'))))
+            .rule_set(RuleSetBuilder::blocklist(2).rule(RuleBuilder::deny(
+                2,
+                all(vec![
+                    crit(Field::MetaDetectedType, Operator::Equals, &["pe"]),
+                    crit(Field::MetaExtensionType, Operator::Equals, &["inert"]),
+                ]),
+            )))
+    };
+    let renamed = facts()
+        .sha256('a')
+        .with(Field::MetaDetectedType, "pe")
+        .with(Field::MetaExtensionType, "inert")
+        .build();
+    assert_eq!(decide(p(), &renamed), Outcome::Blocked);
+    let honest = facts()
+        .sha256('a')
+        .with(Field::MetaDetectedType, "pe")
+        .with(Field::MetaExtensionType, "pe")
+        .build();
+    assert_eq!(decide(p(), &honest), Outcome::Allowed);
 }
 
 #[test]
