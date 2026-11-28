@@ -340,7 +340,24 @@ fn identify_reads_a_file() {
     assert_eq!(id.pe, from_bytes.pe);
     assert_eq!(id.signing_state, from_bytes.signing_state);
     assert!(id.fs.path.computed().is_some_and(|p| !p.claimed));
-    assert!(matches!(id.fs.owner, Field::NotYetSupported(_)));
+    // The file system context comes from the Windows file system only;
+    // elsewhere it is unavailable, never guessed. The provenance tag has
+    // no reader yet.
+    if cfg!(windows) {
+        assert!(id.fs.file_id.is_computed() || matches!(id.fs.file_id, Field::Unavailable(_)));
+    } else {
+        for f in [
+            matches!(id.fs.owner, Field::Unavailable(_)),
+            matches!(id.fs.user_writable, Field::Unavailable(_)),
+            matches!(id.fs.streams, Field::Unavailable(_)),
+            matches!(id.fs.reparse, Field::Unavailable(_)),
+            matches!(id.fs.file_id, Field::Unavailable(_)),
+            matches!(id.fs.volume, Field::Unavailable(_)),
+        ] {
+            assert!(f, "{:?}", id.fs);
+        }
+    }
+    assert!(matches!(id.fs.provenance, Field::NotYetSupported(_)));
     // A directory and a missing file are errors, not records.
     assert!(identify(&dir, Tiers::ALL, &ctx()).is_err());
     assert!(identify(&dir.join("missing"), Tiers::ALL, &ctx()).is_err());
@@ -516,5 +533,65 @@ fn review_minors_in_the_record() {
         assert!(!id.fs.motw.is_computed() && !id.fs.path_variables.is_computed());
         assert!(!id.computed_tiers.contains(Tier::Context));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+/// #55 wiring: a path is Medium only when the access check proved that no
+/// non-administrator can write the file or a folder above it, or change
+/// their permissions; anything else, unknown included, is Weak. A path
+/// rule is never recommended.
+#[test]
+fn path_strength_follows_proven_writability() {
+    use palisade_fileid::identity::{IdentityStrength, WritableSummary, strength};
+    let image = tool_image((1, 0, 0, 0));
+    let dir = std::env::temp_dir().join(format!("palisade-writable-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("extool.exe");
+    std::fs::write(&path, &image).unwrap();
+    let mut id = identify(&path, Tiers::ALL, &ctx()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let path_strength = |id: &palisade_fileid::identity::FileIdentity| {
+        strength::classify(id)
+            .into_iter()
+            .find(|s| s.attribute == "path")
+            .map(|s| s.strength)
+    };
+    let safe = WritableSummary {
+        path_user_writable: false,
+        file_user_writable: false,
+        first_user_writable_ancestor: None,
+        change_perms_by_non_admin: false,
+        principals_with_write: Vec::new(),
+    };
+    for (field, want) in [
+        (
+            Field::Unavailable("not read".to_owned()),
+            IdentityStrength::Weak,
+        ),
+        (Field::Computed(safe.clone()), IdentityStrength::Medium),
+        (
+            Field::Computed(WritableSummary {
+                path_user_writable: true,
+                first_user_writable_ancestor: Some(r"C:\Users\alice".to_owned()),
+                ..safe.clone()
+            }),
+            IdentityStrength::Weak,
+        ),
+        (
+            Field::Computed(WritableSummary {
+                change_perms_by_non_admin: true,
+                ..safe.clone()
+            }),
+            IdentityStrength::Weak,
+        ),
+    ] {
+        id.fs.user_writable = field.clone();
+        assert_eq!(path_strength(&id), Some(want), "{field:?}");
+        let rec = recommend(&id);
+        assert_ne!(rec.level, RuleLevel::Path, "{field:?}");
+        assert!(
+            rec.refused.iter().any(|(l, _)| *l == RuleLevel::Path),
+            "{field:?}"
+        );
     }
 }

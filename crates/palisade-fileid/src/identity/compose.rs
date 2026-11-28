@@ -1069,14 +1069,9 @@ fn context_tier(
     if !tiers.contains(Tier::Context) {
         return;
     }
-    let pending = Field::pending(&[54]);
-    id.fs.file_id = pending.clone();
-    id.fs.volume = pending.clone();
-    id.fs.owner = pending.clone();
-    id.fs.user_writable = pending.clone();
-    id.fs.streams = pending.clone();
-    id.fs.reparse = pending.clone();
-    id.fs.provenance = pending;
+    // The Palisade provenance tag has no reader yet (#54).
+    id.fs.provenance = Field::pending(&[54]);
+    read_fs_details(id, file);
     // The stream is read for the opened file itself: by the handle's final
     // path, and kept only if that path still names the same file, so the
     // record never pairs this file's content with another file's mark.
@@ -1100,7 +1095,16 @@ fn context_tier(
     };
     // The tier counts as computed only when it computed something: with
     // every field pending or unavailable it did not.
-    if id.fs.motw.is_computed() || id.fs.path_variables.is_computed() {
+    let fs = &id.fs;
+    if fs.motw.is_computed()
+        || fs.path_variables.is_computed()
+        || fs.file_id.is_computed()
+        || fs.volume.is_computed()
+        || fs.owner.is_computed()
+        || fs.user_writable.is_computed()
+        || fs.streams.is_computed()
+        || fs.reparse.is_computed()
+    {
         id.computed_tiers.insert(Tier::Context);
     }
 }
@@ -1119,6 +1123,167 @@ fn read_motw(_file: &std::fs::File) -> Field<Option<MotwSummary>> {
         Field::Unavailable("built without the os-trust feature".to_owned())
     } else {
         Field::NotApplicable
+    }
+}
+
+/// The file ID, volume, owner, writability, streams and reparse point of
+/// the opened file, from the OS (#54). Every read is of the open handle, or
+/// of the path the handle's own final path names, so nothing describes
+/// another file. A read that fails leaves its field unavailable.
+#[cfg(all(windows, feature = "os-trust"))]
+fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
+    use crate::fsctx::writable::{AssessOptions, WritabilityCache};
+    use crate::win::{access, links, security::NameCache, volume};
+    let unavailable = |e: &io::Error| e.to_string();
+
+    // The real path of the opened file: every path-based read below uses
+    // it, never the path as given (a link could lead elsewhere).
+    let final_path = links::final_path_of(file).map(|p| p.to_win32_string());
+
+    id.fs.file_id = match links::read_meta(file) {
+        Ok(meta) => {
+            let (count, names) = match &final_path {
+                Ok(p) => links::hard_links(Path::new(p), file)
+                    .map_or((None, Vec::new()), |h| (Some(h.count), h.names.clone())),
+                Err(_) => (None, Vec::new()),
+            };
+            Field::Computed(super::record::FileIdSummary {
+                volume_serial: meta.volume_serial,
+                file_id: meta
+                    .file_id
+                    .map(|b| b.iter().map(|x| format!("{x:02x}")).collect()),
+                usn_journal_id: meta.usn.map(|(j, _)| j),
+                usn: meta.usn.map(|(_, u)| u),
+                link_count: count,
+                link_names: names,
+            })
+        }
+        Err(e) => Field::Unavailable(unavailable(&e)),
+    };
+
+    let vol = volume::read_volume(file);
+    id.fs.volume = Field::Computed(volume_summary(&vol));
+
+    let mut names = NameCache::default();
+    let local = matches!(
+        vol.location_class(),
+        crate::fsctx::LocationClass::OsVolume | crate::fsctx::LocationClass::OtherFixed
+    );
+    id.fs.owner = match access::read_owner(file, vol.fs_type.as_ref(), local, &mut names) {
+        Ok(o) => Field::Computed(super::record::OwnerSummary {
+            sid: o.owner_sid.map(|s| s.to_string()),
+            name: o.owner_name.clone(),
+            trust_class: snake(&format!("{:?}", o.owner_trust_class)),
+            supported: o.owner_supported,
+        }),
+        Err(e) => Field::Unavailable(unavailable(&e)),
+    };
+
+    id.fs.user_writable = match &final_path {
+        Ok(p) => match access::assess_file(
+            Path::new(p),
+            &crate::fsctx::EvaluationOptions::default(),
+            AssessOptions::default(),
+            &mut WritabilityCache::default(),
+        ) {
+            Ok(w) => Field::Computed(super::record::WritableSummary {
+                path_user_writable: w.path_user_writable(),
+                file_user_writable: w.file_user_writable,
+                first_user_writable_ancestor: w.first_user_writable_ancestor.clone(),
+                change_perms_by_non_admin: w.change_perms_by_non_admin,
+                principals_with_write: w
+                    .principals_with_write
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            }),
+            Err(e) => Field::Unavailable(unavailable(&e)),
+        },
+        Err(e) => Field::Unavailable(unavailable(e)),
+    };
+
+    id.fs.streams = match links::read_streams(file) {
+        Ok(s) => Field::Computed(
+            s.streams
+                .iter()
+                .map(|st| super::record::StreamSummary {
+                    name: st.name.clone(),
+                    size: st.size,
+                    benign: st.benign.map(|b| snake(&format!("{b:?}"))),
+                    executable_content: st.is_executable_content,
+                })
+                .collect(),
+        ),
+        Err(e) => Field::Unavailable(unavailable(&e)),
+    };
+
+    // The reparse point of the path as given: the opened handle followed
+    // it, so the link itself is opened without following.
+    id.fs.reparse = match id.path.as_deref() {
+        Some(p) => {
+            match links::open_link_itself(Path::new(p)).and_then(|f| links::read_reparse(&f)) {
+                Ok(r) => Field::Computed(r.map(|r| reparse_summary(&r))),
+                Err(e) => Field::Unavailable(unavailable(&e)),
+            }
+        }
+        None => Field::NotApplicable,
+    };
+}
+
+#[cfg(not(all(windows, feature = "os-trust")))]
+fn read_fs_details(id: &mut FileIdentity, _file: &std::fs::File) {
+    let why = if cfg!(windows) {
+        "built without the os-trust feature"
+    } else {
+        "read from the Windows file system only"
+    };
+    id.fs.file_id = Field::Unavailable(why.to_owned());
+    id.fs.volume = Field::Unavailable(why.to_owned());
+    id.fs.owner = Field::Unavailable(why.to_owned());
+    id.fs.user_writable = Field::Unavailable(why.to_owned());
+    id.fs.streams = Field::Unavailable(why.to_owned());
+    id.fs.reparse = Field::Unavailable(why.to_owned());
+}
+
+#[cfg(all(windows, feature = "os-trust"))]
+fn volume_summary(v: &crate::fsctx::VolumeInfo) -> super::record::VolumeSummary {
+    use crate::fsctx::FsType;
+    super::record::VolumeSummary {
+        fs_type: v.fs_type.as_ref().map(|f| match f {
+            FsType::Other(name) => name.clone(),
+            other => snake(&format!("{other:?}")),
+        }),
+        location: snake(&format!("{:?}", v.location_class())),
+        drive_type: v.drive_type.map(|d| snake(&format!("{d:?}"))),
+        bus_type: v.bus_type.map(|b| snake(&format!("{b:?}"))),
+        is_hotplug: v.is_hotplug,
+        is_os_volume: v.is_os_volume,
+        serial: v.serial,
+        supports_owner: v.supports_owner(),
+    }
+}
+
+#[cfg(all(windows, feature = "os-trust"))]
+fn reparse_summary(r: &crate::fsctx::reparse::ReparsePoint) -> super::record::ReparseSummary {
+    use crate::fsctx::reparse::{ReparseKind, ReparseTarget};
+    super::record::ReparseSummary {
+        kind: match r.kind {
+            ReparseKind::Symlink => "symlink",
+            ReparseKind::Junction => "junction",
+            ReparseKind::MountPoint => "mount_point",
+            ReparseKind::AppExecLink => "app_exec_link",
+            ReparseKind::CloudPlaceholder => "cloud_placeholder",
+            ReparseKind::Dedup => "dedup",
+            ReparseKind::Other(_) => "other",
+        }
+        .to_owned(),
+        tag: r.tag,
+        target: match &r.target {
+            Some(ReparseTarget::Link(l)) => Some(l.print_name.clone()),
+            Some(ReparseTarget::AppExecLink(a)) => Some(a.target_path.clone()),
+            None => None,
+        },
+        alias_package_family_name: r.app_exec_link().map(|a| a.package_family_name.clone()),
     }
 }
 

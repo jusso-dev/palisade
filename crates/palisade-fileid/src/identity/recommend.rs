@@ -284,12 +284,23 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
         }
     }
 
-    // Path rules are never recommended until writability is known (#54).
+    // A path rule is never the recommendation: a content or signer rule
+    // always exists when this is reached. It is refused outright where
+    // non-administrators can write the path, or its writability is not
+    // known (ISM-1392).
     if id.fs.path.computed().is_some_and(|p| !p.claimed) {
-        rec.refused.push((
-            RuleLevel::Path,
-            "path rule refused: the path's writability by non-administrators is not known, so it is treated as user-writable".to_owned(),
-        ));
+        let why = match id.fs.user_writable.computed() {
+            Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin => {
+                "path rule not recommended: the path is not writable by non-administrators, but a content or signer rule identifies the file itself"
+            }
+            Some(_) => {
+                "path rule refused: the file or a folder above it is writable by non-administrators"
+            }
+            None => {
+                "path rule refused: the path's writability by non-administrators is not known, so it is treated as user-writable"
+            }
+        };
+        rec.refused.push((RuleLevel::Path, why.to_owned()));
     }
     rec
 }

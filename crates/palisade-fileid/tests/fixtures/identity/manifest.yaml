@@ -549,6 +549,17 @@
     authenticode_conformant: true
     masquerade_score: 0
 
+- id: "os-fs-context"
+  file: "notepad.exe"
+  source: "os"
+  licence: "OS component: referenced by path, never copied"
+  generator: "C:\\Windows\\System32\\notepad.exe"
+  description: "The file system context of an OS binary on the Windows runners (#54): a file with an ID on an NTFS volume, not a reparse point. The location, owner class and writability depend on the runner's disk and are checked for consistency by fs_context_on_windows_is_consistent."
+  expected:
+    fs_has_file_id: true
+    fs_file_system: "ntfs"
+    fs_reparse: "none"
+
 # Review regressions (#294): each must hold, or an allow rule is
 # recommended for a file nothing vouches for.
 

@@ -285,10 +285,20 @@ pub fn classify(id: &FileIdentity) -> Vec<AttributeStrength> {
         ));
     }
     if id.fs.path.computed().is_some_and(|p| !p.claimed) {
-        // Writability is #54. Until it is read, every path counts as
-        // user-writable, which is the conservative reading.
+        // Medium only when the access check proved that no
+        // non-administrator can write the file or any folder above it on
+        // its real or lexical chain. Unknown counts as user-writable.
         out.push(match id.fs.user_writable.computed() {
-            Some(never) => match *never {},
+            Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin => entry(
+                "path",
+                Medium,
+                "neither the file nor any folder above it is writable by non-administrators",
+            ),
+            Some(_) => entry(
+                "path",
+                Weak,
+                "the file or a folder above it is writable by non-administrators",
+            ),
             None => entry(
                 "path",
                 Weak,

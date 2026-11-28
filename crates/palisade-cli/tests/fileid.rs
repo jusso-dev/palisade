@@ -775,3 +775,39 @@ fn a_closed_pipe_is_not_a_failure() {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+
+/// `--include-ads` asks for the context tier, which lists streams. Off the
+/// Windows file system they cannot be listed, which is a failure, never
+/// "no streams".
+#[test]
+fn include_ads_needs_the_stream_list() {
+    let file = corpus("signed-tool.exe");
+    let o = run(&[
+        "fileid",
+        "inspect",
+        file.to_str().unwrap(),
+        "--tiers",
+        "t0",
+        "--include-ads",
+        "--json",
+    ]);
+    let out = stdout(&o);
+    let first: Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert!(
+        first["requested_tiers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t == "context")
+    );
+    if cfg!(windows) {
+        // On Windows the stream list is read; a fresh file has none.
+        assert!(
+            first["fs"]["streams"]["status"] == "computed" || o.status.code() == Some(1),
+            "{out}"
+        );
+    } else {
+        assert_eq!(o.status.code(), Some(1), "{out}");
+        assert!(out.contains("streams could not be listed"), "{out}");
+    }
+}

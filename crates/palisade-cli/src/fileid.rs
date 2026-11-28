@@ -17,7 +17,8 @@ use palisade_fileid::catalog::{
 use palisade_fileid::fsctx::{KnownFolders, NormalizedPath, normalize_win32};
 use palisade_fileid::hash::{AlgorithmSet, HashOptions};
 use palisade_fileid::identity::{
-    self, FileIdentity, IdentityContext, ProtectedList, Tier, Tiers, compare, identify, recommend,
+    self, Field, FileIdentity, IdentityContext, ProtectedList, Tier, Tiers, compare, identify,
+    recommend,
 };
 use serde_json::{Value, json};
 
@@ -42,6 +43,13 @@ pub enum Command {
         /// Walk subdirectories too (symbolic links are not followed).
         #[arg(long)]
         recursive: bool,
+        /// Also identify each alternate data stream of each file that is not
+        /// a well-known benign stream, as its own record (`file:stream`).
+        /// Computes the context tier, which lists the streams; streams are
+        /// read from the Windows file system only. Output is one record per
+        /// line.
+        #[arg(long)]
+        include_ads: bool,
         #[command(flatten)]
         format: FormatArgs,
         #[command(flatten)]
@@ -210,9 +218,19 @@ pub fn run(command: Command) -> ExitCode {
             path,
             tiers,
             recursive,
+            include_ads,
             format,
             trust,
-        } => inspect(&path, tiers, recursive, format.format(), &trust),
+        } => inspect(
+            &path,
+            tiers,
+            Walk {
+                recursive,
+                include_ads,
+            },
+            format.format(),
+            &trust,
+        ),
         Command::Hash { path, alg, json } => hash(&path, &alg, json),
         Command::Certs {
             path,
@@ -472,10 +490,17 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 // ---------------------------------------------------------------------------
 // inspect
 
+/// How `inspect` walks.
+#[derive(Debug, Clone, Copy)]
+struct Walk {
+    recursive: bool,
+    include_ads: bool,
+}
+
 fn inspect(
     path: &Path,
-    tiers: Tiers,
-    recursive: bool,
+    mut tiers: Tiers,
+    walk_opts: Walk,
     format: Format,
     args: &TrustArgs,
 ) -> Result<ExitCode, Failure> {
@@ -483,25 +508,36 @@ fn inspect(
     let ctx = trust.context();
     let meta = fs::metadata(path)
         .map_err(|e| Failure::Runtime(format!("cannot read {}: {e}", path.display())))?;
+    if walk_opts.include_ads {
+        // The context tier lists the streams.
+        tiers.insert(Tier::Context);
+    }
     if !meta.is_dir() {
         let id = identify(path, tiers, &ctx)
             .map_err(|e| Failure::Runtime(format!("{}: {e}", path.display())))?;
-        print(&render(&to_value(&id), format, false));
+        print(&render(&to_value(&id), format, walk_opts.include_ads));
         // A record with errors is printed in full, but the run did not
         // compute everything that was asked.
-        return Ok(if id.errors.is_empty() {
-            ExitCode::SUCCESS
-        } else {
+        let mut failed = !id.errors.is_empty();
+        if walk_opts.include_ads {
+            failed |= inspect_streams(path, &id, tiers, &ctx, format);
+        }
+        return Ok(if failed {
             ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
         });
     }
     let mut failed = false;
-    for file in walk(path, recursive) {
+    for file in walk(path, walk_opts.recursive) {
         match file {
             Ok(file) => match identify(&file, tiers, &ctx) {
                 Ok(id) => {
                     failed |= !id.errors.is_empty();
                     print(&render(&to_value(&id), format, true));
+                    if walk_opts.include_ads {
+                        failed |= inspect_streams(&file, &id, tiers, &ctx, format);
+                    }
                 }
                 Err(e) => {
                     failed = true;
@@ -519,6 +555,52 @@ fn inspect(
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// Identifies each alternate data stream of `host` that is not a
+/// well-known benign stream, printing one record each. Returns whether
+/// anything failed, including streams that could not be listed: asked for
+/// and not available is a failure, never "no streams".
+fn inspect_streams(
+    host: &Path,
+    id: &FileIdentity,
+    tiers: Tiers,
+    ctx: &IdentityContext<'_>,
+    format: Format,
+) -> bool {
+    let streams = match &id.fs.streams {
+        Field::Computed(s) => s,
+        Field::Unavailable(why) => {
+            report_failure(
+                host,
+                &format!("its streams could not be listed: {why}"),
+                format,
+            );
+            return true;
+        }
+        _ => {
+            report_failure(host, "its streams were not listed", format);
+            return true;
+        }
+    };
+    let mut failed = false;
+    for stream in streams.iter().filter(|s| s.benign.is_none()) {
+        let mut name = host.as_os_str().to_owned();
+        name.push(":");
+        name.push(&stream.name);
+        let path = PathBuf::from(name);
+        match identify(&path, tiers, ctx) {
+            Ok(sid) => {
+                failed |= !sid.errors.is_empty();
+                print(&render(&to_value(&sid), format, true));
+            }
+            Err(e) => {
+                failed = true;
+                report_failure(&path, &e.to_string(), format);
+            }
+        }
+    }
+    failed
 }
 
 fn report_failure(path: &Path, message: &str, format: Format) {

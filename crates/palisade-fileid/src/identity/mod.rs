@@ -19,11 +19,11 @@
 //!
 //! Which reader runs is decided by the content the classifier saw, never by
 //! the name alone: a PE image named `.ps1` or `.msix` is judged only as a
-//! PE, so no script or package signature can vouch for it. Groups other
-//! issues still deliver are present in the schema now, so the record's
-//! shape does not change when they land, and hold [`Field::NotYetSupported`]
-//! with the issue numbers: the owner, writability, streams, reparse points,
-//! file ID, volume and provenance in `fs` (#54).
+//! PE, so no script or package signature can vouch for it. The context
+//! tier reads the file ID, volume, owner, writability, streams and reparse
+//! point from the Windows file system (`os-trust`, #54); elsewhere they are
+//! [`Field::Unavailable`]. The provenance tag has no reader yet, so it holds
+//! [`Field::NotYetSupported`] with the issue number (#54).
 //!
 //! # Signing state
 //!
@@ -50,7 +50,8 @@
 //! [`Field::Unavailable`] and an entry in [`FileIdentity::errors`]; it
 //! never turns into "unsigned", "not a driver" or "clean". A masquerade
 //! check that could not run is listed in [`Masquerade::unassessed`]. A path
-//! counts as user-writable until #54 reads its ACLs.
+//! counts as user-writable unless the access check proved that no
+//! non-administrator can write it or any folder above it.
 //!
 //! # Serialised form and evolution
 //!
@@ -88,11 +89,12 @@ pub use protected::{
 pub use recommend::{MASQUERADE_THRESHOLD, Recommendation, RuleLevel, recommend};
 pub use record::{
     AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary, Derived,
-    EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdentity, FsInfo,
-    Hashes, IdentityError, InstallerSummary, ManifestSummary, Masquerade, MasqueradeReason,
-    MotwSummary, NameInfo, NotYetDefined, PackageSummary, PathInfo, PdbSummary, PeSummary, Pending,
-    PublisherProduct, SCHEMA_VERSION, ScriptSummary, SectionSummary, SignatureSummary,
-    SigningState, SigningStateKind, Timestamps, TrustSource, TrustedSigner, VersionSummary,
+    EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdSummary,
+    FileIdentity, FsInfo, Hashes, IdentityError, InstallerSummary, ManifestSummary, Masquerade,
+    MasqueradeReason, MotwSummary, NameInfo, NotYetDefined, OwnerSummary, PackageSummary, PathInfo,
+    PdbSummary, PeSummary, Pending, PublisherProduct, ReparseSummary, SCHEMA_VERSION,
+    ScriptSummary, SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary,
+    Timestamps, TrustSource, TrustedSigner, VersionSummary, VolumeSummary, WritableSummary,
 };
 pub use strength::{AttributeStrength, IdentityStrength};
 pub use tier::{Tier, TierParseError, Tiers};
@@ -107,18 +109,25 @@ impl FileIdentity {
     ///
     /// Returns `false`, and changes nothing, when the records are shown to
     /// describe different files or versions: a different path or name hint,
-    /// a different final path, size, last-write or creation time, or a
-    /// different content digest; and when both records hold attributes
-    /// derived from the content, unless both carry the same content digest.
-    /// Otherwise an attribute only one record has is not compared. Until #54 adds the file ID and change journal stamp,
-    /// that is the strongest check available; a file rewritten in place
-    /// with the same size and restored times is not detected.
+    /// a different final path, file ID or change journal stamp, size,
+    /// last-write or creation time, or a different content digest; and when
+    /// both records hold attributes derived from the content, unless both
+    /// carry the same content digest. Otherwise an attribute only one record
+    /// has is not compared. Without a change journal (off Windows, or on a
+    /// volume without one), a file rewritten in place with the same size and
+    /// restored times is not detected by the file system fields.
     pub fn merge(&mut self, other: Self, ctx: &IdentityContext<'_>) -> bool {
         fn differ<T: PartialEq>(a: Option<T>, b: Option<T>) -> bool {
             matches!((a, b), (Some(a), Some(b)) if a != b)
         }
         let final_path = |id: &Self| id.fs.path.computed().and_then(|p| p.final_path.clone());
         let times = |id: &Self| id.timestamps.computed().copied();
+        let file_key = |id: &Self| {
+            id.fs
+                .file_id
+                .computed()
+                .map(|f| (f.volume_serial, f.file_id.clone(), f.usn_journal_id, f.usn))
+        };
         // Attributes derived from the content (classify, hash, trust) are
         // joined only when both records carry the digest of the content
         // they read, and it is the same: two records of the same size and
@@ -140,6 +149,7 @@ impl FileIdentity {
             || differ(self.content_sha256.as_ref(), other.content_sha256.as_ref())
             || content_unproven
             || differ(final_path(self), final_path(&other))
+            || differ(file_key(self), file_key(&other))
             || differ(
                 times(self).and_then(|t| t.modified),
                 times(&other).and_then(|t| t.modified),

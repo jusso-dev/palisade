@@ -516,6 +516,24 @@ fn actual(id: &FileIdentity, key: &str) -> String {
             .computed()
             .and_then(|v| v.first())
             .map(|s| s.kind.to_owned())),
+        "fs_owner_trust_class" => opt(id.fs.owner.computed().map(|o| o.trust_class.clone())),
+        "fs_path_user_writable" => opt(id
+            .fs
+            .user_writable
+            .computed()
+            .map(|w| w.path_user_writable.to_string())),
+        "fs_location" => opt(id.fs.volume.computed().map(|v| v.location.clone())),
+        "fs_file_system" => opt(id.fs.volume.computed().and_then(|v| v.fs_type.clone())),
+        "fs_reparse" => opt(id
+            .fs
+            .reparse
+            .computed()
+            .map(|r| r.as_ref().map_or("none".to_owned(), |r| r.kind.clone()))),
+        "fs_has_file_id" => opt(id
+            .fs
+            .file_id
+            .computed()
+            .map(|f| f.file_id.is_some().to_string())),
         k if k.starts_with("strength.") => opt(id
             .strengths
             .iter()
@@ -1361,4 +1379,70 @@ fn normalised_hashes_are_unavailable_until_the_type_is_known() {
     let h = id.hashes.computed().unwrap();
     assert_eq!(h.msi_normalised_sha256, Field::NotApplicable);
     assert_eq!(h.script_normalised_sha256, Field::NotApplicable);
+}
+
+/// #55 wiring, Windows only: every file system field of an OS binary is
+/// read (never "not yet supported"), and the path's strength follows the
+/// writability the access check reports, Medium only when it proved the
+/// path safe. A path rule is never recommended.
+#[cfg(all(windows, feature = "os-trust"))]
+#[test]
+fn fs_context_on_windows_is_consistent() {
+    use palisade_fileid::identity::{IdentityStrength, RuleLevel, recommend};
+    let contexts = Contexts::new();
+    let ctx = contexts.get("default");
+    let id = identify(
+        Path::new(r"C:\Windows\System32\notepad.exe"),
+        Tiers::ALL,
+        &ctx,
+    )
+    .unwrap();
+    for (name, computed) in [
+        ("file_id", id.fs.file_id.is_computed()),
+        ("volume", id.fs.volume.is_computed()),
+        ("owner", id.fs.owner.is_computed()),
+        ("streams", id.fs.streams.is_computed()),
+        ("reparse", id.fs.reparse.is_computed()),
+    ] {
+        assert!(computed, "{name}: {:?}", id.fs);
+    }
+    let path = id
+        .strengths
+        .iter()
+        .find(|s| s.attribute == "path")
+        .map(|s| s.strength);
+    let safe = id
+        .fs
+        .user_writable
+        .computed()
+        .is_some_and(|w| !w.path_user_writable && !w.change_perms_by_non_admin);
+    assert_eq!(
+        path,
+        Some(if safe {
+            IdentityStrength::Medium
+        } else {
+            IdentityStrength::Weak
+        }),
+        "{:?}",
+        id.fs.user_writable
+    );
+    assert_ne!(recommend(&id).level, RuleLevel::Path);
+    // A file in a folder every user can write is never Medium.
+    let dir = std::env::temp_dir().join(format!("palisade-fsctx-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("extool.exe");
+    std::fs::write(&file, b"MZ").unwrap();
+    let id = identify(&file, Tiers::ALL, &ctx).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let path = id
+        .strengths
+        .iter()
+        .find(|s| s.attribute == "path")
+        .map(|s| s.strength);
+    assert_eq!(
+        path,
+        Some(IdentityStrength::Weak),
+        "{:?}",
+        id.fs.user_writable
+    );
 }

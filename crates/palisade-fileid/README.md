@@ -621,9 +621,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     `not_applicable`, `unavailable` (with why) or `not_yet_supported` (with
     the issue numbers). `kind` is the content classification of
     `filetype` (#44). The deep tier fills `script` (#52), `installer` and
-    `package` (#53), chosen by content, never by name. Groups other issues
-    still deliver are in the schema already: the owner, writability,
-    streams, reparse points, file ID, volume and provenance (#54).
+    `package` (#53), chosen by content, never by name. The context tier
+    reads the file ID, volume, owner, writability, streams and reparse
+    point from the Windows file system (`os-trust`, #54); elsewhere they
+    are `unavailable`. The provenance tag is still `not_yet_supported`.
   - `signing_state` folds the embedded signatures (#48, #49, #50) of PE
     images, scripts, installers and packages, and the catalog lookup (#51),
     into `trusted`, `untrusted`, `invalid`, `unsigned` or `unverified`. It
@@ -641,7 +642,9 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     an empty file (#47).
   - `strengths` (`IdentityStrength`: strong, medium, weak, insecure) says
     how far a rule can rely on each attribute, as `identity::strength`
-    documents. A path counts as user-writable until #54 reads its ACLs.
+    documents. A path is Medium only when the access check proved that no
+    non-administrator can write it or any folder above it; unknown counts
+    as user-writable. A path rule is never recommended.
   - `masquerade` (`identity::masquerade`) scores renamed and masquerading
     binaries from 0 to 100: `name_mismatch` (after benign differences such
     as versions, `_x64`, copy markers and the installer family),
