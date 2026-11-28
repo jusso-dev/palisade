@@ -7,7 +7,7 @@ One canonical event.
 Field order here is the serialisation order, so `Event::to_canonical_json`
 is deterministic.
 
-Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json) (`$id` `https://github.com/jusso-dev/palisade/schemas/events/v1.json`), version 1.3.0. Regenerate the schema with `PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema`, then these pages with `cargo xtask docs generate`.
+Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json) (`$id` `https://github.com/jusso-dev/palisade/schemas/events/v1.json`), version 1.4.0. Regenerate the schema with `PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema`, then these pages with `cargo xtask docs generate`.
 
 ## Fields
 
@@ -16,6 +16,7 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `action` | [`Token`](types.md#token) | yes |  |  | 1.0.0 | The verb, for example `execute`, `load`, `install` or `activate`. |
 | `admin` | [`Admin`](admin.md) | no |  |  | 1.1.0 | The administrative action. Since 1.1. |
 | `agent` | [`AgentInfo`](agent-info.md) | no |  |  | 1.0.0 | Agent state, for agent events. |
+| `aggregate` | [`Aggregate`](aggregate.md) | no |  |  | 1.4.0 | Set when this event stands for more than one occurrence: a summary of allowed decisions, or a de-duplicated event with its repeat count. Absent for an event that records one occurrence. Since 1.4. |
 | `approval` | [`Approval`](approval.md) | no |  |  | 1.1.0 | The approval request. Since 1.1. |
 | `audit_policy` | [`AuditPolicy`](audit-policy.md) | no |  |  | 1.1.0 | The OS audit policy change. Since 1.1. |
 | `category` | [`Category`](types.md#category) | yes |  |  | 1.0.0 | The type's category. It must match the registry. |
@@ -41,7 +42,7 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `process` | [`Process`](process.md) | no |  |  | 1.0.0 | The process that acted. |
 | `registry` | [`Registry`](registry.md) | no |  |  | 1.1.0 | The registry key or value. Since 1.1. |
 | `restriction` | [`Restriction`](restriction.md) | no |  |  | 1.1.0 | The script language restriction. Since 1.1. |
-| `schema_version` | [`SchemaVersion`](types.md#schemaversion) | yes |  | matches `^1\.(0\|1\|2\|3)\.(0\|[1-9][0-9]*)$` | 1.0.0 | The schema version of this event. |
+| `schema_version` | [`SchemaVersion`](types.md#schemaversion) | yes |  | matches `^1\.(0\|1\|2\|3\|4)\.(0\|[1-9][0-9]*)$` | 1.0.0 | The schema version of this event. |
 | `script` | [`Script`](script.md) | no |  |  | 1.0.0 | The script, for script events. |
 | `seq` | integer | yes |  | at least 0; format `uint64` | 1.0.0 | The producer's sequence number, starting at 0. |
 | `severity` | [`Severity`](types.md#severity) | yes |  |  | 1.0.0 | 0 to 10. See `Severity::syslog` for the syslog mapping. |
@@ -51,13 +52,14 @@ Schema: [`schemas/events/v1.json`](https://github.com/jusso-dev/palisade/blob/ma
 | `ts_agent_monotonic` | integer | no |  | at least 0; format `uint64` | 1.0.0 | The producer's monotonic clock when the event was recorded, in microseconds since the agent started. It orders events even when the wall clock jumps. |
 | `user` | [`User`](user.md) | no |  |  | 1.0.0 | The user, if any. |
 
-The schema also has 79 cross-field rules (`allOf`), for example which field sets each event type requires and which fields an older `schema_version` may not use.
+The schema also has 82 cross-field rules (`allOf`), for example which field sets each event type requires and which fields an older `schema_version` may not use.
 
 ## Object types
 
 - [`Account`](account.md): An account or group in a directory or on the device.
 - [`Admin`](admin.md): An administrative action on the server (#132).
 - [`AgentInfo`](agent-info.md): Agent state.
+- [`Aggregate`](aggregate.md): The count an aggregated event carries. Counts are exact: every occurrence is in exactly one aggregate or one single event.
 - [`Approval`](approval.md): An approval request and its decision.
 - [`AuditPolicy`](audit-policy.md): A change to the OS audit policy.
 - [`CacheStats`](cache-stats.md): Cache counters.
@@ -69,6 +71,7 @@ The schema also has 79 cross-field rules (`allOf`), for example which field sets
 - [`Hashes`](hashes.md): The digests of a file.
 - [`Host`](host.md): The device an event is about.
 - [`Identity`](identity.md): Identity details: logons and group membership changes. The account that logged on, or that made a change, is `super::Event::user`.
+- [`Loss`](loss.md): One kind of loss.
 - [`Native`](native.md): Details from OS-native enforcement: the OS code integrity and legacy rule-collection engines.
 - [`Network`](network.md): A network connection or request.
 - [`Origin`](origin.md): Where a file came from.
