@@ -1,0 +1,64 @@
+---
+source: crates/palisade-policy/tests/validation_snapshots.rs
+---
+== multiple-errors
+error[invalid_name] /policy/name: must not start or end with whitespace
+error[invalid_tag] /policy/metadata/tags/1: tag `dup` is repeated
+error[unknown_advanced_key] /policy/settings/advanced/engine.flag: `engine.flag` is not a known advanced setting
+error[duplicate_rule_set_ref] /policy/rule_sets/1: rule set 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e60 is listed more than once
+error[case_sensitivity_not_applicable] /rule_sets/0/rules/0/match/criterion/case_sensitive: `meta.file_version` has no case to compare
+error[invalid_value_count] /rule_sets/0/rules/0/match/criterion/values: 2 values; exactly 1 is required for `version_ge`
+== criterion-options
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/1/criterion/anchored: `anchored` only applies to `regex` and `not_regex`
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/2/criterion/match_ads: `match_ads` only applies to positive tests of `path.full`
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/3/criterion/include_sub_ous: `include_sub_ous` only applies to `user.ou` and `device.ou`
+error[invalid_value] /rule_sets/0/rules/0/match/all/4/criterion/values/0: expected one of `untrusted`, `low`, `medium`, `medium_plus`, `high`, `system`, `protected`
+error[invalid_value] /rule_sets/0/rules/0/match/all/5/criterion/values/1: the window is empty: the end equals the start
+error[invalid_value] /rule_sets/0/rules/0/match/all/6/criterion/values/0: bits after the prefix are set; the block is `10.0.0.0/8`
+error[invalid_value] /rule_sets/0/rules/0/match/all/7/criterion/values/1: the maximum is below the minimum
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/8/criterion/safety_critical: `safety_critical` only applies in a mandatory blocklist
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/9/criterion/anchored: `anchored` only applies to `regex` and `not_regex`
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/9/criterion/match_ads: `match_ads` only applies to positive tests of `path.full`
+error[option_not_applicable] /rule_sets/0/rules/0/match/all/9/criterion/include_sub_ous: `include_sub_ous` only applies to `user.ou` and `device.ou`
+== scope-errors
+error[unknown_rule_set] /policy/rule_set_scopes/0/rule_set: rule set 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e6f is not referenced by the policy
+error[user_pattern_not_allowed] /rule_sets/0/rules/0/scope/principals/include/0: account names can be spoofed, so `user_pattern` may only exclude principals from a rule that lets an object run, and only add principals to a deny; use a SID or a group for this position
+error[invalid_scope] /rule_sets/0/rules/0/scope/network/include/0: `10.0.0.1/8` has host bits set; the block starts at its first address
+error[invalid_scope] /rule_sets/0/rules/0/scope/network/include/1: location profile `branch` is not defined in `policy.location_profiles`
+error[user_pattern_not_allowed] /rule_sets/0/rules/1/scope/principals/exclude/0: account names can be spoofed, so `user_pattern` may only exclude principals from a rule that lets an object run, and only add principals to a deny; use a SID or a group for this position
+error[invalid_schedule] /rule_sets/0/rules/1/scope/schedule/windows/0/days: a window needs at least one day, each listed once
+error[invalid_schedule] /rule_sets/0/rules/1/scope/schedule/windows/1: a window needs exactly one of `end` and `duration_mins`, and lasts from 1 minute to 7 days
+error[invalid_schedule] /rule_sets/0/rules/1/scope/schedule/except_dates/0/to: the range ends (2026-12-25) before it starts (2026-12-26)
+error[invalid_schedule] /rule_sets/0/rules/1/scope/schedule/on_window_close: `on_window_close` only applies to rules that allow (`allow`, `allow_contained`, `allow_elevated`)
+error[invalid_scope] /rule_sets/0/rules/1/scope/max_instances_per_session: an instance limit only applies to rules that allow (`allow`, `allow_contained`, `allow_elevated`)
+== unknown-policy
+error[unknown_level_not_valid_for_type] /policy/unknown/by_type/library: `library` loads without a user action, so it cannot be prompted for
+error[restrict_profile_required] /policy/unknown/restrict_profile: the `restrict` level needs `restrict_profile`, the containment profile to run unknown objects in
+error[invalid_prompt_settings] /policy/unknown/prompt/options/1: `block` is listed more than once
+error[invalid_prompt_settings] /policy/unknown/prompt/fallback: the fallback applies when no prompt can be shown, so it cannot be `prompt`
+warning[unknown_allow] /policy/unknown/by_location/temp: `allow` lets unknown objects run silently; use `detect` to at least report them
+error[unknown_allow_not_permitted] /policy/unknown: under the `e8_ml3` preset an unknown `script.powershell` in `user_profile` and `temp` with origin `internet` would run silently; Essential Eight requires default deny in `user_profile` (ISM-1870)
+error[unknown_allow_not_permitted] /policy/unknown: under the `e8_ml3` preset an unknown `script.powershell` in `user_profile` and `temp` with origin `internet` would run silently; Essential Eight requires default deny in `temp` (ISM-1870)
+warning[compliance_weakened] /policy/unknown: weaker than the `e8_ml3` preset: an unknown `executable` in `user_profile` with origin `internet` gets `restrict`, the preset gives `block`
+warning[compliance_weakened] /policy/unknown/driver_boot_policy: under the `e8_ml3` preset unknown drivers are blocked, except during early boot: `driver_boot_policy: audit` only reports drivers loaded before the agent has fully started; set `enforce` once the device's boot-start drivers are known
+error[mandatory_blocklist_required] /policy/rule_sets: the `e8_ml3` preset requires a referenced mandatory blocklist with at least one enabled rule with no `activates_at` or `expires_at` (recommended block rules and the vulnerable driver blocklist, ISM-1544, ISM-1659)
+== lifecycle-governance
+error[invalid_governance] /policy/governance/expiry_notice_days/1: each notice is 0 to 365 days before expiry, once
+error[invalid_activity_window] /rule_sets/0/rules/0/expires_at: `expires_at` (2026-11-01T00:00:00Z) must be after `activates_at` (2026-12-01T00:00:00Z)
+error[on_expire_not_applicable] /rule_sets/0/rules/1/on_expire: `on_expire` needs `expires_at`
+error[justification_required] /rule_sets/0/rules/2/metadata/justification: governance mode needs a justification for this `allow` rule
+error[review_date_required] /rule_sets/0/rules/2/metadata/review_by: governance mode needs `review_by`, or `created_at` to derive it (a year later)
+error[exception_incomplete] /rule_sets/0/rules/3: this rule is an exception (an exclusion, an allow on a weak or path identity, or `metadata.exception`); governance mode needs `expires_at`, `approved_at`, `approved_by`, `risk_rating`
+== mode-settings
+error[mode_not_allowed] /policy/mode_options/mode_by_type/script.powershell: an object type cannot be `disabled`; set its control level to `off` instead
+error[mode_disconnected_weaker] /policy/mode_options/mode_disconnected: `monitor` is not stricter than the policy's mode `audit`; a disconnected device must be as strict or stricter
+error[setting_out_of_range] /policy/mode_options/disconnected_after_secs: 120 is outside 900..=2592000; it must be at least the check-in interval
+error[mode_override_not_allowed] /rule_sets/0/mode_override: only a blocklist that is not mandatory can set its own mode; a mandatory blocklist blocks in every mode (ADR 0004)
+error[mode_override_not_allowed] /rule_sets/1/mode_override: only a blocklist that is not mandatory can set its own mode; a mandatory blocklist blocks in every mode (ADR 0004)
+error[mode_not_allowed] /rule_sets/2/mode_override: a rule set cannot be `disabled`; leave it out of the policy instead
+== action-not-valid
+error[action_not_valid_in_rule_set] /rule_sets/0/rules/0/action/type: `deny` is not valid in a `allowlist` rule set; use a `mixed` rule set or one of the kind the action belongs to
+error[action_not_valid_in_rule_set] /rule_sets/0/rules/1/action/type: `allow_elevated` is not valid in a `allowlist` rule set; use a `mixed` rule set or one of the kind the action belongs to
+error[action_not_valid_for_object_type] /rule_sets/0/rules/1/object_types/1: `allow_elevated` cannot apply to `driver`
+error[action_not_valid_in_rule_set] /rule_sets/0/rules/2/action/type: `trust_source` is not valid in a `allowlist` rule set; use a `mixed` rule set or one of the kind the action belongs to
+error[action_not_valid_for_object_type] /rule_sets/0/rules/2/object_types: `trust_source` applies only to `executable`, `installer`; list the object types the rule is for

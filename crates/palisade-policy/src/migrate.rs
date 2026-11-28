@@ -3,7 +3,7 @@
 //! A minor version only adds optional fields, so any reader of a major
 //! reads every minor of it ([`SchemaVersion::is_readable_by`]). A major
 //! version is a breaking change, and a document written for an older major
-//! is brought up to [`CURRENT`](crate::schema::CURRENT) by migrations.
+//! is brought up to [`crate::schema::CURRENT`] by migrations.
 //!
 //! Each [`Step`] migrates a document from one major version to the next:
 //! `migrate(vN) -> vN+1`. Steps are pure functions from a JSON object to a
@@ -272,7 +272,7 @@ pub fn v0_to_v1(mut document: Object) -> Result<Object, StepError> {
 /// A JSON value read with every object key unique. `serde_json::Value`
 /// keeps the last of repeated keys, which would let two readers disagree
 /// about one document.
-struct UniqueValue(Value);
+pub(crate) struct UniqueValue(pub(crate) Value);
 
 impl<'de> Deserialize<'de> for UniqueValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

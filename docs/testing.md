@@ -237,7 +237,8 @@ them, and only they need a nightly toolchain. There are three projects:
   (the signed policy bundle envelope, its verification and delta rebuilding, #325) and
   `sntp_reply` (the SNTP reply checker behind the server's clock health check, #224).
 - `crates/palisade-policy/fuzz`, with five targets: `fuzz_policy_json` (the strict JSON reader,
-  the migrating reader, validation and the evaluator build), `fuzz_policy_yaml` (the YAML reader),
+  the migrating and lenient readers, validation and the evaluator build), `fuzz_policy_yaml`
+  (the YAML reader),
   `fuzz_wildcard_regex_compile` (compiling and matching wildcards, regular expressions and text
   values), `fuzz_bundle_decode` (the policy bundle's header-only and strict decoders, #43) and
   `fuzz_bundle_delta` (reading a bundle delta and applying it, #43, #325).

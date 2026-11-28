@@ -1541,8 +1541,17 @@ pub(crate) fn category_problem(path: &str) -> Option<String> {
     None
 }
 
-/// Keys accepted in `settings.advanced`. None are defined yet; each will be
-/// added here with its type when a feature needs one.
+/// Keys accepted in `settings.advanced` without `allow_unknown_advanced`.
+///
+/// Decision (#330): the registry stays empty, and `advanced` stays opt-in
+/// through `allow_unknown_advanced`. Nothing in Palisade reads an advanced
+/// key yet, so any key a policy sets has no effect, and registering
+/// speculative keys would only fix names before their meaning is known.
+/// A feature that needs an engineering setting adds its key here, with its
+/// type and range checked in validation, in the same change that reads it.
+/// An advanced key can never relax a decision on its own: settings that
+/// change what is allowed belong in the typed model, where a reader that
+/// does not know them refuses the document ([`crate::lenient`]).
 const KNOWN_ADVANCED_KEYS: &[&str] = &[];
 
 /// Unicode bidirectional formatting characters, which can make a name read

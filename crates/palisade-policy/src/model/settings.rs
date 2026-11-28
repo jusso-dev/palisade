@@ -106,7 +106,8 @@ pub struct PolicySettings {
     pub max_values_per_criterion: u8,
     /// Engineering settings, checked against a registry of known keys. The
     /// registry is empty in this version, so any key is rejected unless
-    /// `allow_unknown_advanced` is set.
+    /// `allow_unknown_advanced` is set. Keys are added only with the feature
+    /// that reads them (#330), and never relax a decision.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(deserialize_with = "unique_keys")]
     #[schemars(transform = advanced_keys)]

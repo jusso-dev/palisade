@@ -12,6 +12,7 @@ pub mod engine;
 pub mod evaluate;
 pub mod facts;
 pub mod hierarchy;
+pub mod lenient;
 pub mod library;
 pub mod lifecycle;
 pub mod migrate;

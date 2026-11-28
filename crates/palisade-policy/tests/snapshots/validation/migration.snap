@@ -1,0 +1,25 @@
+---
+source: crates/palisade-policy/tests/validation_snapshots.rs
+---
+== duplicate-key
+migrate: invalid policy document: duplicate key `mode` at line 8 column 10
+lenient: invalid policy document: duplicate key `mode` at line 8 column 10
+== flags-and-effects
+migrate: cannot migrate from version 0: /rule_sets/0/rules/0/flags: a rule has `flags` (v0) and `effects` (v1); keep one
+lenient: cannot migrate from version 0: /rule_sets/0/rules/0/flags: a rule has `flags` (v0) and `effects` (v1); keep one
+== newer-major
+migrate: unsupported schema version 2.0.0: this reader migrates versions up to 1.0.0
+lenient: unsupported schema version 2.0.0: this reader migrates versions up to 1.0.0
+== no-version
+migrate: invalid policy document: missing or invalid `schema_version`
+lenient: invalid policy document: missing or invalid `schema_version`
+== unknown-criterion-field
+migrate: invalid policy document: unknown variant `quantum.fingerprint`
+lenient: /rule_sets/0/rules/0: an unreadable `allow` rule could relax a decision, so the document is refused: unknown variant `quantum.fingerprint`
+== v1-version-in-policy
+migrate: invalid policy document: missing or invalid `schema_version`
+lenient: invalid policy document: missing or invalid `schema_version`
+== newer minor, set aside
+migrate: invalid policy document: unknown field `cost_centre`
+lenient: reads, from 1.4.0
+  ignored /policy/metadata/cost_centre (GovernanceField): unknown field `cost_centre`
