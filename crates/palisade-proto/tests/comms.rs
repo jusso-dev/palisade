@@ -1,7 +1,7 @@
 //! Seed inputs for the `comms_messages` fuzz target
 //! (`fuzz/fuzz_targets/comms_messages.rs`). The first byte of each seed
 //! picks the parser: 0 proxy reply, 1 enrolment request, 2 check-in,
-//! 3 check-in reply, 4 enrolment reply.
+//! 3 check-in reply, 4 HTTP response head, 5 enrolment reply.
 
 #![allow(clippy::unwrap_used)]
 
@@ -73,7 +73,11 @@ fn seeds() -> Vec<(&'static str, Vec<u8>)> {
         ("enrol", tag(1, &enrol)),
         ("checkin", tag(2, &check_in)),
         ("checkin-reply", tag(3, &reply)),
-        ("enrol-reply-empty", tag(4, b"{}")),
+        (
+            "head",
+            tag(4, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"),
+        ),
+        ("enrol-reply-empty", tag(5, b"{}")),
     ]
 }
 

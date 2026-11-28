@@ -58,6 +58,7 @@
 //! the transport (ADR 0015).
 
 pub mod code;
+pub mod http;
 pub mod proxy;
 
 #[cfg(test)]

@@ -312,6 +312,42 @@ fn proxy_replies_parse_strictly() {
     }
 }
 
+#[test]
+fn response_heads_report_framing_and_retry_after() {
+    use super::http::{HeadError, parse_head};
+    let h =
+        parse_head(b"HTTP/1.1 429 Too Many\r\nRetry-After: 30\r\nContent-Length:  12 \r\n\r\nbody")
+            .unwrap();
+    assert_eq!(h.status, 429);
+    assert_eq!(h.retry_after, Some(30));
+    assert_eq!(h.content_length, Some(12));
+    assert!(!h.transfer_encoding);
+    let h = parse_head(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nRetry-After: Wed, 21 Oct 2026 07:28:00 GMT\r\n\r\n").unwrap();
+    assert!(h.transfer_encoding);
+    assert_eq!(h.retry_after, None);
+    assert_eq!(h.content_length, None);
+    for bad in [
+        &b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\n"[..],
+        b"HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 99999999999999999999\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1 2\r\n\r\n",
+    ] {
+        assert_eq!(
+            parse_head(bad),
+            Err(HeadError::Malformed),
+            "{:?}",
+            String::from_utf8_lossy(bad)
+        );
+    }
+    for e in [
+        HeadError::Incomplete,
+        HeadError::TooLarge,
+        HeadError::Malformed,
+    ] {
+        assert!(!e.to_string().is_empty());
+    }
+}
+
 proptest! {
     #[test]
     fn proxy_parsing_never_panics_and_heads_fit(input in proptest::collection::vec(any::<u8>(), 0..512)) {
