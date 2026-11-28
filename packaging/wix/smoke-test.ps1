@@ -166,11 +166,19 @@ Check ($hidden -contains 'ALLOW_UNINSTALL') 'ALLOW_UNINSTALL is in MsiHiddenProp
 $files = MsiQuery $CurrentMsi 'SELECT `FileName` FROM `File`'
 # File names are stored as `short|long`.
 Check (@($files | Where-Object { $_ -match '\.pdb$' }).Count -eq 0) 'no PDB is packaged'
-Check ($files.Count -eq 3) "exactly three files are packaged ($($files -join ', '))"
+# The watchdog (#56) is packaged, and its service registered, only once
+# the build ships its executable.
+$WatchdogShipped = @($files | Where-Object { $_ -match 'palisade-watchdog\.exe$' }).Count -eq 1
+Check ($files.Count -eq 3 + [int]$WatchdogShipped) "exactly the shipped executables are packaged ($($files -join ', '))"
 $ca = MsiQuery $CurrentMsi 'SELECT `Action` FROM `CustomAction`'
-$types = MsiQuery $CurrentMsi 'SELECT `Type` FROM `CustomAction` WHERE `Action` <> ''ConfigureRecovery'''
+# The service-control custom actions: recovery actions and the
+# failure-actions flag, for the agent and, when it is shipped, the watchdog.
+$serviceActions = @($ca | Where-Object { $_ -like 'Configure*Recovery*' })
+$types = @($ca | Where-Object { $serviceActions -notcontains $_ } | ForEach-Object {
+  (MsiQuery $CurrentMsi "SELECT ``Type`` FROM ``CustomAction`` WHERE ``Action`` = '$_'")[0]
+})
 # Type 51 sets a property and type 19 shows an error and stops; every custom
-# action but the recovery one must be one of those.
+# action but the service-control ones must be one of those.
 Check (@($types | Where-Object { ([int]$_ -band 0x3f) -notin 51, 19 }).Count -eq 0) "custom actions only set properties or stop with an error ($($ca -join ', '))"
 $uiSearch = MsiQuery $CurrentMsi "SELECT ``Action`` FROM ``InstallUISequence`` WHERE ``Action`` = 'AppSearch'"
 Check ($uiSearch.Count -eq 0) 'the unelevated user-interface sequence does not read the protected settings key'
@@ -186,8 +194,12 @@ Check (@($kept | Where-Object { $exec -notcontains $_ }).Count -eq 0) 'every kep
 $schedule = MsiQuery $CurrentMsi "SELECT ``Sequence`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = 'RemoveExistingProducts'"
 $initialize = MsiQuery $CurrentMsi "SELECT ``Sequence`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = 'InstallInitialize'"
 Check ([int]$schedule[0] -gt [int]$initialize[0] -and [int]$schedule[0] -lt [int]$initialize[0] + 10) 'the old version is removed inside the install transaction'
-$recovery = MsiQuery $CurrentMsi 'SELECT `Target` FROM `CustomAction` WHERE `Action` = ''ConfigureRecovery'''
-Check ($recovery.Count -eq 1 -and $recovery[0].StartsWith('"[System64Folder]sc.exe" failure PalisadeAgent ')) "the one other custom action runs the system service-control tool ($recovery)"
+$targets = @($serviceActions | ForEach-Object {
+  (MsiQuery $CurrentMsi "SELECT ``Target`` FROM ``CustomAction`` WHERE ``Action`` = '$_'")[0]
+})
+$badTargets = @($targets | Where-Object { -not ($_.StartsWith('"[System64Folder]sc.exe" failure PalisadeAgent ') -or $_.StartsWith('"[System64Folder]sc.exe" failureflag PalisadeAgent ') -or $_.StartsWith('"[System64Folder]sc.exe" failure PalisadeWatchdog ') -or $_.StartsWith('"[System64Folder]sc.exe" failureflag PalisadeWatchdog ')) })
+Check ($serviceActions.Count -ge 2 -and $badTargets.Count -eq 0) "the other custom actions only run the system service-control tool on the two services ($($targets -join '; '))"
+Check (($serviceActions.Count -eq 4) -eq $WatchdogShipped) "the watchdog's recovery is set exactly when its executable is packaged ($($serviceActions -join ', '))"
 $binaries = MsiQuery $CurrentMsi 'SELECT `Name` FROM `Binary`'
 Check ($binaries.Count -eq 0) "no binary (custom action code) is embedded ($($binaries -join ', '))"
 
@@ -208,13 +220,24 @@ $svc = Get-CimInstance Win32_Service -Filter "Name = '$Service'"
 Require ($null -ne $svc) 'the service is registered' $null
 Check ($svc.State -eq 'Running') "the service is running ($($svc.State))"
 Check ($svc.StartMode -eq 'Auto') 'the service starts automatically'
-Check ($svc.DelayedAutoStart) 'the service uses delayed start'
+Check (-not $svc.DelayedAutoStart) 'the service does not use delayed start (#56)'
 Check ($svc.StartName -eq 'LocalSystem') "the service runs as LocalSystem ($($svc.StartName))"
 Check ($svc.PathName -like "*palisade-agent.exe*--service*") "the service command line ($($svc.PathName))"
 Check ($svc.DisplayName -eq 'Palisade Agent' -and $svc.Description -like 'Palisade*') 'display name and description'
-$failure = (sc.exe qfailure $Service) -join "`n"
-Check ($failure -match 'RESTART -- Delay = 0 milliseconds' -and $failure -match 'RESTART -- Delay = 5000 milliseconds' -and $failure -match 'RESTART -- Delay = 30000 milliseconds') 'recovery restarts after 0, 5 and 30 seconds'
-Check ($failure -match 'RESET_PERIOD \(in seconds\)\s*:\s*86400') 'the failure count resets after a day'
+function CheckRecovery([string] $Name) {
+  $failure = (sc.exe qfailure $Name) -join "`n"
+  Check ($failure -match 'RESTART -- Delay = 1000 milliseconds' -and $failure -match 'RESTART -- Delay = 5000 milliseconds' -and $failure -match 'RESTART -- Delay = 30000 milliseconds' -and $failure -notmatch 'Delay = 0 milliseconds') "$Name restarts after 1, 5 and 30 seconds"
+  Check ($failure -match 'RESET_PERIOD \(in seconds\)\s*:\s*86400') "$Name resets its failure count after a day"
+  Check (((sc.exe qfailureflag $Name) -join "`n") -match 'FAILURE_ACTIONS_ON_NONCRASH_FAILURES\s*:\s*TRUE') "$Name recovers from non-crash failures too"
+}
+CheckRecovery $Service
+if ($WatchdogShipped) {
+  $wd = Get-CimInstance Win32_Service -Filter "Name = 'PalisadeWatchdog'"
+  Check ($null -ne $wd -and $wd.State -eq 'Running' -and $wd.StartMode -eq 'Auto' -and -not $wd.DelayedAutoStart -and $wd.StartName -eq 'LocalSystem') 'the watchdog service is registered, running and starts automatically'
+  CheckRecovery 'PalisadeWatchdog'
+} else {
+  Check ($null -eq (Get-Service 'PalisadeWatchdog' -ErrorAction SilentlyContinue)) 'no watchdog service is registered without its executable'
+}
 Check (((sc.exe qsidtype $Service) -join "`n") -match 'UNRESTRICTED') 'the service SID type is unrestricted'
 
 foreach ($name in 'palisade-agent.exe', 'palisade-tray.exe', 'pal.exe') {
@@ -305,6 +328,7 @@ Check ((Get-Content $state) -eq 'kept across upgrades') 'repair keeps ProgramDat
 $r = Msiexec 'uninstall' @('/x', "`"$NextMsi`"")
 Require ($r.Code -eq 0) 'silent uninstall succeeds' $r
 Check ($null -eq (Get-Service $Service -ErrorAction SilentlyContinue)) 'the service is removed'
+Check ($null -eq (Get-Service 'PalisadeWatchdog' -ErrorAction SilentlyContinue)) 'no watchdog service is left'
 Check (-not (Test-Path $InstallDir)) 'the install folder is removed'
 Check (-not (Test-Path $SettingsKey)) 'the settings key is removed'
 Check ($null -eq (RunValue)) 'the sign-in entry is removed'
