@@ -36,7 +36,7 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-a700fb1e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../../../toc-049dbba3.js"></script>
@@ -457,6 +457,8 @@ matcher.</p>
 <tr><td><code>path.is_ads</code></td><td>Whether the object is an alternate data stream of a file (#328).</td></tr>
 <tr><td><code>path.share</code></td><td>The <code>\\server\share</code> a file on a network share is under (#328), from its UNC path. A file on no share has none, so <code>equals</code> does not match it.</td></tr>
 <tr><td><code>path.user_can_change_acl</code></td><td>Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328).</td></tr>
+<tr><td><code>meta.detected_type</code></td><td>What the file's content is, from its bytes (#30, #328): <code>pe</code>, <code>msi</code>, <code>script</code>, <code>zip</code>, <code>lnk</code>, <code>text</code> and so on, in <code>palisade-fileid</code>'s names. <code>unknown</code> is a missing fact.</td></tr>
+<tr><td><code>meta.extension_type</code></td><td>What the file's name claims it is, from its extension (#30, #328): one of the <code>Self::MetaDetectedType</code> names, or <code>none</code> (no extension), <code>inert</code> (a document or media extension) or <code>other</code>. A PE renamed to <code>.pdf</code> has <code>meta.detected_type</code> <code>pe</code> and <code>meta.extension_type</code> <code>inert</code>.</td></tr>
 </tbody>
 </table>
 </div>

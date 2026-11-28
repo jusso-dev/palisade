@@ -647,754 +647,774 @@
 <a href=#647 id=647 data-nosnippet>647</a>    /// owner of the file or a directory above it (#328).
 <a href=#648 id=648 data-nosnippet>648</a>    </span><span class="attr">#[serde(rename = <span class="string">"path.user_can_change_acl"</span>)]
 <a href=#649 id=649 data-nosnippet>649</a>    </span>PathUserCanChangeAcl,
-<a href=#650 id=650 data-nosnippet>650</a>}
-<a href=#651 id=651 data-nosnippet>651</a>
-<a href=#652 id=652 data-nosnippet>652</a><span class="doccomment">/// The type of a field's value, which decides the operators it accepts and
-<a href=#653 id=653 data-nosnippet>653</a>/// how values are compared (#32).
-<a href=#654 id=654 data-nosnippet>654</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-<a href=#655 id=655 data-nosnippet>655</a></span><span class="kw">pub enum </span>FieldClass {
-<a href=#656 id=656 data-nosnippet>656</a>    <span class="doccomment">/// A hexadecimal digest of a fixed length.
-<a href=#657 id=657 data-nosnippet>657</a>    </span>Hash {
-<a href=#658 id=658 data-nosnippet>658</a>        <span class="doccomment">/// The number of hex digits.
-<a href=#659 id=659 data-nosnippet>659</a>        </span>hex_len: usize,
-<a href=#660 id=660 data-nosnippet>660</a>    },
-<a href=#661 id=661 data-nosnippet>661</a>    <span class="doccomment">/// A full path or a directory: normalised before comparison, and the
-<a href=#662 id=662 data-nosnippet>662</a>    /// only class with path variables and the recursive `**` wildcard.
-<a href=#663 id=663 data-nosnippet>663</a>    </span>Path,
-<a href=#664 id=664 data-nosnippet>664</a>    <span class="doccomment">/// One path component, such as a file name or an extension.
-<a href=#665 id=665 data-nosnippet>665</a>    </span>FileName,
-<a href=#666 id=666 data-nosnippet>666</a>    <span class="doccomment">/// Free text, such as a signer name.
-<a href=#667 id=667 data-nosnippet>667</a>    </span>Text,
-<a href=#668 id=668 data-nosnippet>668</a>    <span class="doccomment">/// A dotted version number.
-<a href=#669 id=669 data-nosnippet>669</a>    </span>Version,
-<a href=#670 id=670 data-nosnippet>670</a>    <span class="doccomment">/// A principal's account name (#33): text, without regular
-<a href=#671 id=671 data-nosnippet>671</a>    /// expressions (#32).
-<a href=#672 id=672 data-nosnippet>672</a>    </span>PrincipalName,
-<a href=#673 id=673 data-nosnippet>673</a>    <span class="doccomment">/// One security identifier, such as `S-1-5-32-544` (#33).
-<a href=#674 id=674 data-nosnippet>674</a>    </span>Sid,
-<a href=#675 id=675 data-nosnippet>675</a>    <span class="doccomment">/// A set of principals: SIDs, and cloud-directory object IDs (#33).
-<a href=#676 id=676 data-nosnippet>676</a>    </span>PrincipalSet,
-<a href=#677 id=677 data-nosnippet>677</a>    <span class="doccomment">/// A set of tags (#33).
-<a href=#678 id=678 data-nosnippet>678</a>    </span>TagSet,
-<a href=#679 id=679 data-nosnippet>679</a>    <span class="doccomment">/// A yes-or-no fact (#33).
-<a href=#680 id=680 data-nosnippet>680</a>    </span>Bool,
-<a href=#681 id=681 data-nosnippet>681</a>    <span class="doccomment">/// The type of a session (#33).
-<a href=#682 id=682 data-nosnippet>682</a>    </span>SessionType,
-<a href=#683 id=683 data-nosnippet>683</a>    <span class="doccomment">/// A whole number, such as a build number or a session ID (#32).
-<a href=#684 id=684 data-nosnippet>684</a>    </span>Number,
-<a href=#685 id=685 data-nosnippet>685</a>    <span class="doccomment">/// A token integrity level, ordered from `untrusted` to `protected` (#33).
-<a href=#686 id=686 data-nosnippet>686</a>    </span>IntegrityLevel,
-<a href=#687 id=687 data-nosnippet>687</a>    <span class="doccomment">/// A directory distinguished name (#33): compared component by component.
-<a href=#688 id=688 data-nosnippet>688</a>    </span>DistinguishedName,
-<a href=#689 id=689 data-nosnippet>689</a>    <span class="doccomment">/// One IP address (#32).
-<a href=#690 id=690 data-nosnippet>690</a>    </span>Ip,
-<a href=#691 id=691 data-nosnippet>691</a>    <span class="doccomment">/// A set of IP addresses (#32).
-<a href=#692 id=692 data-nosnippet>692</a>    </span>IpSet,
-<a href=#693 id=693 data-nosnippet>693</a>    <span class="doccomment">/// A set of MAC addresses (#33).
-<a href=#694 id=694 data-nosnippet>694</a>    </span>MacSet,
-<a href=#695 id=695 data-nosnippet>695</a>    <span class="doccomment">/// A set of DNS suffixes or names (#33).
-<a href=#696 id=696 data-nosnippet>696</a>    </span>NameSet,
-<a href=#697 id=697 data-nosnippet>697</a>    <span class="doccomment">/// A day of the week (#32).
-<a href=#698 id=698 data-nosnippet>698</a>    </span>Weekday,
-<a href=#699 id=699 data-nosnippet>699</a>    <span class="doccomment">/// A time of day (#32).
-<a href=#700 id=700 data-nosnippet>700</a>    </span>TimeOfDay,
-<a href=#701 id=701 data-nosnippet>701</a>    <span class="doccomment">/// A calendar date (#32).
-<a href=#702 id=702 data-nosnippet>702</a>    </span>Date,
-<a href=#703 id=703 data-nosnippet>703</a>    <span class="doccomment">/// A hexadecimal digest of 40, 64, 96 or 128 digits: SHA-1 to SHA-512,
-<a href=#704 id=704 data-nosnippet>704</a>    /// as a certificate's signature algorithm chose (#31).
-<a href=#705 id=705 data-nosnippet>705</a>    </span>Digest,
-<a href=#706 id=706 data-nosnippet>706</a>    <span class="doccomment">/// A set of object identifiers, in dotted form (#31).
-<a href=#707 id=707 data-nosnippet>707</a>    </span>OidSet,
-<a href=#708 id=708 data-nosnippet>708</a>    <span class="doccomment">/// A GUID, such as `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`, compared
-<a href=#709 id=709 data-nosnippet>709</a>    /// with or without braces, in either case (#328).
-<a href=#710 id=710 data-nosnippet>710</a>    </span>Guid,
-<a href=#711 id=711 data-nosnippet>711</a>}
-<a href=#712 id=712 data-nosnippet>712</a>
-<a href=#713 id=713 data-nosnippet>713</a><span class="kw">impl </span>FieldClass {
-<a href=#714 id=714 data-nosnippet>714</a>    <span class="doccomment">/// Whether text of this class has a case, so `case_sensitive` applies.
-<a href=#715 id=715 data-nosnippet>715</a>    </span><span class="attr">#[must_use]
-<a href=#716 id=716 data-nosnippet>716</a>    </span><span class="kw">pub const fn </span>has_case(<span class="self">self</span>) -&gt; bool {
-<a href=#717 id=717 data-nosnippet>717</a>        <span class="macro">matches!</span>(
-<a href=#718 id=718 data-nosnippet>718</a>            <span class="self">self</span>,
-<a href=#719 id=719 data-nosnippet>719</a>            <span class="self">Self</span>::Path
-<a href=#720 id=720 data-nosnippet>720</a>                | <span class="self">Self</span>::FileName
-<a href=#721 id=721 data-nosnippet>721</a>                | <span class="self">Self</span>::Text
-<a href=#722 id=722 data-nosnippet>722</a>                | <span class="self">Self</span>::PrincipalName
-<a href=#723 id=723 data-nosnippet>723</a>                | <span class="self">Self</span>::TagSet
-<a href=#724 id=724 data-nosnippet>724</a>                | <span class="self">Self</span>::NameSet
-<a href=#725 id=725 data-nosnippet>725</a>        )
-<a href=#726 id=726 data-nosnippet>726</a>    }
-<a href=#727 id=727 data-nosnippet>727</a>}
-<a href=#728 id=728 data-nosnippet>728</a>
-<a href=#729 id=729 data-nosnippet>729</a><span class="doccomment">/// How firmly a criterion identifies an object (#31). Ordered from weakest
-<a href=#730 id=730 data-nosnippet>730</a>/// to strongest.
-<a href=#731 id=731 data-nosnippet>731</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-<a href=#732 id=732 data-nosnippet>732</a></span><span class="kw">pub enum </span>Strength {
-<a href=#733 id=733 data-nosnippet>733</a>    <span class="doccomment">/// Attributes anyone can set or copy: file names, extensions, version
-<a href=#734 id=734 data-nosnippet>734</a>    /// resource strings, a first-page hash, or a certificate authority
-<a href=#735 id=735 data-nosnippet>735</a>    /// alone (an issuer, a PCA, a root thumbprint or an EKU), which vouches
-<a href=#736 id=736 data-nosnippet>736</a>    /// for every file it signs.
-<a href=#737 id=737 data-nosnippet>737</a>    </span>Weak,
-<a href=#738 id=738 data-nosnippet>738</a>    <span class="doccomment">/// Identities that rest on a trust decision: a publisher, or a path,
-<a href=#739 id=739 data-nosnippet>739</a>    /// which an allow rule only trusts where users cannot write (#32).
-<a href=#740 id=740 data-nosnippet>740</a>    </span>Medium,
-<a href=#741 id=741 data-nosnippet>741</a>    <span class="doccomment">/// Collision-resistant hashes of the content or the signing
-<a href=#742 id=742 data-nosnippet>742</a>    /// certificate.
-<a href=#743 id=743 data-nosnippet>743</a>    </span>Strong,
-<a href=#744 id=744 data-nosnippet>744</a>}
-<a href=#745 id=745 data-nosnippet>745</a>
-<a href=#746 id=746 data-nosnippet>746</a><span class="kw">impl </span>Field {
-<a href=#747 id=747 data-nosnippet>747</a>    <span class="doccomment">/// Every field, in declaration order.
-<a href=#748 id=748 data-nosnippet>748</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">90</span>] = [
-<a href=#749 id=749 data-nosnippet>749</a>        <span class="self">Self</span>::HashSha256,
-<a href=#750 id=750 data-nosnippet>750</a>        <span class="self">Self</span>::HashSha384,
-<a href=#751 id=751 data-nosnippet>751</a>        <span class="self">Self</span>::HashSha512,
-<a href=#752 id=752 data-nosnippet>752</a>        <span class="self">Self</span>::HashAuthenticodeSha256,
-<a href=#753 id=753 data-nosnippet>753</a>        <span class="self">Self</span>::HashAuthenticodeSha1,
-<a href=#754 id=754 data-nosnippet>754</a>        <span class="self">Self</span>::HashPageSha256,
-<a href=#755 id=755 data-nosnippet>755</a>        <span class="self">Self</span>::HashPageSha1,
-<a href=#756 id=756 data-nosnippet>756</a>        <span class="self">Self</span>::HashMsiFuzzySha256,
-<a href=#757 id=757 data-nosnippet>757</a>        <span class="self">Self</span>::HashSha1,
-<a href=#758 id=758 data-nosnippet>758</a>        <span class="self">Self</span>::HashMd5,
-<a href=#759 id=759 data-nosnippet>759</a>        <span class="self">Self</span>::SignerPublisher,
-<a href=#760 id=760 data-nosnippet>760</a>        <span class="self">Self</span>::SignerIssuer,
-<a href=#761 id=761 data-nosnippet>761</a>        <span class="self">Self</span>::SignerLeafThumbprint,
-<a href=#762 id=762 data-nosnippet>762</a>        <span class="self">Self</span>::PathFull,
-<a href=#763 id=763 data-nosnippet>763</a>        <span class="self">Self</span>::PathDirectory,
-<a href=#764 id=764 data-nosnippet>764</a>        <span class="self">Self</span>::PathFileName,
-<a href=#765 id=765 data-nosnippet>765</a>        <span class="self">Self</span>::PathExtension,
-<a href=#766 id=766 data-nosnippet>766</a>        <span class="self">Self</span>::MetaOriginalFilename,
-<a href=#767 id=767 data-nosnippet>767</a>        <span class="self">Self</span>::MetaInternalName,
-<a href=#768 id=768 data-nosnippet>768</a>        <span class="self">Self</span>::MetaFileDescription,
-<a href=#769 id=769 data-nosnippet>769</a>        <span class="self">Self</span>::MetaProductName,
-<a href=#770 id=770 data-nosnippet>770</a>        <span class="self">Self</span>::MetaCompanyName,
-<a href=#771 id=771 data-nosnippet>771</a>        <span class="self">Self</span>::MetaFileVersion,
-<a href=#772 id=772 data-nosnippet>772</a>        <span class="self">Self</span>::MetaProductVersion,
-<a href=#773 id=773 data-nosnippet>773</a>        <span class="self">Self</span>::UserSid,
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="self">Self</span>::UserName,
-<a href=#775 id=775 data-nosnippet>775</a>        <span class="self">Self</span>::UserGroups,
-<a href=#776 id=776 data-nosnippet>776</a>        <span class="self">Self</span>::UserPrimaryGroup,
-<a href=#777 id=777 data-nosnippet>777</a>        <span class="self">Self</span>::UserIsAdmin,
-<a href=#778 id=778 data-nosnippet>778</a>        <span class="self">Self</span>::UserIsElevated,
-<a href=#779 id=779 data-nosnippet>779</a>        <span class="self">Self</span>::UserIsServiceAccount,
-<a href=#780 id=780 data-nosnippet>780</a>        <span class="self">Self</span>::UserIsSystem,
-<a href=#781 id=781 data-nosnippet>781</a>        <span class="self">Self</span>::DeviceHostname,
-<a href=#782 id=782 data-nosnippet>782</a>        <span class="self">Self</span>::DeviceFqdn,
-<a href=#783 id=783 data-nosnippet>783</a>        <span class="self">Self</span>::DeviceDomain,
-<a href=#784 id=784 data-nosnippet>784</a>        <span class="self">Self</span>::DeviceNetbios,
-<a href=#785 id=785 data-nosnippet>785</a>        <span class="self">Self</span>::DeviceAdSite,
-<a href=#786 id=786 data-nosnippet>786</a>        <span class="self">Self</span>::DeviceGroups,
-<a href=#787 id=787 data-nosnippet>787</a>        <span class="self">Self</span>::DeviceTags,
-<a href=#788 id=788 data-nosnippet>788</a>        <span class="self">Self</span>::DeviceOsVersion,
-<a href=#789 id=789 data-nosnippet>789</a>        <span class="self">Self</span>::DeviceOsEdition,
-<a href=#790 id=790 data-nosnippet>790</a>        <span class="self">Self</span>::DeviceArch,
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="self">Self</span>::DeviceIsServer,
-<a href=#792 id=792 data-nosnippet>792</a>        <span class="self">Self</span>::DeviceIsDomainController,
-<a href=#793 id=793 data-nosnippet>793</a>        <span class="self">Self</span>::DeviceIsLaptop,
-<a href=#794 id=794 data-nosnippet>794</a>        <span class="self">Self</span>::DeviceIsVdi,
-<a href=#795 id=795 data-nosnippet>795</a>        <span class="self">Self</span>::DeviceIsTerminalServer,
-<a href=#796 id=796 data-nosnippet>796</a>        <span class="self">Self</span>::SessionType,
-<a href=#797 id=797 data-nosnippet>797</a>        <span class="self">Self</span>::SessionClientHostname,
-<a href=#798 id=798 data-nosnippet>798</a>        <span class="self">Self</span>::SessionIsRemote,
-<a href=#799 id=799 data-nosnippet>799</a>        <span class="self">Self</span>::UserIntegrityLevel,
-<a href=#800 id=800 data-nosnippet>800</a>        <span class="self">Self</span>::UserOu,
-<a href=#801 id=801 data-nosnippet>801</a>        <span class="self">Self</span>::DeviceOu,
-<a href=#802 id=802 data-nosnippet>802</a>        <span class="self">Self</span>::DeviceOsBuild,
-<a href=#803 id=803 data-nosnippet>803</a>        <span class="self">Self</span>::SessionId,
-<a href=#804 id=804 data-nosnippet>804</a>        <span class="self">Self</span>::SessionClientIp,
-<a href=#805 id=805 data-nosnippet>805</a>        <span class="self">Self</span>::NetIp,
-<a href=#806 id=806 data-nosnippet>806</a>        <span class="self">Self</span>::NetMac,
-<a href=#807 id=807 data-nosnippet>807</a>        <span class="self">Self</span>::NetDnsSuffix,
-<a href=#808 id=808 data-nosnippet>808</a>        <span class="self">Self</span>::NetConnectedToServer,
-<a href=#809 id=809 data-nosnippet>809</a>        <span class="self">Self</span>::NetLocation,
-<a href=#810 id=810 data-nosnippet>810</a>        <span class="self">Self</span>::TimeWeekday,
-<a href=#811 id=811 data-nosnippet>811</a>        <span class="self">Self</span>::TimeLocalTime,
-<a href=#812 id=812 data-nosnippet>812</a>        <span class="self">Self</span>::TimeDate,
-<a href=#813 id=813 data-nosnippet>813</a>        <span class="self">Self</span>::SignerLeafThumbprintSha1,
-<a href=#814 id=814 data-nosnippet>814</a>        <span class="self">Self</span>::SignerPca,
-<a href=#815 id=815 data-nosnippet>815</a>        <span class="self">Self</span>::SignerRootThumbprint,
-<a href=#816 id=816 data-nosnippet>816</a>        <span class="self">Self</span>::SignerRootThumbprintSha1,
-<a href=#817 id=817 data-nosnippet>817</a>        <span class="self">Self</span>::SignerTbsHash,
-<a href=#818 id=818 data-nosnippet>818</a>        <span class="self">Self</span>::SignerEku,
-<a href=#819 id=819 data-nosnippet>819</a>        <span class="self">Self</span>::SignerSpkiSha256,
-<a href=#820 id=820 data-nosnippet>820</a>        <span class="self">Self</span>::MetaLegalCopyright,
-<a href=#821 id=821 data-nosnippet>821</a>        <span class="self">Self</span>::MetaLanguage,
-<a href=#822 id=822 data-nosnippet>822</a>        <span class="self">Self</span>::MetaFileNameFallback,
-<a href=#823 id=823 data-nosnippet>823</a>        <span class="self">Self</span>::MetaFileSize,
-<a href=#824 id=824 data-nosnippet>824</a>        <span class="self">Self</span>::MetaPeMachine,
-<a href=#825 id=825 data-nosnippet>825</a>        <span class="self">Self</span>::MetaPeSubsystem,
-<a href=#826 id=826 data-nosnippet>826</a>        <span class="self">Self</span>::MetaIsDotnet,
-<a href=#827 id=827 data-nosnippet>827</a>        <span class="self">Self</span>::MsiProductCode,
-<a href=#828 id=828 data-nosnippet>828</a>        <span class="self">Self</span>::MsiUpgradeCode,
-<a href=#829 id=829 data-nosnippet>829</a>        <span class="self">Self</span>::MsiProductName,
-<a href=#830 id=830 data-nosnippet>830</a>        <span class="self">Self</span>::MsiManufacturer,
-<a href=#831 id=831 data-nosnippet>831</a>        <span class="self">Self</span>::MsiProductVersion,
-<a href=#832 id=832 data-nosnippet>832</a>        <span class="self">Self</span>::MsiPackageCode,
-<a href=#833 id=833 data-nosnippet>833</a>        <span class="self">Self</span>::PathDriveType,
-<a href=#834 id=834 data-nosnippet>834</a>        <span class="self">Self</span>::PathBus,
-<a href=#835 id=835 data-nosnippet>835</a>        <span class="self">Self</span>::PathIsUnc,
-<a href=#836 id=836 data-nosnippet>836</a>        <span class="self">Self</span>::PathIsAds,
-<a href=#837 id=837 data-nosnippet>837</a>        <span class="self">Self</span>::PathShare,
-<a href=#838 id=838 data-nosnippet>838</a>        <span class="self">Self</span>::PathUserCanChangeAcl,
-<a href=#839 id=839 data-nosnippet>839</a>    ];
-<a href=#840 id=840 data-nosnippet>840</a>
-<a href=#841 id=841 data-nosnippet>841</a>    <span class="doccomment">/// Whether the field is read from the object's signatures
-<a href=#842 id=842 data-nosnippet>842</a>    /// ([`crate::facts::SignerFact`]), so the `signer` options apply.
-<a href=#843 id=843 data-nosnippet>843</a>    </span><span class="attr">#[must_use]
-<a href=#844 id=844 data-nosnippet>844</a>    </span><span class="kw">pub const fn </span>is_signer(<span class="self">self</span>) -&gt; bool {
-<a href=#845 id=845 data-nosnippet>845</a>        <span class="macro">matches!</span>(
-<a href=#846 id=846 data-nosnippet>846</a>            <span class="self">self</span>,
-<a href=#847 id=847 data-nosnippet>847</a>            <span class="self">Self</span>::SignerPublisher
-<a href=#848 id=848 data-nosnippet>848</a>                | <span class="self">Self</span>::SignerIssuer
-<a href=#849 id=849 data-nosnippet>849</a>                | <span class="self">Self</span>::SignerLeafThumbprint
-<a href=#850 id=850 data-nosnippet>850</a>                | <span class="self">Self</span>::SignerLeafThumbprintSha1
-<a href=#851 id=851 data-nosnippet>851</a>                | <span class="self">Self</span>::SignerPca
-<a href=#852 id=852 data-nosnippet>852</a>                | <span class="self">Self</span>::SignerRootThumbprint
-<a href=#853 id=853 data-nosnippet>853</a>                | <span class="self">Self</span>::SignerRootThumbprintSha1
-<a href=#854 id=854 data-nosnippet>854</a>                | <span class="self">Self</span>::SignerTbsHash
-<a href=#855 id=855 data-nosnippet>855</a>                | <span class="self">Self</span>::SignerEku
-<a href=#856 id=856 data-nosnippet>856</a>                | <span class="self">Self</span>::SignerSpkiSha256
-<a href=#857 id=857 data-nosnippet>857</a>        )
-<a href=#858 id=858 data-nosnippet>858</a>    }
-<a href=#859 id=859 data-nosnippet>859</a>
-<a href=#860 id=860 data-nosnippet>860</a>    <span class="doccomment">/// Whether the field describes where the object's path is, and is
-<a href=#861 id=861 data-nosnippet>861</a>    /// read from [`crate::facts::PathFact`] rather than stored by field
-<a href=#862 id=862 data-nosnippet>862</a>    /// (#328): the volume's drive type and bus, whether the path is on a
-<a href=#863 id=863 data-nosnippet>863</a>    /// share or names a stream, the share, and whether users may change its
-<a href=#864 id=864 data-nosnippet>864</a>    /// permissions. None of them identifies an object.
-<a href=#865 id=865 data-nosnippet>865</a>    </span><span class="attr">#[must_use]
-<a href=#866 id=866 data-nosnippet>866</a>    </span><span class="kw">pub const fn </span>is_path_location(<span class="self">self</span>) -&gt; bool {
-<a href=#867 id=867 data-nosnippet>867</a>        <span class="macro">matches!</span>(
-<a href=#868 id=868 data-nosnippet>868</a>            <span class="self">self</span>,
-<a href=#869 id=869 data-nosnippet>869</a>            <span class="self">Self</span>::PathDriveType
-<a href=#870 id=870 data-nosnippet>870</a>                | <span class="self">Self</span>::PathBus
-<a href=#871 id=871 data-nosnippet>871</a>                | <span class="self">Self</span>::PathIsUnc
-<a href=#872 id=872 data-nosnippet>872</a>                | <span class="self">Self</span>::PathIsAds
-<a href=#873 id=873 data-nosnippet>873</a>                | <span class="self">Self</span>::PathShare
-<a href=#874 id=874 data-nosnippet>874</a>                | <span class="self">Self</span>::PathUserCanChangeAcl
-<a href=#875 id=875 data-nosnippet>875</a>        )
-<a href=#876 id=876 data-nosnippet>876</a>    }
-<a href=#877 id=877 data-nosnippet>877</a>
-<a href=#878 id=878 data-nosnippet>878</a>    <span class="doccomment">/// Whether the field names a chain certificate that the
-<a href=#879 id=879 data-nosnippet>879</a>    /// `signer.position` option chooses: `signer.tbs_hash` and
-<a href=#880 id=880 data-nosnippet>880</a>    /// `signer.spki_sha256`.
-<a href=#881 id=881 data-nosnippet>881</a>    </span><span class="attr">#[must_use]
-<a href=#882 id=882 data-nosnippet>882</a>    </span><span class="kw">pub const fn </span>has_position(<span class="self">self</span>) -&gt; bool {
-<a href=#883 id=883 data-nosnippet>883</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::SignerTbsHash | <span class="self">Self</span>::SignerSpkiSha256)
-<a href=#884 id=884 data-nosnippet>884</a>    }
-<a href=#885 id=885 data-nosnippet>885</a>
-<a href=#886 id=886 data-nosnippet>886</a>    <span class="doccomment">/// Whether the field describes the context of an evaluation (the user,
-<a href=#887 id=887 data-nosnippet>887</a>    /// device or session) rather than the object (#33). A context field
-<a href=#888 id=888 data-nosnippet>888</a>    /// never identifies an object.
-<a href=#889 id=889 data-nosnippet>889</a>    </span><span class="attr">#[must_use]
-<a href=#890 id=890 data-nosnippet>890</a>    </span><span class="kw">pub const fn </span>is_context(<span class="self">self</span>) -&gt; bool {
-<a href=#891 id=891 data-nosnippet>891</a>        <span class="self">self</span>.strength().is_none()
-<a href=#892 id=892 data-nosnippet>892</a>    }
-<a href=#893 id=893 data-nosnippet>893</a>
-<a href=#894 id=894 data-nosnippet>894</a>    <span class="doccomment">/// The type of this field's value.
+<a href=#650 id=650 data-nosnippet>650</a>    <span class="doccomment">/// What the file's content is, from its bytes (#30, #328): `pe`,
+<a href=#651 id=651 data-nosnippet>651</a>    /// `msi`, `script`, `zip`, `lnk`, `text` and so on, in
+<a href=#652 id=652 data-nosnippet>652</a>    /// `palisade-fileid`'s names. `unknown` is a missing fact.
+<a href=#653 id=653 data-nosnippet>653</a>    </span><span class="attr">#[serde(rename = <span class="string">"meta.detected_type"</span>)]
+<a href=#654 id=654 data-nosnippet>654</a>    </span>MetaDetectedType,
+<a href=#655 id=655 data-nosnippet>655</a>    <span class="doccomment">/// What the file's name claims it is, from its extension (#30, #328):
+<a href=#656 id=656 data-nosnippet>656</a>    /// one of the [`Self::MetaDetectedType`] names, or `none` (no
+<a href=#657 id=657 data-nosnippet>657</a>    /// extension), `inert` (a document or media extension) or `other`. A
+<a href=#658 id=658 data-nosnippet>658</a>    /// PE renamed to `.pdf` has `meta.detected_type` `pe` and
+<a href=#659 id=659 data-nosnippet>659</a>    /// `meta.extension_type` `inert`.
+<a href=#660 id=660 data-nosnippet>660</a>    </span><span class="attr">#[serde(rename = <span class="string">"meta.extension_type"</span>)]
+<a href=#661 id=661 data-nosnippet>661</a>    </span>MetaExtensionType,
+<a href=#662 id=662 data-nosnippet>662</a>}
+<a href=#663 id=663 data-nosnippet>663</a>
+<a href=#664 id=664 data-nosnippet>664</a><span class="doccomment">/// The type of a field's value, which decides the operators it accepts and
+<a href=#665 id=665 data-nosnippet>665</a>/// how values are compared (#32).
+<a href=#666 id=666 data-nosnippet>666</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+<a href=#667 id=667 data-nosnippet>667</a></span><span class="kw">pub enum </span>FieldClass {
+<a href=#668 id=668 data-nosnippet>668</a>    <span class="doccomment">/// A hexadecimal digest of a fixed length.
+<a href=#669 id=669 data-nosnippet>669</a>    </span>Hash {
+<a href=#670 id=670 data-nosnippet>670</a>        <span class="doccomment">/// The number of hex digits.
+<a href=#671 id=671 data-nosnippet>671</a>        </span>hex_len: usize,
+<a href=#672 id=672 data-nosnippet>672</a>    },
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="doccomment">/// A full path or a directory: normalised before comparison, and the
+<a href=#674 id=674 data-nosnippet>674</a>    /// only class with path variables and the recursive `**` wildcard.
+<a href=#675 id=675 data-nosnippet>675</a>    </span>Path,
+<a href=#676 id=676 data-nosnippet>676</a>    <span class="doccomment">/// One path component, such as a file name or an extension.
+<a href=#677 id=677 data-nosnippet>677</a>    </span>FileName,
+<a href=#678 id=678 data-nosnippet>678</a>    <span class="doccomment">/// Free text, such as a signer name.
+<a href=#679 id=679 data-nosnippet>679</a>    </span>Text,
+<a href=#680 id=680 data-nosnippet>680</a>    <span class="doccomment">/// A dotted version number.
+<a href=#681 id=681 data-nosnippet>681</a>    </span>Version,
+<a href=#682 id=682 data-nosnippet>682</a>    <span class="doccomment">/// A principal's account name (#33): text, without regular
+<a href=#683 id=683 data-nosnippet>683</a>    /// expressions (#32).
+<a href=#684 id=684 data-nosnippet>684</a>    </span>PrincipalName,
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="doccomment">/// One security identifier, such as `S-1-5-32-544` (#33).
+<a href=#686 id=686 data-nosnippet>686</a>    </span>Sid,
+<a href=#687 id=687 data-nosnippet>687</a>    <span class="doccomment">/// A set of principals: SIDs, and cloud-directory object IDs (#33).
+<a href=#688 id=688 data-nosnippet>688</a>    </span>PrincipalSet,
+<a href=#689 id=689 data-nosnippet>689</a>    <span class="doccomment">/// A set of tags (#33).
+<a href=#690 id=690 data-nosnippet>690</a>    </span>TagSet,
+<a href=#691 id=691 data-nosnippet>691</a>    <span class="doccomment">/// A yes-or-no fact (#33).
+<a href=#692 id=692 data-nosnippet>692</a>    </span>Bool,
+<a href=#693 id=693 data-nosnippet>693</a>    <span class="doccomment">/// The type of a session (#33).
+<a href=#694 id=694 data-nosnippet>694</a>    </span>SessionType,
+<a href=#695 id=695 data-nosnippet>695</a>    <span class="doccomment">/// A whole number, such as a build number or a session ID (#32).
+<a href=#696 id=696 data-nosnippet>696</a>    </span>Number,
+<a href=#697 id=697 data-nosnippet>697</a>    <span class="doccomment">/// A token integrity level, ordered from `untrusted` to `protected` (#33).
+<a href=#698 id=698 data-nosnippet>698</a>    </span>IntegrityLevel,
+<a href=#699 id=699 data-nosnippet>699</a>    <span class="doccomment">/// A directory distinguished name (#33): compared component by component.
+<a href=#700 id=700 data-nosnippet>700</a>    </span>DistinguishedName,
+<a href=#701 id=701 data-nosnippet>701</a>    <span class="doccomment">/// One IP address (#32).
+<a href=#702 id=702 data-nosnippet>702</a>    </span>Ip,
+<a href=#703 id=703 data-nosnippet>703</a>    <span class="doccomment">/// A set of IP addresses (#32).
+<a href=#704 id=704 data-nosnippet>704</a>    </span>IpSet,
+<a href=#705 id=705 data-nosnippet>705</a>    <span class="doccomment">/// A set of MAC addresses (#33).
+<a href=#706 id=706 data-nosnippet>706</a>    </span>MacSet,
+<a href=#707 id=707 data-nosnippet>707</a>    <span class="doccomment">/// A set of DNS suffixes or names (#33).
+<a href=#708 id=708 data-nosnippet>708</a>    </span>NameSet,
+<a href=#709 id=709 data-nosnippet>709</a>    <span class="doccomment">/// A day of the week (#32).
+<a href=#710 id=710 data-nosnippet>710</a>    </span>Weekday,
+<a href=#711 id=711 data-nosnippet>711</a>    <span class="doccomment">/// A time of day (#32).
+<a href=#712 id=712 data-nosnippet>712</a>    </span>TimeOfDay,
+<a href=#713 id=713 data-nosnippet>713</a>    <span class="doccomment">/// A calendar date (#32).
+<a href=#714 id=714 data-nosnippet>714</a>    </span>Date,
+<a href=#715 id=715 data-nosnippet>715</a>    <span class="doccomment">/// A hexadecimal digest of 40, 64, 96 or 128 digits: SHA-1 to SHA-512,
+<a href=#716 id=716 data-nosnippet>716</a>    /// as a certificate's signature algorithm chose (#31).
+<a href=#717 id=717 data-nosnippet>717</a>    </span>Digest,
+<a href=#718 id=718 data-nosnippet>718</a>    <span class="doccomment">/// A set of object identifiers, in dotted form (#31).
+<a href=#719 id=719 data-nosnippet>719</a>    </span>OidSet,
+<a href=#720 id=720 data-nosnippet>720</a>    <span class="doccomment">/// A GUID, such as `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`, compared
+<a href=#721 id=721 data-nosnippet>721</a>    /// with or without braces, in either case (#328).
+<a href=#722 id=722 data-nosnippet>722</a>    </span>Guid,
+<a href=#723 id=723 data-nosnippet>723</a>}
+<a href=#724 id=724 data-nosnippet>724</a>
+<a href=#725 id=725 data-nosnippet>725</a><span class="kw">impl </span>FieldClass {
+<a href=#726 id=726 data-nosnippet>726</a>    <span class="doccomment">/// Whether text of this class has a case, so `case_sensitive` applies.
+<a href=#727 id=727 data-nosnippet>727</a>    </span><span class="attr">#[must_use]
+<a href=#728 id=728 data-nosnippet>728</a>    </span><span class="kw">pub const fn </span>has_case(<span class="self">self</span>) -&gt; bool {
+<a href=#729 id=729 data-nosnippet>729</a>        <span class="macro">matches!</span>(
+<a href=#730 id=730 data-nosnippet>730</a>            <span class="self">self</span>,
+<a href=#731 id=731 data-nosnippet>731</a>            <span class="self">Self</span>::Path
+<a href=#732 id=732 data-nosnippet>732</a>                | <span class="self">Self</span>::FileName
+<a href=#733 id=733 data-nosnippet>733</a>                | <span class="self">Self</span>::Text
+<a href=#734 id=734 data-nosnippet>734</a>                | <span class="self">Self</span>::PrincipalName
+<a href=#735 id=735 data-nosnippet>735</a>                | <span class="self">Self</span>::TagSet
+<a href=#736 id=736 data-nosnippet>736</a>                | <span class="self">Self</span>::NameSet
+<a href=#737 id=737 data-nosnippet>737</a>        )
+<a href=#738 id=738 data-nosnippet>738</a>    }
+<a href=#739 id=739 data-nosnippet>739</a>}
+<a href=#740 id=740 data-nosnippet>740</a>
+<a href=#741 id=741 data-nosnippet>741</a><span class="doccomment">/// How firmly a criterion identifies an object (#31). Ordered from weakest
+<a href=#742 id=742 data-nosnippet>742</a>/// to strongest.
+<a href=#743 id=743 data-nosnippet>743</a></span><span class="attr">#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+<a href=#744 id=744 data-nosnippet>744</a></span><span class="kw">pub enum </span>Strength {
+<a href=#745 id=745 data-nosnippet>745</a>    <span class="doccomment">/// Attributes anyone can set or copy: file names, extensions, version
+<a href=#746 id=746 data-nosnippet>746</a>    /// resource strings, a first-page hash, or a certificate authority
+<a href=#747 id=747 data-nosnippet>747</a>    /// alone (an issuer, a PCA, a root thumbprint or an EKU), which vouches
+<a href=#748 id=748 data-nosnippet>748</a>    /// for every file it signs.
+<a href=#749 id=749 data-nosnippet>749</a>    </span>Weak,
+<a href=#750 id=750 data-nosnippet>750</a>    <span class="doccomment">/// Identities that rest on a trust decision: a publisher, or a path,
+<a href=#751 id=751 data-nosnippet>751</a>    /// which an allow rule only trusts where users cannot write (#32).
+<a href=#752 id=752 data-nosnippet>752</a>    </span>Medium,
+<a href=#753 id=753 data-nosnippet>753</a>    <span class="doccomment">/// Collision-resistant hashes of the content or the signing
+<a href=#754 id=754 data-nosnippet>754</a>    /// certificate.
+<a href=#755 id=755 data-nosnippet>755</a>    </span>Strong,
+<a href=#756 id=756 data-nosnippet>756</a>}
+<a href=#757 id=757 data-nosnippet>757</a>
+<a href=#758 id=758 data-nosnippet>758</a><span class="kw">impl </span>Field {
+<a href=#759 id=759 data-nosnippet>759</a>    <span class="doccomment">/// Every field, in declaration order.
+<a href=#760 id=760 data-nosnippet>760</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">92</span>] = [
+<a href=#761 id=761 data-nosnippet>761</a>        <span class="self">Self</span>::HashSha256,
+<a href=#762 id=762 data-nosnippet>762</a>        <span class="self">Self</span>::HashSha384,
+<a href=#763 id=763 data-nosnippet>763</a>        <span class="self">Self</span>::HashSha512,
+<a href=#764 id=764 data-nosnippet>764</a>        <span class="self">Self</span>::HashAuthenticodeSha256,
+<a href=#765 id=765 data-nosnippet>765</a>        <span class="self">Self</span>::HashAuthenticodeSha1,
+<a href=#766 id=766 data-nosnippet>766</a>        <span class="self">Self</span>::HashPageSha256,
+<a href=#767 id=767 data-nosnippet>767</a>        <span class="self">Self</span>::HashPageSha1,
+<a href=#768 id=768 data-nosnippet>768</a>        <span class="self">Self</span>::HashMsiFuzzySha256,
+<a href=#769 id=769 data-nosnippet>769</a>        <span class="self">Self</span>::HashSha1,
+<a href=#770 id=770 data-nosnippet>770</a>        <span class="self">Self</span>::HashMd5,
+<a href=#771 id=771 data-nosnippet>771</a>        <span class="self">Self</span>::SignerPublisher,
+<a href=#772 id=772 data-nosnippet>772</a>        <span class="self">Self</span>::SignerIssuer,
+<a href=#773 id=773 data-nosnippet>773</a>        <span class="self">Self</span>::SignerLeafThumbprint,
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="self">Self</span>::PathFull,
+<a href=#775 id=775 data-nosnippet>775</a>        <span class="self">Self</span>::PathDirectory,
+<a href=#776 id=776 data-nosnippet>776</a>        <span class="self">Self</span>::PathFileName,
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="self">Self</span>::PathExtension,
+<a href=#778 id=778 data-nosnippet>778</a>        <span class="self">Self</span>::MetaOriginalFilename,
+<a href=#779 id=779 data-nosnippet>779</a>        <span class="self">Self</span>::MetaInternalName,
+<a href=#780 id=780 data-nosnippet>780</a>        <span class="self">Self</span>::MetaFileDescription,
+<a href=#781 id=781 data-nosnippet>781</a>        <span class="self">Self</span>::MetaProductName,
+<a href=#782 id=782 data-nosnippet>782</a>        <span class="self">Self</span>::MetaCompanyName,
+<a href=#783 id=783 data-nosnippet>783</a>        <span class="self">Self</span>::MetaFileVersion,
+<a href=#784 id=784 data-nosnippet>784</a>        <span class="self">Self</span>::MetaProductVersion,
+<a href=#785 id=785 data-nosnippet>785</a>        <span class="self">Self</span>::UserSid,
+<a href=#786 id=786 data-nosnippet>786</a>        <span class="self">Self</span>::UserName,
+<a href=#787 id=787 data-nosnippet>787</a>        <span class="self">Self</span>::UserGroups,
+<a href=#788 id=788 data-nosnippet>788</a>        <span class="self">Self</span>::UserPrimaryGroup,
+<a href=#789 id=789 data-nosnippet>789</a>        <span class="self">Self</span>::UserIsAdmin,
+<a href=#790 id=790 data-nosnippet>790</a>        <span class="self">Self</span>::UserIsElevated,
+<a href=#791 id=791 data-nosnippet>791</a>        <span class="self">Self</span>::UserIsServiceAccount,
+<a href=#792 id=792 data-nosnippet>792</a>        <span class="self">Self</span>::UserIsSystem,
+<a href=#793 id=793 data-nosnippet>793</a>        <span class="self">Self</span>::DeviceHostname,
+<a href=#794 id=794 data-nosnippet>794</a>        <span class="self">Self</span>::DeviceFqdn,
+<a href=#795 id=795 data-nosnippet>795</a>        <span class="self">Self</span>::DeviceDomain,
+<a href=#796 id=796 data-nosnippet>796</a>        <span class="self">Self</span>::DeviceNetbios,
+<a href=#797 id=797 data-nosnippet>797</a>        <span class="self">Self</span>::DeviceAdSite,
+<a href=#798 id=798 data-nosnippet>798</a>        <span class="self">Self</span>::DeviceGroups,
+<a href=#799 id=799 data-nosnippet>799</a>        <span class="self">Self</span>::DeviceTags,
+<a href=#800 id=800 data-nosnippet>800</a>        <span class="self">Self</span>::DeviceOsVersion,
+<a href=#801 id=801 data-nosnippet>801</a>        <span class="self">Self</span>::DeviceOsEdition,
+<a href=#802 id=802 data-nosnippet>802</a>        <span class="self">Self</span>::DeviceArch,
+<a href=#803 id=803 data-nosnippet>803</a>        <span class="self">Self</span>::DeviceIsServer,
+<a href=#804 id=804 data-nosnippet>804</a>        <span class="self">Self</span>::DeviceIsDomainController,
+<a href=#805 id=805 data-nosnippet>805</a>        <span class="self">Self</span>::DeviceIsLaptop,
+<a href=#806 id=806 data-nosnippet>806</a>        <span class="self">Self</span>::DeviceIsVdi,
+<a href=#807 id=807 data-nosnippet>807</a>        <span class="self">Self</span>::DeviceIsTerminalServer,
+<a href=#808 id=808 data-nosnippet>808</a>        <span class="self">Self</span>::SessionType,
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="self">Self</span>::SessionClientHostname,
+<a href=#810 id=810 data-nosnippet>810</a>        <span class="self">Self</span>::SessionIsRemote,
+<a href=#811 id=811 data-nosnippet>811</a>        <span class="self">Self</span>::UserIntegrityLevel,
+<a href=#812 id=812 data-nosnippet>812</a>        <span class="self">Self</span>::UserOu,
+<a href=#813 id=813 data-nosnippet>813</a>        <span class="self">Self</span>::DeviceOu,
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="self">Self</span>::DeviceOsBuild,
+<a href=#815 id=815 data-nosnippet>815</a>        <span class="self">Self</span>::SessionId,
+<a href=#816 id=816 data-nosnippet>816</a>        <span class="self">Self</span>::SessionClientIp,
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="self">Self</span>::NetIp,
+<a href=#818 id=818 data-nosnippet>818</a>        <span class="self">Self</span>::NetMac,
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="self">Self</span>::NetDnsSuffix,
+<a href=#820 id=820 data-nosnippet>820</a>        <span class="self">Self</span>::NetConnectedToServer,
+<a href=#821 id=821 data-nosnippet>821</a>        <span class="self">Self</span>::NetLocation,
+<a href=#822 id=822 data-nosnippet>822</a>        <span class="self">Self</span>::TimeWeekday,
+<a href=#823 id=823 data-nosnippet>823</a>        <span class="self">Self</span>::TimeLocalTime,
+<a href=#824 id=824 data-nosnippet>824</a>        <span class="self">Self</span>::TimeDate,
+<a href=#825 id=825 data-nosnippet>825</a>        <span class="self">Self</span>::SignerLeafThumbprintSha1,
+<a href=#826 id=826 data-nosnippet>826</a>        <span class="self">Self</span>::SignerPca,
+<a href=#827 id=827 data-nosnippet>827</a>        <span class="self">Self</span>::SignerRootThumbprint,
+<a href=#828 id=828 data-nosnippet>828</a>        <span class="self">Self</span>::SignerRootThumbprintSha1,
+<a href=#829 id=829 data-nosnippet>829</a>        <span class="self">Self</span>::SignerTbsHash,
+<a href=#830 id=830 data-nosnippet>830</a>        <span class="self">Self</span>::SignerEku,
+<a href=#831 id=831 data-nosnippet>831</a>        <span class="self">Self</span>::SignerSpkiSha256,
+<a href=#832 id=832 data-nosnippet>832</a>        <span class="self">Self</span>::MetaLegalCopyright,
+<a href=#833 id=833 data-nosnippet>833</a>        <span class="self">Self</span>::MetaLanguage,
+<a href=#834 id=834 data-nosnippet>834</a>        <span class="self">Self</span>::MetaFileNameFallback,
+<a href=#835 id=835 data-nosnippet>835</a>        <span class="self">Self</span>::MetaFileSize,
+<a href=#836 id=836 data-nosnippet>836</a>        <span class="self">Self</span>::MetaPeMachine,
+<a href=#837 id=837 data-nosnippet>837</a>        <span class="self">Self</span>::MetaPeSubsystem,
+<a href=#838 id=838 data-nosnippet>838</a>        <span class="self">Self</span>::MetaIsDotnet,
+<a href=#839 id=839 data-nosnippet>839</a>        <span class="self">Self</span>::MsiProductCode,
+<a href=#840 id=840 data-nosnippet>840</a>        <span class="self">Self</span>::MsiUpgradeCode,
+<a href=#841 id=841 data-nosnippet>841</a>        <span class="self">Self</span>::MsiProductName,
+<a href=#842 id=842 data-nosnippet>842</a>        <span class="self">Self</span>::MsiManufacturer,
+<a href=#843 id=843 data-nosnippet>843</a>        <span class="self">Self</span>::MsiProductVersion,
+<a href=#844 id=844 data-nosnippet>844</a>        <span class="self">Self</span>::MsiPackageCode,
+<a href=#845 id=845 data-nosnippet>845</a>        <span class="self">Self</span>::PathDriveType,
+<a href=#846 id=846 data-nosnippet>846</a>        <span class="self">Self</span>::PathBus,
+<a href=#847 id=847 data-nosnippet>847</a>        <span class="self">Self</span>::PathIsUnc,
+<a href=#848 id=848 data-nosnippet>848</a>        <span class="self">Self</span>::PathIsAds,
+<a href=#849 id=849 data-nosnippet>849</a>        <span class="self">Self</span>::PathShare,
+<a href=#850 id=850 data-nosnippet>850</a>        <span class="self">Self</span>::PathUserCanChangeAcl,
+<a href=#851 id=851 data-nosnippet>851</a>        <span class="self">Self</span>::MetaDetectedType,
+<a href=#852 id=852 data-nosnippet>852</a>        <span class="self">Self</span>::MetaExtensionType,
+<a href=#853 id=853 data-nosnippet>853</a>    ];
+<a href=#854 id=854 data-nosnippet>854</a>
+<a href=#855 id=855 data-nosnippet>855</a>    <span class="doccomment">/// Whether the field is read from the object's signatures
+<a href=#856 id=856 data-nosnippet>856</a>    /// ([`crate::facts::SignerFact`]), so the `signer` options apply.
+<a href=#857 id=857 data-nosnippet>857</a>    </span><span class="attr">#[must_use]
+<a href=#858 id=858 data-nosnippet>858</a>    </span><span class="kw">pub const fn </span>is_signer(<span class="self">self</span>) -&gt; bool {
+<a href=#859 id=859 data-nosnippet>859</a>        <span class="macro">matches!</span>(
+<a href=#860 id=860 data-nosnippet>860</a>            <span class="self">self</span>,
+<a href=#861 id=861 data-nosnippet>861</a>            <span class="self">Self</span>::SignerPublisher
+<a href=#862 id=862 data-nosnippet>862</a>                | <span class="self">Self</span>::SignerIssuer
+<a href=#863 id=863 data-nosnippet>863</a>                | <span class="self">Self</span>::SignerLeafThumbprint
+<a href=#864 id=864 data-nosnippet>864</a>                | <span class="self">Self</span>::SignerLeafThumbprintSha1
+<a href=#865 id=865 data-nosnippet>865</a>                | <span class="self">Self</span>::SignerPca
+<a href=#866 id=866 data-nosnippet>866</a>                | <span class="self">Self</span>::SignerRootThumbprint
+<a href=#867 id=867 data-nosnippet>867</a>                | <span class="self">Self</span>::SignerRootThumbprintSha1
+<a href=#868 id=868 data-nosnippet>868</a>                | <span class="self">Self</span>::SignerTbsHash
+<a href=#869 id=869 data-nosnippet>869</a>                | <span class="self">Self</span>::SignerEku
+<a href=#870 id=870 data-nosnippet>870</a>                | <span class="self">Self</span>::SignerSpkiSha256
+<a href=#871 id=871 data-nosnippet>871</a>        )
+<a href=#872 id=872 data-nosnippet>872</a>    }
+<a href=#873 id=873 data-nosnippet>873</a>
+<a href=#874 id=874 data-nosnippet>874</a>    <span class="doccomment">/// Whether the field describes where the object's path is, and is
+<a href=#875 id=875 data-nosnippet>875</a>    /// read from [`crate::facts::PathFact`] rather than stored by field
+<a href=#876 id=876 data-nosnippet>876</a>    /// (#328): the volume's drive type and bus, whether the path is on a
+<a href=#877 id=877 data-nosnippet>877</a>    /// share or names a stream, the share, and whether users may change its
+<a href=#878 id=878 data-nosnippet>878</a>    /// permissions. None of them identifies an object.
+<a href=#879 id=879 data-nosnippet>879</a>    </span><span class="attr">#[must_use]
+<a href=#880 id=880 data-nosnippet>880</a>    </span><span class="kw">pub const fn </span>is_path_location(<span class="self">self</span>) -&gt; bool {
+<a href=#881 id=881 data-nosnippet>881</a>        <span class="macro">matches!</span>(
+<a href=#882 id=882 data-nosnippet>882</a>            <span class="self">self</span>,
+<a href=#883 id=883 data-nosnippet>883</a>            <span class="self">Self</span>::PathDriveType
+<a href=#884 id=884 data-nosnippet>884</a>                | <span class="self">Self</span>::PathBus
+<a href=#885 id=885 data-nosnippet>885</a>                | <span class="self">Self</span>::PathIsUnc
+<a href=#886 id=886 data-nosnippet>886</a>                | <span class="self">Self</span>::PathIsAds
+<a href=#887 id=887 data-nosnippet>887</a>                | <span class="self">Self</span>::PathShare
+<a href=#888 id=888 data-nosnippet>888</a>                | <span class="self">Self</span>::PathUserCanChangeAcl
+<a href=#889 id=889 data-nosnippet>889</a>        )
+<a href=#890 id=890 data-nosnippet>890</a>    }
+<a href=#891 id=891 data-nosnippet>891</a>
+<a href=#892 id=892 data-nosnippet>892</a>    <span class="doccomment">/// Whether the field names a chain certificate that the
+<a href=#893 id=893 data-nosnippet>893</a>    /// `signer.position` option chooses: `signer.tbs_hash` and
+<a href=#894 id=894 data-nosnippet>894</a>    /// `signer.spki_sha256`.
 <a href=#895 id=895 data-nosnippet>895</a>    </span><span class="attr">#[must_use]
-<a href=#896 id=896 data-nosnippet>896</a>    </span><span class="kw">pub const fn </span>class(<span class="self">self</span>) -&gt; FieldClass {
-<a href=#897 id=897 data-nosnippet>897</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#898 id=898 data-nosnippet>898</a>            <span class="self">Self</span>::HashSha256
-<a href=#899 id=899 data-nosnippet>899</a>            | <span class="self">Self</span>::HashAuthenticodeSha256
-<a href=#900 id=900 data-nosnippet>900</a>            | <span class="self">Self</span>::HashPageSha256
-<a href=#901 id=901 data-nosnippet>901</a>            | <span class="self">Self</span>::HashMsiFuzzySha256
-<a href=#902 id=902 data-nosnippet>902</a>            | <span class="self">Self</span>::SignerLeafThumbprint
-<a href=#903 id=903 data-nosnippet>903</a>            | <span class="self">Self</span>::SignerRootThumbprint
-<a href=#904 id=904 data-nosnippet>904</a>            | <span class="self">Self</span>::SignerSpkiSha256 =&gt; FieldClass::Hash { hex_len: <span class="number">64 </span>},
-<a href=#905 id=905 data-nosnippet>905</a>            <span class="self">Self</span>::HashSha384 =&gt; FieldClass::Hash { hex_len: <span class="number">96 </span>},
-<a href=#906 id=906 data-nosnippet>906</a>            <span class="self">Self</span>::HashSha512 =&gt; FieldClass::Hash { hex_len: <span class="number">128 </span>},
-<a href=#907 id=907 data-nosnippet>907</a>            <span class="self">Self</span>::HashAuthenticodeSha1
-<a href=#908 id=908 data-nosnippet>908</a>            | <span class="self">Self</span>::HashPageSha1
-<a href=#909 id=909 data-nosnippet>909</a>            | <span class="self">Self</span>::HashSha1
-<a href=#910 id=910 data-nosnippet>910</a>            | <span class="self">Self</span>::SignerLeafThumbprintSha1
-<a href=#911 id=911 data-nosnippet>911</a>            | <span class="self">Self</span>::SignerRootThumbprintSha1 =&gt; FieldClass::Hash { hex_len: <span class="number">40 </span>},
-<a href=#912 id=912 data-nosnippet>912</a>            <span class="self">Self</span>::HashMd5 =&gt; FieldClass::Hash { hex_len: <span class="number">32 </span>},
-<a href=#913 id=913 data-nosnippet>913</a>            <span class="self">Self</span>::PathFull | <span class="self">Self</span>::PathDirectory =&gt; FieldClass::Path,
-<a href=#914 id=914 data-nosnippet>914</a>            <span class="self">Self</span>::PathFileName | <span class="self">Self</span>::PathExtension =&gt; FieldClass::FileName,
-<a href=#915 id=915 data-nosnippet>915</a>            <span class="self">Self</span>::SignerPublisher
-<a href=#916 id=916 data-nosnippet>916</a>            | <span class="self">Self</span>::SignerIssuer
-<a href=#917 id=917 data-nosnippet>917</a>            | <span class="self">Self</span>::SignerPca
-<a href=#918 id=918 data-nosnippet>918</a>            | <span class="self">Self</span>::MetaOriginalFilename
-<a href=#919 id=919 data-nosnippet>919</a>            | <span class="self">Self</span>::MetaInternalName
-<a href=#920 id=920 data-nosnippet>920</a>            | <span class="self">Self</span>::MetaFileDescription
-<a href=#921 id=921 data-nosnippet>921</a>            | <span class="self">Self</span>::MetaProductName
-<a href=#922 id=922 data-nosnippet>922</a>            | <span class="self">Self</span>::MetaCompanyName
-<a href=#923 id=923 data-nosnippet>923</a>            | <span class="self">Self</span>::DeviceHostname
-<a href=#924 id=924 data-nosnippet>924</a>            | <span class="self">Self</span>::DeviceFqdn
-<a href=#925 id=925 data-nosnippet>925</a>            | <span class="self">Self</span>::DeviceDomain
-<a href=#926 id=926 data-nosnippet>926</a>            | <span class="self">Self</span>::DeviceNetbios
-<a href=#927 id=927 data-nosnippet>927</a>            | <span class="self">Self</span>::DeviceAdSite
-<a href=#928 id=928 data-nosnippet>928</a>            | <span class="self">Self</span>::DeviceOsEdition
-<a href=#929 id=929 data-nosnippet>929</a>            | <span class="self">Self</span>::DeviceArch
-<a href=#930 id=930 data-nosnippet>930</a>            | <span class="self">Self</span>::SessionClientHostname =&gt; FieldClass::Text,
-<a href=#931 id=931 data-nosnippet>931</a>            <span class="self">Self</span>::MetaFileVersion | <span class="self">Self</span>::MetaProductVersion | <span class="self">Self</span>::DeviceOsVersion =&gt; {
-<a href=#932 id=932 data-nosnippet>932</a>                FieldClass::Version
-<a href=#933 id=933 data-nosnippet>933</a>            }
-<a href=#934 id=934 data-nosnippet>934</a>            <span class="self">Self</span>::UserName =&gt; FieldClass::PrincipalName,
-<a href=#935 id=935 data-nosnippet>935</a>            <span class="self">Self</span>::UserSid | <span class="self">Self</span>::UserPrimaryGroup =&gt; FieldClass::Sid,
-<a href=#936 id=936 data-nosnippet>936</a>            <span class="self">Self</span>::UserGroups | <span class="self">Self</span>::DeviceGroups =&gt; FieldClass::PrincipalSet,
-<a href=#937 id=937 data-nosnippet>937</a>            <span class="self">Self</span>::DeviceTags =&gt; FieldClass::TagSet,
-<a href=#938 id=938 data-nosnippet>938</a>            <span class="self">Self</span>::UserIsAdmin
-<a href=#939 id=939 data-nosnippet>939</a>            | <span class="self">Self</span>::UserIsElevated
-<a href=#940 id=940 data-nosnippet>940</a>            | <span class="self">Self</span>::UserIsServiceAccount
-<a href=#941 id=941 data-nosnippet>941</a>            | <span class="self">Self</span>::UserIsSystem
-<a href=#942 id=942 data-nosnippet>942</a>            | <span class="self">Self</span>::DeviceIsServer
-<a href=#943 id=943 data-nosnippet>943</a>            | <span class="self">Self</span>::DeviceIsDomainController
-<a href=#944 id=944 data-nosnippet>944</a>            | <span class="self">Self</span>::DeviceIsLaptop
-<a href=#945 id=945 data-nosnippet>945</a>            | <span class="self">Self</span>::DeviceIsVdi
-<a href=#946 id=946 data-nosnippet>946</a>            | <span class="self">Self</span>::DeviceIsTerminalServer
-<a href=#947 id=947 data-nosnippet>947</a>            | <span class="self">Self</span>::SessionIsRemote
-<a href=#948 id=948 data-nosnippet>948</a>            | <span class="self">Self</span>::NetConnectedToServer =&gt; FieldClass::Bool,
-<a href=#949 id=949 data-nosnippet>949</a>            <span class="self">Self</span>::SessionType =&gt; FieldClass::SessionType,
-<a href=#950 id=950 data-nosnippet>950</a>            <span class="self">Self</span>::DeviceOsBuild | <span class="self">Self</span>::SessionId =&gt; FieldClass::Number,
-<a href=#951 id=951 data-nosnippet>951</a>            <span class="self">Self</span>::UserIntegrityLevel =&gt; FieldClass::IntegrityLevel,
-<a href=#952 id=952 data-nosnippet>952</a>            <span class="self">Self</span>::UserOu | <span class="self">Self</span>::DeviceOu =&gt; FieldClass::DistinguishedName,
-<a href=#953 id=953 data-nosnippet>953</a>            <span class="self">Self</span>::SessionClientIp =&gt; FieldClass::Ip,
-<a href=#954 id=954 data-nosnippet>954</a>            <span class="self">Self</span>::NetIp =&gt; FieldClass::IpSet,
-<a href=#955 id=955 data-nosnippet>955</a>            <span class="self">Self</span>::NetMac =&gt; FieldClass::MacSet,
-<a href=#956 id=956 data-nosnippet>956</a>            <span class="self">Self</span>::NetDnsSuffix | <span class="self">Self</span>::NetLocation =&gt; FieldClass::NameSet,
-<a href=#957 id=957 data-nosnippet>957</a>            <span class="self">Self</span>::TimeWeekday =&gt; FieldClass::Weekday,
-<a href=#958 id=958 data-nosnippet>958</a>            <span class="self">Self</span>::TimeLocalTime =&gt; FieldClass::TimeOfDay,
-<a href=#959 id=959 data-nosnippet>959</a>            <span class="self">Self</span>::TimeDate =&gt; FieldClass::Date,
-<a href=#960 id=960 data-nosnippet>960</a>            <span class="self">Self</span>::SignerTbsHash =&gt; FieldClass::Digest,
-<a href=#961 id=961 data-nosnippet>961</a>            <span class="self">Self</span>::MetaLegalCopyright
-<a href=#962 id=962 data-nosnippet>962</a>            | <span class="self">Self</span>::MetaLanguage
-<a href=#963 id=963 data-nosnippet>963</a>            | <span class="self">Self</span>::MetaFileNameFallback
-<a href=#964 id=964 data-nosnippet>964</a>            | <span class="self">Self</span>::MetaPeMachine
-<a href=#965 id=965 data-nosnippet>965</a>            | <span class="self">Self</span>::MetaPeSubsystem
-<a href=#966 id=966 data-nosnippet>966</a>            | <span class="self">Self</span>::MsiProductName
-<a href=#967 id=967 data-nosnippet>967</a>            | <span class="self">Self</span>::MsiManufacturer =&gt; FieldClass::Text,
-<a href=#968 id=968 data-nosnippet>968</a>            <span class="self">Self</span>::MetaFileSize =&gt; FieldClass::Number,
-<a href=#969 id=969 data-nosnippet>969</a>            <span class="self">Self</span>::MetaIsDotnet =&gt; FieldClass::Bool,
-<a href=#970 id=970 data-nosnippet>970</a>            <span class="self">Self</span>::MsiProductCode | <span class="self">Self</span>::MsiUpgradeCode | <span class="self">Self</span>::MsiPackageCode =&gt; FieldClass::Guid,
-<a href=#971 id=971 data-nosnippet>971</a>            <span class="self">Self</span>::MsiProductVersion =&gt; FieldClass::Version,
-<a href=#972 id=972 data-nosnippet>972</a>            <span class="self">Self</span>::PathDriveType | <span class="self">Self</span>::PathBus | <span class="self">Self</span>::PathShare =&gt; FieldClass::Text,
-<a href=#973 id=973 data-nosnippet>973</a>            <span class="self">Self</span>::PathIsUnc | <span class="self">Self</span>::PathIsAds | <span class="self">Self</span>::PathUserCanChangeAcl =&gt; FieldClass::Bool,
-<a href=#974 id=974 data-nosnippet>974</a>            <span class="self">Self</span>::SignerEku =&gt; FieldClass::OidSet,
-<a href=#975 id=975 data-nosnippet>975</a>        }
-<a href=#976 id=976 data-nosnippet>976</a>    }
-<a href=#977 id=977 data-nosnippet>977</a>
-<a href=#978 id=978 data-nosnippet>978</a>    <span class="doccomment">/// Whether this is a collision-prone hash that must never be the only
-<a href=#979 id=979 data-nosnippet>979</a>    /// identity of an allow rule (ADR 0008).
-<a href=#980 id=980 data-nosnippet>980</a>    </span><span class="attr">#[must_use]
-<a href=#981 id=981 data-nosnippet>981</a>    </span><span class="kw">pub const fn </span>is_weak_hash(<span class="self">self</span>) -&gt; bool {
-<a href=#982 id=982 data-nosnippet>982</a>        <span class="macro">matches!</span>(
-<a href=#983 id=983 data-nosnippet>983</a>            <span class="self">self</span>,
-<a href=#984 id=984 data-nosnippet>984</a>            <span class="self">Self</span>::HashSha1
-<a href=#985 id=985 data-nosnippet>985</a>                | <span class="self">Self</span>::HashMd5
-<a href=#986 id=986 data-nosnippet>986</a>                | <span class="self">Self</span>::HashAuthenticodeSha1
-<a href=#987 id=987 data-nosnippet>987</a>                | <span class="self">Self</span>::HashPageSha1
-<a href=#988 id=988 data-nosnippet>988</a>                | <span class="self">Self</span>::SignerLeafThumbprintSha1
-<a href=#989 id=989 data-nosnippet>989</a>                | <span class="self">Self</span>::SignerRootThumbprintSha1
-<a href=#990 id=990 data-nosnippet>990</a>        )
-<a href=#991 id=991 data-nosnippet>991</a>    }
-<a href=#992 id=992 data-nosnippet>992</a>
-<a href=#993 id=993 data-nosnippet>993</a>    <span class="doccomment">/// How firmly a positive test of this field identifies an object (#31).
-<a href=#994 id=994 data-nosnippet>994</a>    /// `None` for a context field (#33), which identifies no object.
-<a href=#995 id=995 data-nosnippet>995</a>    ///
-<a href=#996 id=996 data-nosnippet>996</a>    /// A certificate authority vouches for every file it signs, so the
-<a href=#997 id=997 data-nosnippet>997</a>    /// issuer, the PCA, the root thumbprint and the EKUs are weak alone.
-<a href=#998 id=998 data-nosnippet>998</a>    /// A TBS hash is strong here, as #31 rates it, and so is a key hash
-<a href=#999 id=999 data-nosnippet>999</a>    /// (#318); validation counts either that may name a CA certificate
-<a href=#1000 id=1000 data-nosnippet>1000</a>    /// (`position` other than `leaf`) as weak in a rule that lets an object
-<a href=#1001 id=1001 data-nosnippet>1001</a>    /// run. A leaf key hash names whoever holds the private key, across
-<a href=#1002 id=1002 data-nosnippet>1002</a>    /// every certificate issued for it.
-<a href=#1003 id=1003 data-nosnippet>1003</a>    </span><span class="attr">#[must_use]
-<a href=#1004 id=1004 data-nosnippet>1004</a>    </span><span class="kw">pub const fn </span>strength(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Strength&gt; {
-<a href=#1005 id=1005 data-nosnippet>1005</a>        <span class="prelude-val">Some</span>(<span class="kw">match </span><span class="self">self </span>{
-<a href=#1006 id=1006 data-nosnippet>1006</a>            <span class="self">Self</span>::HashSha256
-<a href=#1007 id=1007 data-nosnippet>1007</a>            | <span class="self">Self</span>::HashSha384
-<a href=#1008 id=1008 data-nosnippet>1008</a>            | <span class="self">Self</span>::HashSha512
-<a href=#1009 id=1009 data-nosnippet>1009</a>            | <span class="self">Self</span>::HashAuthenticodeSha256
-<a href=#1010 id=1010 data-nosnippet>1010</a>            | <span class="self">Self</span>::HashMsiFuzzySha256
-<a href=#1011 id=1011 data-nosnippet>1011</a>            | <span class="self">Self</span>::SignerLeafThumbprint
-<a href=#1012 id=1012 data-nosnippet>1012</a>            | <span class="self">Self</span>::SignerTbsHash
-<a href=#1013 id=1013 data-nosnippet>1013</a>            | <span class="self">Self</span>::SignerSpkiSha256 =&gt; Strength::Strong,
-<a href=#1014 id=1014 data-nosnippet>1014</a>            <span class="self">Self</span>::SignerPublisher | <span class="self">Self</span>::PathFull | <span class="self">Self</span>::PathDirectory =&gt; Strength::Medium,
-<a href=#1015 id=1015 data-nosnippet>1015</a>            <span class="self">Self</span>::HashAuthenticodeSha1
-<a href=#1016 id=1016 data-nosnippet>1016</a>            | <span class="self">Self</span>::HashPageSha256
-<a href=#1017 id=1017 data-nosnippet>1017</a>            | <span class="self">Self</span>::HashPageSha1
-<a href=#1018 id=1018 data-nosnippet>1018</a>            | <span class="self">Self</span>::HashSha1
-<a href=#1019 id=1019 data-nosnippet>1019</a>            | <span class="self">Self</span>::HashMd5
-<a href=#1020 id=1020 data-nosnippet>1020</a>            | <span class="self">Self</span>::SignerIssuer
-<a href=#1021 id=1021 data-nosnippet>1021</a>            | <span class="self">Self</span>::SignerPca
-<a href=#1022 id=1022 data-nosnippet>1022</a>            | <span class="self">Self</span>::SignerRootThumbprint
-<a href=#1023 id=1023 data-nosnippet>1023</a>            | <span class="self">Self</span>::SignerLeafThumbprintSha1
-<a href=#1024 id=1024 data-nosnippet>1024</a>            | <span class="self">Self</span>::SignerRootThumbprintSha1
-<a href=#1025 id=1025 data-nosnippet>1025</a>            | <span class="self">Self</span>::SignerEku
-<a href=#1026 id=1026 data-nosnippet>1026</a>            | <span class="self">Self</span>::PathFileName
-<a href=#1027 id=1027 data-nosnippet>1027</a>            | <span class="self">Self</span>::PathExtension
-<a href=#1028 id=1028 data-nosnippet>1028</a>            | <span class="self">Self</span>::MetaOriginalFilename
-<a href=#1029 id=1029 data-nosnippet>1029</a>            | <span class="self">Self</span>::MetaInternalName
-<a href=#1030 id=1030 data-nosnippet>1030</a>            | <span class="self">Self</span>::MetaFileDescription
-<a href=#1031 id=1031 data-nosnippet>1031</a>            | <span class="self">Self</span>::MetaProductName
-<a href=#1032 id=1032 data-nosnippet>1032</a>            | <span class="self">Self</span>::MetaCompanyName
-<a href=#1033 id=1033 data-nosnippet>1033</a>            | <span class="self">Self</span>::MetaFileVersion
-<a href=#1034 id=1034 data-nosnippet>1034</a>            | <span class="self">Self</span>::MetaProductVersion
-<a href=#1035 id=1035 data-nosnippet>1035</a>            | <span class="self">Self</span>::MetaLegalCopyright
-<a href=#1036 id=1036 data-nosnippet>1036</a>            | <span class="self">Self</span>::MetaLanguage
-<a href=#1037 id=1037 data-nosnippet>1037</a>            | <span class="self">Self</span>::MetaFileNameFallback
-<a href=#1038 id=1038 data-nosnippet>1038</a>            | <span class="self">Self</span>::MetaFileSize
-<a href=#1039 id=1039 data-nosnippet>1039</a>            | <span class="self">Self</span>::MetaPeMachine
-<a href=#1040 id=1040 data-nosnippet>1040</a>            | <span class="self">Self</span>::MetaPeSubsystem
-<a href=#1041 id=1041 data-nosnippet>1041</a>            | <span class="self">Self</span>::MetaIsDotnet
-<a href=#1042 id=1042 data-nosnippet>1042</a>            | <span class="self">Self</span>::MsiProductCode
-<a href=#1043 id=1043 data-nosnippet>1043</a>            | <span class="self">Self</span>::MsiUpgradeCode
-<a href=#1044 id=1044 data-nosnippet>1044</a>            | <span class="self">Self</span>::MsiProductName
-<a href=#1045 id=1045 data-nosnippet>1045</a>            | <span class="self">Self</span>::MsiManufacturer
-<a href=#1046 id=1046 data-nosnippet>1046</a>            | <span class="self">Self</span>::MsiProductVersion
-<a href=#1047 id=1047 data-nosnippet>1047</a>            | <span class="self">Self</span>::MsiPackageCode
-<a href=#1048 id=1048 data-nosnippet>1048</a>            | <span class="self">Self</span>::PathDriveType
-<a href=#1049 id=1049 data-nosnippet>1049</a>            | <span class="self">Self</span>::PathBus
-<a href=#1050 id=1050 data-nosnippet>1050</a>            | <span class="self">Self</span>::PathIsUnc
-<a href=#1051 id=1051 data-nosnippet>1051</a>            | <span class="self">Self</span>::PathIsAds
-<a href=#1052 id=1052 data-nosnippet>1052</a>            | <span class="self">Self</span>::PathShare
-<a href=#1053 id=1053 data-nosnippet>1053</a>            | <span class="self">Self</span>::PathUserCanChangeAcl =&gt; Strength::Weak,
-<a href=#1054 id=1054 data-nosnippet>1054</a>            <span class="self">Self</span>::UserSid
-<a href=#1055 id=1055 data-nosnippet>1055</a>            | <span class="self">Self</span>::UserName
-<a href=#1056 id=1056 data-nosnippet>1056</a>            | <span class="self">Self</span>::UserGroups
-<a href=#1057 id=1057 data-nosnippet>1057</a>            | <span class="self">Self</span>::UserPrimaryGroup
-<a href=#1058 id=1058 data-nosnippet>1058</a>            | <span class="self">Self</span>::UserIsAdmin
-<a href=#1059 id=1059 data-nosnippet>1059</a>            | <span class="self">Self</span>::UserIsElevated
-<a href=#1060 id=1060 data-nosnippet>1060</a>            | <span class="self">Self</span>::UserIsServiceAccount
-<a href=#1061 id=1061 data-nosnippet>1061</a>            | <span class="self">Self</span>::UserIsSystem
-<a href=#1062 id=1062 data-nosnippet>1062</a>            | <span class="self">Self</span>::DeviceHostname
-<a href=#1063 id=1063 data-nosnippet>1063</a>            | <span class="self">Self</span>::DeviceFqdn
-<a href=#1064 id=1064 data-nosnippet>1064</a>            | <span class="self">Self</span>::DeviceDomain
-<a href=#1065 id=1065 data-nosnippet>1065</a>            | <span class="self">Self</span>::DeviceNetbios
-<a href=#1066 id=1066 data-nosnippet>1066</a>            | <span class="self">Self</span>::DeviceAdSite
-<a href=#1067 id=1067 data-nosnippet>1067</a>            | <span class="self">Self</span>::DeviceGroups
-<a href=#1068 id=1068 data-nosnippet>1068</a>            | <span class="self">Self</span>::DeviceTags
-<a href=#1069 id=1069 data-nosnippet>1069</a>            | <span class="self">Self</span>::DeviceOsVersion
-<a href=#1070 id=1070 data-nosnippet>1070</a>            | <span class="self">Self</span>::DeviceOsEdition
-<a href=#1071 id=1071 data-nosnippet>1071</a>            | <span class="self">Self</span>::DeviceArch
-<a href=#1072 id=1072 data-nosnippet>1072</a>            | <span class="self">Self</span>::DeviceIsServer
-<a href=#1073 id=1073 data-nosnippet>1073</a>            | <span class="self">Self</span>::DeviceIsDomainController
-<a href=#1074 id=1074 data-nosnippet>1074</a>            | <span class="self">Self</span>::DeviceIsLaptop
-<a href=#1075 id=1075 data-nosnippet>1075</a>            | <span class="self">Self</span>::DeviceIsVdi
-<a href=#1076 id=1076 data-nosnippet>1076</a>            | <span class="self">Self</span>::DeviceIsTerminalServer
-<a href=#1077 id=1077 data-nosnippet>1077</a>            | <span class="self">Self</span>::SessionType
-<a href=#1078 id=1078 data-nosnippet>1078</a>            | <span class="self">Self</span>::SessionClientHostname
-<a href=#1079 id=1079 data-nosnippet>1079</a>            | <span class="self">Self</span>::SessionIsRemote
-<a href=#1080 id=1080 data-nosnippet>1080</a>            | <span class="self">Self</span>::UserIntegrityLevel
-<a href=#1081 id=1081 data-nosnippet>1081</a>            | <span class="self">Self</span>::UserOu
-<a href=#1082 id=1082 data-nosnippet>1082</a>            | <span class="self">Self</span>::DeviceOu
-<a href=#1083 id=1083 data-nosnippet>1083</a>            | <span class="self">Self</span>::DeviceOsBuild
-<a href=#1084 id=1084 data-nosnippet>1084</a>            | <span class="self">Self</span>::SessionId
-<a href=#1085 id=1085 data-nosnippet>1085</a>            | <span class="self">Self</span>::SessionClientIp
-<a href=#1086 id=1086 data-nosnippet>1086</a>            | <span class="self">Self</span>::NetIp
-<a href=#1087 id=1087 data-nosnippet>1087</a>            | <span class="self">Self</span>::NetMac
-<a href=#1088 id=1088 data-nosnippet>1088</a>            | <span class="self">Self</span>::NetDnsSuffix
-<a href=#1089 id=1089 data-nosnippet>1089</a>            | <span class="self">Self</span>::NetConnectedToServer
-<a href=#1090 id=1090 data-nosnippet>1090</a>            | <span class="self">Self</span>::NetLocation
-<a href=#1091 id=1091 data-nosnippet>1091</a>            | <span class="self">Self</span>::TimeWeekday
-<a href=#1092 id=1092 data-nosnippet>1092</a>            | <span class="self">Self</span>::TimeLocalTime
-<a href=#1093 id=1093 data-nosnippet>1093</a>            | <span class="self">Self</span>::TimeDate =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
-<a href=#1094 id=1094 data-nosnippet>1094</a>        })
-<a href=#1095 id=1095 data-nosnippet>1095</a>    }
-<a href=#1096 id=1096 data-nosnippet>1096</a>}
-<a href=#1097 id=1097 data-nosnippet>1097</a>
-<a href=#1098 id=1098 data-nosnippet>1098</a><span class="doccomment">/// How a criterion compares the fact with its values (#32). Positive
-<a href=#1099 id=1099 data-nosnippet>1099</a>/// operators match if any value matches; negative operators (`not_*`)
-<a href=#1100 id=1100 data-nosnippet>1100</a>/// match if no value does, and never match a fact that is unknown.
-<a href=#1101 id=1101 data-nosnippet>1101</a></span><span class="attr">#[derive(
-<a href=#1102 id=1102 data-nosnippet>1102</a>    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-<a href=#1103 id=1103 data-nosnippet>1103</a>)]
-<a href=#1104 id=1104 data-nosnippet>1104</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
-<a href=#1105 id=1105 data-nosnippet>1105</a></span><span class="kw">pub enum </span>Operator {
-<a href=#1106 id=1106 data-nosnippet>1106</a>    <span class="doccomment">/// Equal to any value.
-<a href=#1107 id=1107 data-nosnippet>1107</a>    </span>Equals,
-<a href=#1108 id=1108 data-nosnippet>1108</a>    <span class="doccomment">/// Equal to none of the values.
-<a href=#1109 id=1109 data-nosnippet>1109</a>    </span>NotEquals,
-<a href=#1110 id=1110 data-nosnippet>1110</a>    <span class="doccomment">/// Starts with any value. On paths, the value must end at a component
-<a href=#1111 id=1111 data-nosnippet>1111</a>    /// boundary: `C:\Tools` does not match `C:\ToolsX`.
-<a href=#1112 id=1112 data-nosnippet>1112</a>    </span>StartsWith,
-<a href=#1113 id=1113 data-nosnippet>1113</a>    <span class="doccomment">/// Ends with any value.
-<a href=#1114 id=1114 data-nosnippet>1114</a>    </span>EndsWith,
-<a href=#1115 id=1115 data-nosnippet>1115</a>    <span class="doccomment">/// Contains any value.
-<a href=#1116 id=1116 data-nosnippet>1116</a>    </span>Contains,
-<a href=#1117 id=1117 data-nosnippet>1117</a>    <span class="doccomment">/// Contains none of the values.
-<a href=#1118 id=1118 data-nosnippet>1118</a>    </span>NotContains,
-<a href=#1119 id=1119 data-nosnippet>1119</a>    <span class="doccomment">/// Matches any wildcard pattern.
-<a href=#1120 id=1120 data-nosnippet>1120</a>    </span>Wildcard,
-<a href=#1121 id=1121 data-nosnippet>1121</a>    <span class="doccomment">/// Matches none of the wildcard patterns.
-<a href=#1122 id=1122 data-nosnippet>1122</a>    </span>NotWildcard,
-<a href=#1123 id=1123 data-nosnippet>1123</a>    <span class="doccomment">/// Matches any regular expression. Anchored at both ends, and run by a
-<a href=#1124 id=1124 data-nosnippet>1124</a>    /// linear-time engine without look-around or backreferences.
-<a href=#1125 id=1125 data-nosnippet>1125</a>    </span>Regex,
-<a href=#1126 id=1126 data-nosnippet>1126</a>    <span class="doccomment">/// Matches none of the regular expressions.
-<a href=#1127 id=1127 data-nosnippet>1127</a>    </span>NotRegex,
-<a href=#1128 id=1128 data-nosnippet>1128</a>    <span class="doccomment">/// Version equal to any value.
-<a href=#1129 id=1129 data-nosnippet>1129</a>    </span>VersionEq,
-<a href=#1130 id=1130 data-nosnippet>1130</a>    <span class="doccomment">/// Version greater than the value.
-<a href=#1131 id=1131 data-nosnippet>1131</a>    </span>VersionGt,
-<a href=#1132 id=1132 data-nosnippet>1132</a>    <span class="doccomment">/// Version greater than or equal to the value.
-<a href=#1133 id=1133 data-nosnippet>1133</a>    </span>VersionGe,
-<a href=#1134 id=1134 data-nosnippet>1134</a>    <span class="doccomment">/// Version less than the value.
-<a href=#1135 id=1135 data-nosnippet>1135</a>    </span>VersionLt,
-<a href=#1136 id=1136 data-nosnippet>1136</a>    <span class="doccomment">/// Version less than or equal to the value.
-<a href=#1137 id=1137 data-nosnippet>1137</a>    </span>VersionLe,
-<a href=#1138 id=1138 data-nosnippet>1138</a>    <span class="doccomment">/// Version within `[min, max]`, both inclusive. Takes exactly two
-<a href=#1139 id=1139 data-nosnippet>1139</a>    /// values, the minimum first.
-<a href=#1140 id=1140 data-nosnippet>1140</a>    </span>VersionBetween,
-<a href=#1141 id=1141 data-nosnippet>1141</a>    <span class="doccomment">/// The set holds any of the values (#33).
-<a href=#1142 id=1142 data-nosnippet>1142</a>    </span>MemberOf,
-<a href=#1143 id=1143 data-nosnippet>1143</a>    <span class="doccomment">/// The set holds none of the values (#33).
-<a href=#1144 id=1144 data-nosnippet>1144</a>    </span>NotMemberOf,
-<a href=#1145 id=1145 data-nosnippet>1145</a>    <span class="doccomment">/// The fact is true. Takes no values (#33).
-<a href=#1146 id=1146 data-nosnippet>1146</a>    </span>IsTrue,
-<a href=#1147 id=1147 data-nosnippet>1147</a>    <span class="doccomment">/// The fact is false. Takes no values (#33). On an unknown fact it is
-<a href=#1148 id=1148 data-nosnippet>1148</a>    /// unknown, like every other test.
-<a href=#1149 id=1149 data-nosnippet>1149</a>    </span>IsFalse,
-<a href=#1150 id=1150 data-nosnippet>1150</a>    <span class="doccomment">/// Number, level or date equal to any value (#32).
-<a href=#1151 id=1151 data-nosnippet>1151</a>    </span>Eq,
-<a href=#1152 id=1152 data-nosnippet>1152</a>    <span class="doccomment">/// Number, level or date equal to none of the values (#32).
-<a href=#1153 id=1153 data-nosnippet>1153</a>    </span>Ne,
-<a href=#1154 id=1154 data-nosnippet>1154</a>    <span class="doccomment">/// Greater than the value (#32).
-<a href=#1155 id=1155 data-nosnippet>1155</a>    </span>Gt,
-<a href=#1156 id=1156 data-nosnippet>1156</a>    <span class="doccomment">/// Greater than or equal to the value (#32).
-<a href=#1157 id=1157 data-nosnippet>1157</a>    </span>Ge,
-<a href=#1158 id=1158 data-nosnippet>1158</a>    <span class="doccomment">/// Less than the value (#32).
-<a href=#1159 id=1159 data-nosnippet>1159</a>    </span>Lt,
-<a href=#1160 id=1160 data-nosnippet>1160</a>    <span class="doccomment">/// Less than or equal to the value (#32).
-<a href=#1161 id=1161 data-nosnippet>1161</a>    </span>Le,
-<a href=#1162 id=1162 data-nosnippet>1162</a>    <span class="doccomment">/// Within `[min, max]`, both inclusive. Takes exactly two values, the
-<a href=#1163 id=1163 data-nosnippet>1163</a>    /// minimum first (#32).
-<a href=#1164 id=1164 data-nosnippet>1164</a>    </span>Between,
-<a href=#1165 id=1165 data-nosnippet>1165</a>    <span class="doccomment">/// The address is in any of the CIDR blocks, such as `10.0.0.0/8` or
-<a href=#1166 id=1166 data-nosnippet>1166</a>    /// `2001:db8::/32` (#32). On a set of addresses, any address may be.
-<a href=#1167 id=1167 data-nosnippet>1167</a>    </span>IpInCidr,
-<a href=#1168 id=1168 data-nosnippet>1168</a>    <span class="doccomment">/// The address is in any of the ranges, written `first-last` or, for
-<a href=#1169 id=1169 data-nosnippet>1169</a>    /// IPv4, `a.b.c.first-last` (#32).
-<a href=#1170 id=1170 data-nosnippet>1170</a>    </span>IpBetween,
-<a href=#1171 id=1171 data-nosnippet>1171</a>    <span class="doccomment">/// The IPv4 address matches any whole-octet pattern, such as `10.*.*.*`
-<a href=#1172 id=1172 data-nosnippet>1172</a>    /// (#32).
-<a href=#1173 id=1173 data-nosnippet>1173</a>    </span>IpWildcard,
-<a href=#1174 id=1174 data-nosnippet>1174</a>    <span class="doccomment">/// The set holds at least one of the values (#32). The same test as
-<a href=#1175 id=1175 data-nosnippet>1175</a>    /// `member_of`.
-<a href=#1176 id=1176 data-nosnippet>1176</a>    </span>AnyOf,
-<a href=#1177 id=1177 data-nosnippet>1177</a>    <span class="doccomment">/// The set holds every one of the values (#32).
-<a href=#1178 id=1178 data-nosnippet>1178</a>    </span>AllOf,
-<a href=#1179 id=1179 data-nosnippet>1179</a>    <span class="doccomment">/// The day of the week is any of the values, `mon` to `sun` (#32).
-<a href=#1180 id=1180 data-nosnippet>1180</a>    </span>WeekdayIn,
-<a href=#1181 id=1181 data-nosnippet>1181</a>    <span class="doccomment">/// The time of day is within `[start, end)`, both `HH:MM`. A window
-<a href=#1182 id=1182 data-nosnippet>1182</a>    /// whose end is before its start wraps midnight: `22:00` to `06:00`
-<a href=#1183 id=1183 data-nosnippet>1183</a>    /// (#32).
-<a href=#1184 id=1184 data-nosnippet>1184</a>    </span>TimeBetween,
-<a href=#1185 id=1185 data-nosnippet>1185</a>    <span class="doccomment">/// The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive
-<a href=#1186 id=1186 data-nosnippet>1186</a>    /// (#32).
-<a href=#1187 id=1187 data-nosnippet>1187</a>    </span>DateBetween,
-<a href=#1188 id=1188 data-nosnippet>1188</a>}
-<a href=#1189 id=1189 data-nosnippet>1189</a>
-<a href=#1190 id=1190 data-nosnippet>1190</a><span class="kw">impl </span>Operator {
-<a href=#1191 id=1191 data-nosnippet>1191</a>    <span class="doccomment">/// Whether a match means the fact equals or resembles a value, as opposed
-<a href=#1192 id=1192 data-nosnippet>1192</a>    /// to a negative test such as `not_equals`. Only positive tests identify
-<a href=#1193 id=1193 data-nosnippet>1193</a>    /// an object.
-<a href=#1194 id=1194 data-nosnippet>1194</a>    </span><span class="attr">#[must_use]
-<a href=#1195 id=1195 data-nosnippet>1195</a>    </span><span class="kw">pub const fn </span>is_positive(<span class="self">self</span>) -&gt; bool {
-<a href=#1196 id=1196 data-nosnippet>1196</a>        !<span class="macro">matches!</span>(
-<a href=#1197 id=1197 data-nosnippet>1197</a>            <span class="self">self</span>,
-<a href=#1198 id=1198 data-nosnippet>1198</a>            <span class="self">Self</span>::NotEquals
-<a href=#1199 id=1199 data-nosnippet>1199</a>                | <span class="self">Self</span>::NotContains
-<a href=#1200 id=1200 data-nosnippet>1200</a>                | <span class="self">Self</span>::NotWildcard
-<a href=#1201 id=1201 data-nosnippet>1201</a>                | <span class="self">Self</span>::NotRegex
-<a href=#1202 id=1202 data-nosnippet>1202</a>                | <span class="self">Self</span>::NotMemberOf
-<a href=#1203 id=1203 data-nosnippet>1203</a>                | <span class="self">Self</span>::Ne
-<a href=#1204 id=1204 data-nosnippet>1204</a>        )
-<a href=#1205 id=1205 data-nosnippet>1205</a>    }
-<a href=#1206 id=1206 data-nosnippet>1206</a>
-<a href=#1207 id=1207 data-nosnippet>1207</a>    <span class="doccomment">/// The positive operator that this one negates, or the operator itself
-<a href=#1208 id=1208 data-nosnippet>1208</a>    /// if it is positive. `not_contains` gives `contains`.
-<a href=#1209 id=1209 data-nosnippet>1209</a>    </span><span class="attr">#[must_use]
-<a href=#1210 id=1210 data-nosnippet>1210</a>    </span><span class="kw">pub const fn </span>positive(<span class="self">self</span>) -&gt; <span class="self">Self </span>{
-<a href=#1211 id=1211 data-nosnippet>1211</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#1212 id=1212 data-nosnippet>1212</a>            <span class="self">Self</span>::NotEquals =&gt; <span class="self">Self</span>::Equals,
-<a href=#1213 id=1213 data-nosnippet>1213</a>            <span class="self">Self</span>::NotContains =&gt; <span class="self">Self</span>::Contains,
-<a href=#1214 id=1214 data-nosnippet>1214</a>            <span class="self">Self</span>::NotWildcard =&gt; <span class="self">Self</span>::Wildcard,
-<a href=#1215 id=1215 data-nosnippet>1215</a>            <span class="self">Self</span>::NotRegex =&gt; <span class="self">Self</span>::Regex,
-<a href=#1216 id=1216 data-nosnippet>1216</a>            <span class="self">Self</span>::NotMemberOf =&gt; <span class="self">Self</span>::MemberOf,
-<a href=#1217 id=1217 data-nosnippet>1217</a>            <span class="self">Self</span>::Ne =&gt; <span class="self">Self</span>::Eq,
-<a href=#1218 id=1218 data-nosnippet>1218</a>            other =&gt; other,
-<a href=#1219 id=1219 data-nosnippet>1219</a>        }
-<a href=#1220 id=1220 data-nosnippet>1220</a>    }
-<a href=#1221 id=1221 data-nosnippet>1221</a>
-<a href=#1222 id=1222 data-nosnippet>1222</a>    <span class="doccomment">/// Whether the operator compares versions.
-<a href=#1223 id=1223 data-nosnippet>1223</a>    </span><span class="attr">#[must_use]
-<a href=#1224 id=1224 data-nosnippet>1224</a>    </span><span class="kw">pub const fn </span>is_version(<span class="self">self</span>) -&gt; bool {
-<a href=#1225 id=1225 data-nosnippet>1225</a>        <span class="macro">matches!</span>(
-<a href=#1226 id=1226 data-nosnippet>1226</a>            <span class="self">self</span>,
-<a href=#1227 id=1227 data-nosnippet>1227</a>            <span class="self">Self</span>::VersionEq
-<a href=#1228 id=1228 data-nosnippet>1228</a>                | <span class="self">Self</span>::VersionGt
-<a href=#1229 id=1229 data-nosnippet>1229</a>                | <span class="self">Self</span>::VersionGe
-<a href=#1230 id=1230 data-nosnippet>1230</a>                | <span class="self">Self</span>::VersionLt
-<a href=#1231 id=1231 data-nosnippet>1231</a>                | <span class="self">Self</span>::VersionLe
-<a href=#1232 id=1232 data-nosnippet>1232</a>                | <span class="self">Self</span>::VersionBetween
-<a href=#1233 id=1233 data-nosnippet>1233</a>        )
-<a href=#1234 id=1234 data-nosnippet>1234</a>    }
-<a href=#1235 id=1235 data-nosnippet>1235</a>
-<a href=#1236 id=1236 data-nosnippet>1236</a>    <span class="doccomment">/// Whether the operator compares text: the operators of path, file
-<a href=#1237 id=1237 data-nosnippet>1237</a>    /// name and text fields.
-<a href=#1238 id=1238 data-nosnippet>1238</a>    </span><span class="attr">#[must_use]
-<a href=#1239 id=1239 data-nosnippet>1239</a>    </span><span class="kw">pub const fn </span>is_text(<span class="self">self</span>) -&gt; bool {
-<a href=#1240 id=1240 data-nosnippet>1240</a>        <span class="macro">matches!</span>(
-<a href=#1241 id=1241 data-nosnippet>1241</a>            <span class="self">self</span>,
-<a href=#1242 id=1242 data-nosnippet>1242</a>            <span class="self">Self</span>::Equals
-<a href=#1243 id=1243 data-nosnippet>1243</a>                | <span class="self">Self</span>::NotEquals
-<a href=#1244 id=1244 data-nosnippet>1244</a>                | <span class="self">Self</span>::StartsWith
-<a href=#1245 id=1245 data-nosnippet>1245</a>                | <span class="self">Self</span>::EndsWith
-<a href=#1246 id=1246 data-nosnippet>1246</a>                | <span class="self">Self</span>::Contains
-<a href=#1247 id=1247 data-nosnippet>1247</a>                | <span class="self">Self</span>::NotContains
-<a href=#1248 id=1248 data-nosnippet>1248</a>                | <span class="self">Self</span>::Wildcard
-<a href=#1249 id=1249 data-nosnippet>1249</a>                | <span class="self">Self</span>::NotWildcard
-<a href=#1250 id=1250 data-nosnippet>1250</a>                | <span class="self">Self</span>::Regex
-<a href=#1251 id=1251 data-nosnippet>1251</a>                | <span class="self">Self</span>::NotRegex
-<a href=#1252 id=1252 data-nosnippet>1252</a>        )
-<a href=#1253 id=1253 data-nosnippet>1253</a>    }
-<a href=#1254 id=1254 data-nosnippet>1254</a>
-<a href=#1255 id=1255 data-nosnippet>1255</a>    <span class="doccomment">/// Whether the operator orders values: `eq` to `between`.
-<a href=#1256 id=1256 data-nosnippet>1256</a>    </span><span class="attr">#[must_use]
-<a href=#1257 id=1257 data-nosnippet>1257</a>    </span><span class="kw">pub const fn </span>is_ordered(<span class="self">self</span>) -&gt; bool {
-<a href=#1258 id=1258 data-nosnippet>1258</a>        <span class="macro">matches!</span>(
-<a href=#1259 id=1259 data-nosnippet>1259</a>            <span class="self">self</span>,
-<a href=#1260 id=1260 data-nosnippet>1260</a>            <span class="self">Self</span>::Eq | <span class="self">Self</span>::Ne | <span class="self">Self</span>::Gt | <span class="self">Self</span>::Ge | <span class="self">Self</span>::Lt | <span class="self">Self</span>::Le | <span class="self">Self</span>::Between
-<a href=#1261 id=1261 data-nosnippet>1261</a>        )
-<a href=#1262 id=1262 data-nosnippet>1262</a>    }
-<a href=#1263 id=1263 data-nosnippet>1263</a>
-<a href=#1264 id=1264 data-nosnippet>1264</a>    <span class="doccomment">/// Whether the operator tests IP addresses.
-<a href=#1265 id=1265 data-nosnippet>1265</a>    </span><span class="attr">#[must_use]
-<a href=#1266 id=1266 data-nosnippet>1266</a>    </span><span class="kw">pub const fn </span>is_network(<span class="self">self</span>) -&gt; bool {
-<a href=#1267 id=1267 data-nosnippet>1267</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::IpInCidr | <span class="self">Self</span>::IpBetween | <span class="self">Self</span>::IpWildcard)
-<a href=#1268 id=1268 data-nosnippet>1268</a>    }
-<a href=#1269 id=1269 data-nosnippet>1269</a>
-<a href=#1270 id=1270 data-nosnippet>1270</a>    <span class="doccomment">/// Whether the operator tests membership of a set.
-<a href=#1271 id=1271 data-nosnippet>1271</a>    </span><span class="attr">#[must_use]
-<a href=#1272 id=1272 data-nosnippet>1272</a>    </span><span class="kw">pub const fn </span>is_set(<span class="self">self</span>) -&gt; bool {
-<a href=#1273 id=1273 data-nosnippet>1273</a>        <span class="macro">matches!</span>(
-<a href=#1274 id=1274 data-nosnippet>1274</a>            <span class="self">self</span>,
-<a href=#1275 id=1275 data-nosnippet>1275</a>            <span class="self">Self</span>::MemberOf | <span class="self">Self</span>::NotMemberOf | <span class="self">Self</span>::AnyOf | <span class="self">Self</span>::AllOf
-<a href=#1276 id=1276 data-nosnippet>1276</a>        )
-<a href=#1277 id=1277 data-nosnippet>1277</a>    }
-<a href=#1278 id=1278 data-nosnippet>1278</a>
-<a href=#1279 id=1279 data-nosnippet>1279</a>    <span class="doccomment">/// Whether the operator takes regular expressions.
-<a href=#1280 id=1280 data-nosnippet>1280</a>    </span><span class="attr">#[must_use]
-<a href=#1281 id=1281 data-nosnippet>1281</a>    </span><span class="kw">pub const fn </span>is_regex(<span class="self">self</span>) -&gt; bool {
-<a href=#1282 id=1282 data-nosnippet>1282</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Regex | <span class="self">Self</span>::NotRegex)
-<a href=#1283 id=1283 data-nosnippet>1283</a>    }
-<a href=#1284 id=1284 data-nosnippet>1284</a>
-<a href=#1285 id=1285 data-nosnippet>1285</a>    <span class="doccomment">/// The smallest and largest number of values the operator takes.
-<a href=#1286 id=1286 data-nosnippet>1286</a>    </span><span class="attr">#[must_use]
-<a href=#1287 id=1287 data-nosnippet>1287</a>    </span><span class="kw">pub const fn </span>value_count(<span class="self">self</span>) -&gt; (usize, usize) {
-<a href=#1288 id=1288 data-nosnippet>1288</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#1289 id=1289 data-nosnippet>1289</a>            <span class="self">Self</span>::VersionGt
-<a href=#1290 id=1290 data-nosnippet>1290</a>            | <span class="self">Self</span>::VersionGe
-<a href=#1291 id=1291 data-nosnippet>1291</a>            | <span class="self">Self</span>::VersionLt
-<a href=#1292 id=1292 data-nosnippet>1292</a>            | <span class="self">Self</span>::VersionLe
-<a href=#1293 id=1293 data-nosnippet>1293</a>            | <span class="self">Self</span>::Gt
-<a href=#1294 id=1294 data-nosnippet>1294</a>            | <span class="self">Self</span>::Ge
-<a href=#1295 id=1295 data-nosnippet>1295</a>            | <span class="self">Self</span>::Lt
-<a href=#1296 id=1296 data-nosnippet>1296</a>            | <span class="self">Self</span>::Le =&gt; (<span class="number">1</span>, <span class="number">1</span>),
-<a href=#1297 id=1297 data-nosnippet>1297</a>            <span class="self">Self</span>::VersionBetween | <span class="self">Self</span>::Between | <span class="self">Self</span>::TimeBetween | <span class="self">Self</span>::DateBetween =&gt; (<span class="number">2</span>, <span class="number">2</span>),
-<a href=#1298 id=1298 data-nosnippet>1298</a>            <span class="self">Self</span>::IsTrue | <span class="self">Self</span>::IsFalse =&gt; (<span class="number">0</span>, <span class="number">0</span>),
-<a href=#1299 id=1299 data-nosnippet>1299</a>            <span class="kw">_ </span>=&gt; (<span class="number">1</span>, <span class="kw">super</span>::limits::MAX_VALUES_PER_CRITERION),
-<a href=#1300 id=1300 data-nosnippet>1300</a>        }
-<a href=#1301 id=1301 data-nosnippet>1301</a>    }
-<a href=#1302 id=1302 data-nosnippet>1302</a>
-<a href=#1303 id=1303 data-nosnippet>1303</a>    <span class="doccomment">/// Whether the operator is valid on a field of this class: the static
-<a href=#1304 id=1304 data-nosnippet>1304</a>    /// compatibility table of #32.
-<a href=#1305 id=1305 data-nosnippet>1305</a>    </span><span class="attr">#[must_use]
-<a href=#1306 id=1306 data-nosnippet>1306</a>    </span><span class="kw">pub const fn </span>applies_to(<span class="self">self</span>, class: FieldClass) -&gt; bool {
-<a href=#1307 id=1307 data-nosnippet>1307</a>        <span class="kw">match </span>class {
-<a href=#1308 id=1308 data-nosnippet>1308</a>            FieldClass::Hash { .. }
-<a href=#1309 id=1309 data-nosnippet>1309</a>            | FieldClass::Digest
-<a href=#1310 id=1310 data-nosnippet>1310</a>            | FieldClass::Sid
-<a href=#1311 id=1311 data-nosnippet>1311</a>            | FieldClass::SessionType
-<a href=#1312 id=1312 data-nosnippet>1312</a>            | FieldClass::Guid =&gt; {
-<a href=#1313 id=1313 data-nosnippet>1313</a>                <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals)
-<a href=#1314 id=1314 data-nosnippet>1314</a>            }
-<a href=#1315 id=1315 data-nosnippet>1315</a>            FieldClass::Path | FieldClass::FileName | FieldClass::Text =&gt; <span class="self">self</span>.is_text(),
-<a href=#1316 id=1316 data-nosnippet>1316</a>            FieldClass::PrincipalName =&gt; <span class="self">self</span>.is_text() &amp;&amp; !<span class="self">self</span>.is_regex(),
-<a href=#1317 id=1317 data-nosnippet>1317</a>            FieldClass::Version =&gt; {
-<a href=#1318 id=1318 data-nosnippet>1318</a>                <span class="self">self</span>.is_version() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals)
-<a href=#1319 id=1319 data-nosnippet>1319</a>            }
-<a href=#1320 id=1320 data-nosnippet>1320</a>            FieldClass::PrincipalSet
-<a href=#1321 id=1321 data-nosnippet>1321</a>            | FieldClass::TagSet
-<a href=#1322 id=1322 data-nosnippet>1322</a>            | FieldClass::NameSet
-<a href=#1323 id=1323 data-nosnippet>1323</a>            | FieldClass::MacSet
-<a href=#1324 id=1324 data-nosnippet>1324</a>            | FieldClass::OidSet =&gt; <span class="self">self</span>.is_set(),
-<a href=#1325 id=1325 data-nosnippet>1325</a>            FieldClass::Bool =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::IsTrue | <span class="self">Self</span>::IsFalse),
-<a href=#1326 id=1326 data-nosnippet>1326</a>            FieldClass::Number | FieldClass::IntegrityLevel =&gt; <span class="self">self</span>.is_ordered(),
-<a href=#1327 id=1327 data-nosnippet>1327</a>            FieldClass::Date =&gt; <span class="self">self</span>.is_ordered() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::DateBetween),
-<a href=#1328 id=1328 data-nosnippet>1328</a>            FieldClass::DistinguishedName =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals),
-<a href=#1329 id=1329 data-nosnippet>1329</a>            FieldClass::Ip =&gt; <span class="self">self</span>.is_network() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals),
-<a href=#1330 id=1330 data-nosnippet>1330</a>            FieldClass::IpSet =&gt; <span class="self">self</span>.is_network() || <span class="self">self</span>.is_set(),
-<a href=#1331 id=1331 data-nosnippet>1331</a>            FieldClass::Weekday =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::WeekdayIn),
-<a href=#1332 id=1332 data-nosnippet>1332</a>            FieldClass::TimeOfDay =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::TimeBetween),
-<a href=#1333 id=1333 data-nosnippet>1333</a>        }
-<a href=#1334 id=1334 data-nosnippet>1334</a>    }
-<a href=#1335 id=1335 data-nosnippet>1335</a>
-<a href=#1336 id=1336 data-nosnippet>1336</a>    <span class="doccomment">/// Whether the operator is valid on this field: the class table of
-<a href=#1337 id=1337 data-nosnippet>1337</a>    /// [`Self::applies_to`].
-<a href=#1338 id=1338 data-nosnippet>1338</a>    </span><span class="attr">#[must_use]
-<a href=#1339 id=1339 data-nosnippet>1339</a>    </span><span class="kw">pub const fn </span>applies_to_field(<span class="self">self</span>, field: Field) -&gt; bool {
-<a href=#1340 id=1340 data-nosnippet>1340</a>        <span class="self">self</span>.applies_to(field.class())
-<a href=#1341 id=1341 data-nosnippet>1341</a>    }
-<a href=#1342 id=1342 data-nosnippet>1342</a>
-<a href=#1343 id=1343 data-nosnippet>1343</a>    <span class="doccomment">/// Every operator, in declaration order.
-<a href=#1344 id=1344 data-nosnippet>1344</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">35</span>] = [
-<a href=#1345 id=1345 data-nosnippet>1345</a>        <span class="self">Self</span>::Equals,
-<a href=#1346 id=1346 data-nosnippet>1346</a>        <span class="self">Self</span>::NotEquals,
-<a href=#1347 id=1347 data-nosnippet>1347</a>        <span class="self">Self</span>::StartsWith,
-<a href=#1348 id=1348 data-nosnippet>1348</a>        <span class="self">Self</span>::EndsWith,
-<a href=#1349 id=1349 data-nosnippet>1349</a>        <span class="self">Self</span>::Contains,
-<a href=#1350 id=1350 data-nosnippet>1350</a>        <span class="self">Self</span>::NotContains,
-<a href=#1351 id=1351 data-nosnippet>1351</a>        <span class="self">Self</span>::Wildcard,
-<a href=#1352 id=1352 data-nosnippet>1352</a>        <span class="self">Self</span>::NotWildcard,
-<a href=#1353 id=1353 data-nosnippet>1353</a>        <span class="self">Self</span>::Regex,
-<a href=#1354 id=1354 data-nosnippet>1354</a>        <span class="self">Self</span>::NotRegex,
-<a href=#1355 id=1355 data-nosnippet>1355</a>        <span class="self">Self</span>::VersionEq,
-<a href=#1356 id=1356 data-nosnippet>1356</a>        <span class="self">Self</span>::VersionGt,
-<a href=#1357 id=1357 data-nosnippet>1357</a>        <span class="self">Self</span>::VersionGe,
-<a href=#1358 id=1358 data-nosnippet>1358</a>        <span class="self">Self</span>::VersionLt,
-<a href=#1359 id=1359 data-nosnippet>1359</a>        <span class="self">Self</span>::VersionLe,
-<a href=#1360 id=1360 data-nosnippet>1360</a>        <span class="self">Self</span>::VersionBetween,
-<a href=#1361 id=1361 data-nosnippet>1361</a>        <span class="self">Self</span>::MemberOf,
-<a href=#1362 id=1362 data-nosnippet>1362</a>        <span class="self">Self</span>::NotMemberOf,
-<a href=#1363 id=1363 data-nosnippet>1363</a>        <span class="self">Self</span>::IsTrue,
-<a href=#1364 id=1364 data-nosnippet>1364</a>        <span class="self">Self</span>::IsFalse,
-<a href=#1365 id=1365 data-nosnippet>1365</a>        <span class="self">Self</span>::Eq,
-<a href=#1366 id=1366 data-nosnippet>1366</a>        <span class="self">Self</span>::Ne,
-<a href=#1367 id=1367 data-nosnippet>1367</a>        <span class="self">Self</span>::Gt,
-<a href=#1368 id=1368 data-nosnippet>1368</a>        <span class="self">Self</span>::Ge,
-<a href=#1369 id=1369 data-nosnippet>1369</a>        <span class="self">Self</span>::Lt,
-<a href=#1370 id=1370 data-nosnippet>1370</a>        <span class="self">Self</span>::Le,
-<a href=#1371 id=1371 data-nosnippet>1371</a>        <span class="self">Self</span>::Between,
-<a href=#1372 id=1372 data-nosnippet>1372</a>        <span class="self">Self</span>::IpInCidr,
-<a href=#1373 id=1373 data-nosnippet>1373</a>        <span class="self">Self</span>::IpBetween,
-<a href=#1374 id=1374 data-nosnippet>1374</a>        <span class="self">Self</span>::IpWildcard,
-<a href=#1375 id=1375 data-nosnippet>1375</a>        <span class="self">Self</span>::AnyOf,
-<a href=#1376 id=1376 data-nosnippet>1376</a>        <span class="self">Self</span>::AllOf,
-<a href=#1377 id=1377 data-nosnippet>1377</a>        <span class="self">Self</span>::WeekdayIn,
-<a href=#1378 id=1378 data-nosnippet>1378</a>        <span class="self">Self</span>::TimeBetween,
-<a href=#1379 id=1379 data-nosnippet>1379</a>        <span class="self">Self</span>::DateBetween,
-<a href=#1380 id=1380 data-nosnippet>1380</a>    ];
-<a href=#1381 id=1381 data-nosnippet>1381</a>}
-<a href=#1382 id=1382 data-nosnippet>1382</a>
-<a href=#1383 id=1383 data-nosnippet>1383</a><span class="doccomment">/// Adds to the generated schema of [`Criterion`] what the derive cannot
-<a href=#1384 id=1384 data-nosnippet>1384</a>/// say: `is_true` and `is_false` take no values, and every other operator
-<a href=#1385 id=1385 data-nosnippet>1385</a>/// needs at least one. Validation checks the exact count per operator.
-<a href=#1386 id=1386 data-nosnippet>1386</a></span><span class="kw">fn </span>values_by_operator(schema: <span class="kw-2">&amp;mut </span>schemars::Schema) {
-<a href=#1387 id=1387 data-nosnippet>1387</a>    <span class="kw">let </span>rule = <span class="macro">serde_json::json!</span>({
-<a href=#1388 id=1388 data-nosnippet>1388</a>        <span class="string">"if"</span>: {
-<a href=#1389 id=1389 data-nosnippet>1389</a>            <span class="string">"properties"</span>: { <span class="string">"operator"</span>: { <span class="string">"enum"</span>: [<span class="string">"is_true"</span>, <span class="string">"is_false"</span>] } },
-<a href=#1390 id=1390 data-nosnippet>1390</a>            <span class="string">"required"</span>: [<span class="string">"operator"</span>]
-<a href=#1391 id=1391 data-nosnippet>1391</a>        },
-<a href=#1392 id=1392 data-nosnippet>1392</a>        <span class="string">"then"</span>: { <span class="string">"properties"</span>: { <span class="string">"values"</span>: { <span class="string">"maxItems"</span>: <span class="number">0 </span>} } },
-<a href=#1393 id=1393 data-nosnippet>1393</a>        <span class="string">"else"</span>: {
-<a href=#1394 id=1394 data-nosnippet>1394</a>            <span class="string">"properties"</span>: { <span class="string">"values"</span>: { <span class="string">"minItems"</span>: <span class="number">1 </span>} },
-<a href=#1395 id=1395 data-nosnippet>1395</a>            <span class="string">"required"</span>: [<span class="string">"values"</span>]
-<a href=#1396 id=1396 data-nosnippet>1396</a>        }
-<a href=#1397 id=1397 data-nosnippet>1397</a>    });
-<a href=#1398 id=1398 data-nosnippet>1398</a>    schema.insert(<span class="string">"allOf"</span>.to_owned(), serde_json::Value::Array(<span class="macro">vec!</span>[rule]));
-<a href=#1399 id=1399 data-nosnippet>1399</a>}
+<a href=#896 id=896 data-nosnippet>896</a>    </span><span class="kw">pub const fn </span>has_position(<span class="self">self</span>) -&gt; bool {
+<a href=#897 id=897 data-nosnippet>897</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::SignerTbsHash | <span class="self">Self</span>::SignerSpkiSha256)
+<a href=#898 id=898 data-nosnippet>898</a>    }
+<a href=#899 id=899 data-nosnippet>899</a>
+<a href=#900 id=900 data-nosnippet>900</a>    <span class="doccomment">/// Whether the field describes the context of an evaluation (the user,
+<a href=#901 id=901 data-nosnippet>901</a>    /// device or session) rather than the object (#33). A context field
+<a href=#902 id=902 data-nosnippet>902</a>    /// never identifies an object.
+<a href=#903 id=903 data-nosnippet>903</a>    </span><span class="attr">#[must_use]
+<a href=#904 id=904 data-nosnippet>904</a>    </span><span class="kw">pub const fn </span>is_context(<span class="self">self</span>) -&gt; bool {
+<a href=#905 id=905 data-nosnippet>905</a>        <span class="self">self</span>.strength().is_none()
+<a href=#906 id=906 data-nosnippet>906</a>    }
+<a href=#907 id=907 data-nosnippet>907</a>
+<a href=#908 id=908 data-nosnippet>908</a>    <span class="doccomment">/// The type of this field's value.
+<a href=#909 id=909 data-nosnippet>909</a>    </span><span class="attr">#[must_use]
+<a href=#910 id=910 data-nosnippet>910</a>    </span><span class="kw">pub const fn </span>class(<span class="self">self</span>) -&gt; FieldClass {
+<a href=#911 id=911 data-nosnippet>911</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#912 id=912 data-nosnippet>912</a>            <span class="self">Self</span>::HashSha256
+<a href=#913 id=913 data-nosnippet>913</a>            | <span class="self">Self</span>::HashAuthenticodeSha256
+<a href=#914 id=914 data-nosnippet>914</a>            | <span class="self">Self</span>::HashPageSha256
+<a href=#915 id=915 data-nosnippet>915</a>            | <span class="self">Self</span>::HashMsiFuzzySha256
+<a href=#916 id=916 data-nosnippet>916</a>            | <span class="self">Self</span>::SignerLeafThumbprint
+<a href=#917 id=917 data-nosnippet>917</a>            | <span class="self">Self</span>::SignerRootThumbprint
+<a href=#918 id=918 data-nosnippet>918</a>            | <span class="self">Self</span>::SignerSpkiSha256 =&gt; FieldClass::Hash { hex_len: <span class="number">64 </span>},
+<a href=#919 id=919 data-nosnippet>919</a>            <span class="self">Self</span>::HashSha384 =&gt; FieldClass::Hash { hex_len: <span class="number">96 </span>},
+<a href=#920 id=920 data-nosnippet>920</a>            <span class="self">Self</span>::HashSha512 =&gt; FieldClass::Hash { hex_len: <span class="number">128 </span>},
+<a href=#921 id=921 data-nosnippet>921</a>            <span class="self">Self</span>::HashAuthenticodeSha1
+<a href=#922 id=922 data-nosnippet>922</a>            | <span class="self">Self</span>::HashPageSha1
+<a href=#923 id=923 data-nosnippet>923</a>            | <span class="self">Self</span>::HashSha1
+<a href=#924 id=924 data-nosnippet>924</a>            | <span class="self">Self</span>::SignerLeafThumbprintSha1
+<a href=#925 id=925 data-nosnippet>925</a>            | <span class="self">Self</span>::SignerRootThumbprintSha1 =&gt; FieldClass::Hash { hex_len: <span class="number">40 </span>},
+<a href=#926 id=926 data-nosnippet>926</a>            <span class="self">Self</span>::HashMd5 =&gt; FieldClass::Hash { hex_len: <span class="number">32 </span>},
+<a href=#927 id=927 data-nosnippet>927</a>            <span class="self">Self</span>::PathFull | <span class="self">Self</span>::PathDirectory =&gt; FieldClass::Path,
+<a href=#928 id=928 data-nosnippet>928</a>            <span class="self">Self</span>::PathFileName | <span class="self">Self</span>::PathExtension =&gt; FieldClass::FileName,
+<a href=#929 id=929 data-nosnippet>929</a>            <span class="self">Self</span>::SignerPublisher
+<a href=#930 id=930 data-nosnippet>930</a>            | <span class="self">Self</span>::SignerIssuer
+<a href=#931 id=931 data-nosnippet>931</a>            | <span class="self">Self</span>::SignerPca
+<a href=#932 id=932 data-nosnippet>932</a>            | <span class="self">Self</span>::MetaOriginalFilename
+<a href=#933 id=933 data-nosnippet>933</a>            | <span class="self">Self</span>::MetaInternalName
+<a href=#934 id=934 data-nosnippet>934</a>            | <span class="self">Self</span>::MetaFileDescription
+<a href=#935 id=935 data-nosnippet>935</a>            | <span class="self">Self</span>::MetaProductName
+<a href=#936 id=936 data-nosnippet>936</a>            | <span class="self">Self</span>::MetaCompanyName
+<a href=#937 id=937 data-nosnippet>937</a>            | <span class="self">Self</span>::DeviceHostname
+<a href=#938 id=938 data-nosnippet>938</a>            | <span class="self">Self</span>::DeviceFqdn
+<a href=#939 id=939 data-nosnippet>939</a>            | <span class="self">Self</span>::DeviceDomain
+<a href=#940 id=940 data-nosnippet>940</a>            | <span class="self">Self</span>::DeviceNetbios
+<a href=#941 id=941 data-nosnippet>941</a>            | <span class="self">Self</span>::DeviceAdSite
+<a href=#942 id=942 data-nosnippet>942</a>            | <span class="self">Self</span>::DeviceOsEdition
+<a href=#943 id=943 data-nosnippet>943</a>            | <span class="self">Self</span>::DeviceArch
+<a href=#944 id=944 data-nosnippet>944</a>            | <span class="self">Self</span>::SessionClientHostname =&gt; FieldClass::Text,
+<a href=#945 id=945 data-nosnippet>945</a>            <span class="self">Self</span>::MetaFileVersion | <span class="self">Self</span>::MetaProductVersion | <span class="self">Self</span>::DeviceOsVersion =&gt; {
+<a href=#946 id=946 data-nosnippet>946</a>                FieldClass::Version
+<a href=#947 id=947 data-nosnippet>947</a>            }
+<a href=#948 id=948 data-nosnippet>948</a>            <span class="self">Self</span>::UserName =&gt; FieldClass::PrincipalName,
+<a href=#949 id=949 data-nosnippet>949</a>            <span class="self">Self</span>::UserSid | <span class="self">Self</span>::UserPrimaryGroup =&gt; FieldClass::Sid,
+<a href=#950 id=950 data-nosnippet>950</a>            <span class="self">Self</span>::UserGroups | <span class="self">Self</span>::DeviceGroups =&gt; FieldClass::PrincipalSet,
+<a href=#951 id=951 data-nosnippet>951</a>            <span class="self">Self</span>::DeviceTags =&gt; FieldClass::TagSet,
+<a href=#952 id=952 data-nosnippet>952</a>            <span class="self">Self</span>::UserIsAdmin
+<a href=#953 id=953 data-nosnippet>953</a>            | <span class="self">Self</span>::UserIsElevated
+<a href=#954 id=954 data-nosnippet>954</a>            | <span class="self">Self</span>::UserIsServiceAccount
+<a href=#955 id=955 data-nosnippet>955</a>            | <span class="self">Self</span>::UserIsSystem
+<a href=#956 id=956 data-nosnippet>956</a>            | <span class="self">Self</span>::DeviceIsServer
+<a href=#957 id=957 data-nosnippet>957</a>            | <span class="self">Self</span>::DeviceIsDomainController
+<a href=#958 id=958 data-nosnippet>958</a>            | <span class="self">Self</span>::DeviceIsLaptop
+<a href=#959 id=959 data-nosnippet>959</a>            | <span class="self">Self</span>::DeviceIsVdi
+<a href=#960 id=960 data-nosnippet>960</a>            | <span class="self">Self</span>::DeviceIsTerminalServer
+<a href=#961 id=961 data-nosnippet>961</a>            | <span class="self">Self</span>::SessionIsRemote
+<a href=#962 id=962 data-nosnippet>962</a>            | <span class="self">Self</span>::NetConnectedToServer =&gt; FieldClass::Bool,
+<a href=#963 id=963 data-nosnippet>963</a>            <span class="self">Self</span>::SessionType =&gt; FieldClass::SessionType,
+<a href=#964 id=964 data-nosnippet>964</a>            <span class="self">Self</span>::DeviceOsBuild | <span class="self">Self</span>::SessionId =&gt; FieldClass::Number,
+<a href=#965 id=965 data-nosnippet>965</a>            <span class="self">Self</span>::UserIntegrityLevel =&gt; FieldClass::IntegrityLevel,
+<a href=#966 id=966 data-nosnippet>966</a>            <span class="self">Self</span>::UserOu | <span class="self">Self</span>::DeviceOu =&gt; FieldClass::DistinguishedName,
+<a href=#967 id=967 data-nosnippet>967</a>            <span class="self">Self</span>::SessionClientIp =&gt; FieldClass::Ip,
+<a href=#968 id=968 data-nosnippet>968</a>            <span class="self">Self</span>::NetIp =&gt; FieldClass::IpSet,
+<a href=#969 id=969 data-nosnippet>969</a>            <span class="self">Self</span>::NetMac =&gt; FieldClass::MacSet,
+<a href=#970 id=970 data-nosnippet>970</a>            <span class="self">Self</span>::NetDnsSuffix | <span class="self">Self</span>::NetLocation =&gt; FieldClass::NameSet,
+<a href=#971 id=971 data-nosnippet>971</a>            <span class="self">Self</span>::TimeWeekday =&gt; FieldClass::Weekday,
+<a href=#972 id=972 data-nosnippet>972</a>            <span class="self">Self</span>::TimeLocalTime =&gt; FieldClass::TimeOfDay,
+<a href=#973 id=973 data-nosnippet>973</a>            <span class="self">Self</span>::TimeDate =&gt; FieldClass::Date,
+<a href=#974 id=974 data-nosnippet>974</a>            <span class="self">Self</span>::SignerTbsHash =&gt; FieldClass::Digest,
+<a href=#975 id=975 data-nosnippet>975</a>            <span class="self">Self</span>::MetaLegalCopyright
+<a href=#976 id=976 data-nosnippet>976</a>            | <span class="self">Self</span>::MetaLanguage
+<a href=#977 id=977 data-nosnippet>977</a>            | <span class="self">Self</span>::MetaFileNameFallback
+<a href=#978 id=978 data-nosnippet>978</a>            | <span class="self">Self</span>::MetaPeMachine
+<a href=#979 id=979 data-nosnippet>979</a>            | <span class="self">Self</span>::MetaPeSubsystem
+<a href=#980 id=980 data-nosnippet>980</a>            | <span class="self">Self</span>::MsiProductName
+<a href=#981 id=981 data-nosnippet>981</a>            | <span class="self">Self</span>::MsiManufacturer =&gt; FieldClass::Text,
+<a href=#982 id=982 data-nosnippet>982</a>            <span class="self">Self</span>::MetaFileSize =&gt; FieldClass::Number,
+<a href=#983 id=983 data-nosnippet>983</a>            <span class="self">Self</span>::MetaIsDotnet =&gt; FieldClass::Bool,
+<a href=#984 id=984 data-nosnippet>984</a>            <span class="self">Self</span>::MsiProductCode | <span class="self">Self</span>::MsiUpgradeCode | <span class="self">Self</span>::MsiPackageCode =&gt; FieldClass::Guid,
+<a href=#985 id=985 data-nosnippet>985</a>            <span class="self">Self</span>::MsiProductVersion =&gt; FieldClass::Version,
+<a href=#986 id=986 data-nosnippet>986</a>            <span class="self">Self</span>::PathDriveType
+<a href=#987 id=987 data-nosnippet>987</a>            | <span class="self">Self</span>::PathBus
+<a href=#988 id=988 data-nosnippet>988</a>            | <span class="self">Self</span>::PathShare
+<a href=#989 id=989 data-nosnippet>989</a>            | <span class="self">Self</span>::MetaDetectedType
+<a href=#990 id=990 data-nosnippet>990</a>            | <span class="self">Self</span>::MetaExtensionType =&gt; FieldClass::Text,
+<a href=#991 id=991 data-nosnippet>991</a>            <span class="self">Self</span>::PathIsUnc | <span class="self">Self</span>::PathIsAds | <span class="self">Self</span>::PathUserCanChangeAcl =&gt; FieldClass::Bool,
+<a href=#992 id=992 data-nosnippet>992</a>            <span class="self">Self</span>::SignerEku =&gt; FieldClass::OidSet,
+<a href=#993 id=993 data-nosnippet>993</a>        }
+<a href=#994 id=994 data-nosnippet>994</a>    }
+<a href=#995 id=995 data-nosnippet>995</a>
+<a href=#996 id=996 data-nosnippet>996</a>    <span class="doccomment">/// Whether this is a collision-prone hash that must never be the only
+<a href=#997 id=997 data-nosnippet>997</a>    /// identity of an allow rule (ADR 0008).
+<a href=#998 id=998 data-nosnippet>998</a>    </span><span class="attr">#[must_use]
+<a href=#999 id=999 data-nosnippet>999</a>    </span><span class="kw">pub const fn </span>is_weak_hash(<span class="self">self</span>) -&gt; bool {
+<a href=#1000 id=1000 data-nosnippet>1000</a>        <span class="macro">matches!</span>(
+<a href=#1001 id=1001 data-nosnippet>1001</a>            <span class="self">self</span>,
+<a href=#1002 id=1002 data-nosnippet>1002</a>            <span class="self">Self</span>::HashSha1
+<a href=#1003 id=1003 data-nosnippet>1003</a>                | <span class="self">Self</span>::HashMd5
+<a href=#1004 id=1004 data-nosnippet>1004</a>                | <span class="self">Self</span>::HashAuthenticodeSha1
+<a href=#1005 id=1005 data-nosnippet>1005</a>                | <span class="self">Self</span>::HashPageSha1
+<a href=#1006 id=1006 data-nosnippet>1006</a>                | <span class="self">Self</span>::SignerLeafThumbprintSha1
+<a href=#1007 id=1007 data-nosnippet>1007</a>                | <span class="self">Self</span>::SignerRootThumbprintSha1
+<a href=#1008 id=1008 data-nosnippet>1008</a>        )
+<a href=#1009 id=1009 data-nosnippet>1009</a>    }
+<a href=#1010 id=1010 data-nosnippet>1010</a>
+<a href=#1011 id=1011 data-nosnippet>1011</a>    <span class="doccomment">/// How firmly a positive test of this field identifies an object (#31).
+<a href=#1012 id=1012 data-nosnippet>1012</a>    /// `None` for a context field (#33), which identifies no object.
+<a href=#1013 id=1013 data-nosnippet>1013</a>    ///
+<a href=#1014 id=1014 data-nosnippet>1014</a>    /// A certificate authority vouches for every file it signs, so the
+<a href=#1015 id=1015 data-nosnippet>1015</a>    /// issuer, the PCA, the root thumbprint and the EKUs are weak alone.
+<a href=#1016 id=1016 data-nosnippet>1016</a>    /// A TBS hash is strong here, as #31 rates it, and so is a key hash
+<a href=#1017 id=1017 data-nosnippet>1017</a>    /// (#318); validation counts either that may name a CA certificate
+<a href=#1018 id=1018 data-nosnippet>1018</a>    /// (`position` other than `leaf`) as weak in a rule that lets an object
+<a href=#1019 id=1019 data-nosnippet>1019</a>    /// run. A leaf key hash names whoever holds the private key, across
+<a href=#1020 id=1020 data-nosnippet>1020</a>    /// every certificate issued for it.
+<a href=#1021 id=1021 data-nosnippet>1021</a>    </span><span class="attr">#[must_use]
+<a href=#1022 id=1022 data-nosnippet>1022</a>    </span><span class="kw">pub const fn </span>strength(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Strength&gt; {
+<a href=#1023 id=1023 data-nosnippet>1023</a>        <span class="prelude-val">Some</span>(<span class="kw">match </span><span class="self">self </span>{
+<a href=#1024 id=1024 data-nosnippet>1024</a>            <span class="self">Self</span>::HashSha256
+<a href=#1025 id=1025 data-nosnippet>1025</a>            | <span class="self">Self</span>::HashSha384
+<a href=#1026 id=1026 data-nosnippet>1026</a>            | <span class="self">Self</span>::HashSha512
+<a href=#1027 id=1027 data-nosnippet>1027</a>            | <span class="self">Self</span>::HashAuthenticodeSha256
+<a href=#1028 id=1028 data-nosnippet>1028</a>            | <span class="self">Self</span>::HashMsiFuzzySha256
+<a href=#1029 id=1029 data-nosnippet>1029</a>            | <span class="self">Self</span>::SignerLeafThumbprint
+<a href=#1030 id=1030 data-nosnippet>1030</a>            | <span class="self">Self</span>::SignerTbsHash
+<a href=#1031 id=1031 data-nosnippet>1031</a>            | <span class="self">Self</span>::SignerSpkiSha256 =&gt; Strength::Strong,
+<a href=#1032 id=1032 data-nosnippet>1032</a>            <span class="self">Self</span>::SignerPublisher | <span class="self">Self</span>::PathFull | <span class="self">Self</span>::PathDirectory =&gt; Strength::Medium,
+<a href=#1033 id=1033 data-nosnippet>1033</a>            <span class="self">Self</span>::HashAuthenticodeSha1
+<a href=#1034 id=1034 data-nosnippet>1034</a>            | <span class="self">Self</span>::HashPageSha256
+<a href=#1035 id=1035 data-nosnippet>1035</a>            | <span class="self">Self</span>::HashPageSha1
+<a href=#1036 id=1036 data-nosnippet>1036</a>            | <span class="self">Self</span>::HashSha1
+<a href=#1037 id=1037 data-nosnippet>1037</a>            | <span class="self">Self</span>::HashMd5
+<a href=#1038 id=1038 data-nosnippet>1038</a>            | <span class="self">Self</span>::SignerIssuer
+<a href=#1039 id=1039 data-nosnippet>1039</a>            | <span class="self">Self</span>::SignerPca
+<a href=#1040 id=1040 data-nosnippet>1040</a>            | <span class="self">Self</span>::SignerRootThumbprint
+<a href=#1041 id=1041 data-nosnippet>1041</a>            | <span class="self">Self</span>::SignerLeafThumbprintSha1
+<a href=#1042 id=1042 data-nosnippet>1042</a>            | <span class="self">Self</span>::SignerRootThumbprintSha1
+<a href=#1043 id=1043 data-nosnippet>1043</a>            | <span class="self">Self</span>::SignerEku
+<a href=#1044 id=1044 data-nosnippet>1044</a>            | <span class="self">Self</span>::PathFileName
+<a href=#1045 id=1045 data-nosnippet>1045</a>            | <span class="self">Self</span>::PathExtension
+<a href=#1046 id=1046 data-nosnippet>1046</a>            | <span class="self">Self</span>::MetaOriginalFilename
+<a href=#1047 id=1047 data-nosnippet>1047</a>            | <span class="self">Self</span>::MetaInternalName
+<a href=#1048 id=1048 data-nosnippet>1048</a>            | <span class="self">Self</span>::MetaFileDescription
+<a href=#1049 id=1049 data-nosnippet>1049</a>            | <span class="self">Self</span>::MetaProductName
+<a href=#1050 id=1050 data-nosnippet>1050</a>            | <span class="self">Self</span>::MetaCompanyName
+<a href=#1051 id=1051 data-nosnippet>1051</a>            | <span class="self">Self</span>::MetaFileVersion
+<a href=#1052 id=1052 data-nosnippet>1052</a>            | <span class="self">Self</span>::MetaProductVersion
+<a href=#1053 id=1053 data-nosnippet>1053</a>            | <span class="self">Self</span>::MetaLegalCopyright
+<a href=#1054 id=1054 data-nosnippet>1054</a>            | <span class="self">Self</span>::MetaLanguage
+<a href=#1055 id=1055 data-nosnippet>1055</a>            | <span class="self">Self</span>::MetaFileNameFallback
+<a href=#1056 id=1056 data-nosnippet>1056</a>            | <span class="self">Self</span>::MetaFileSize
+<a href=#1057 id=1057 data-nosnippet>1057</a>            | <span class="self">Self</span>::MetaPeMachine
+<a href=#1058 id=1058 data-nosnippet>1058</a>            | <span class="self">Self</span>::MetaPeSubsystem
+<a href=#1059 id=1059 data-nosnippet>1059</a>            | <span class="self">Self</span>::MetaIsDotnet
+<a href=#1060 id=1060 data-nosnippet>1060</a>            | <span class="self">Self</span>::MsiProductCode
+<a href=#1061 id=1061 data-nosnippet>1061</a>            | <span class="self">Self</span>::MsiUpgradeCode
+<a href=#1062 id=1062 data-nosnippet>1062</a>            | <span class="self">Self</span>::MsiProductName
+<a href=#1063 id=1063 data-nosnippet>1063</a>            | <span class="self">Self</span>::MsiManufacturer
+<a href=#1064 id=1064 data-nosnippet>1064</a>            | <span class="self">Self</span>::MsiProductVersion
+<a href=#1065 id=1065 data-nosnippet>1065</a>            | <span class="self">Self</span>::MsiPackageCode
+<a href=#1066 id=1066 data-nosnippet>1066</a>            | <span class="self">Self</span>::PathDriveType
+<a href=#1067 id=1067 data-nosnippet>1067</a>            | <span class="self">Self</span>::PathBus
+<a href=#1068 id=1068 data-nosnippet>1068</a>            | <span class="self">Self</span>::PathIsUnc
+<a href=#1069 id=1069 data-nosnippet>1069</a>            | <span class="self">Self</span>::PathIsAds
+<a href=#1070 id=1070 data-nosnippet>1070</a>            | <span class="self">Self</span>::PathShare
+<a href=#1071 id=1071 data-nosnippet>1071</a>            | <span class="self">Self</span>::PathUserCanChangeAcl
+<a href=#1072 id=1072 data-nosnippet>1072</a>            | <span class="self">Self</span>::MetaDetectedType
+<a href=#1073 id=1073 data-nosnippet>1073</a>            | <span class="self">Self</span>::MetaExtensionType =&gt; Strength::Weak,
+<a href=#1074 id=1074 data-nosnippet>1074</a>            <span class="self">Self</span>::UserSid
+<a href=#1075 id=1075 data-nosnippet>1075</a>            | <span class="self">Self</span>::UserName
+<a href=#1076 id=1076 data-nosnippet>1076</a>            | <span class="self">Self</span>::UserGroups
+<a href=#1077 id=1077 data-nosnippet>1077</a>            | <span class="self">Self</span>::UserPrimaryGroup
+<a href=#1078 id=1078 data-nosnippet>1078</a>            | <span class="self">Self</span>::UserIsAdmin
+<a href=#1079 id=1079 data-nosnippet>1079</a>            | <span class="self">Self</span>::UserIsElevated
+<a href=#1080 id=1080 data-nosnippet>1080</a>            | <span class="self">Self</span>::UserIsServiceAccount
+<a href=#1081 id=1081 data-nosnippet>1081</a>            | <span class="self">Self</span>::UserIsSystem
+<a href=#1082 id=1082 data-nosnippet>1082</a>            | <span class="self">Self</span>::DeviceHostname
+<a href=#1083 id=1083 data-nosnippet>1083</a>            | <span class="self">Self</span>::DeviceFqdn
+<a href=#1084 id=1084 data-nosnippet>1084</a>            | <span class="self">Self</span>::DeviceDomain
+<a href=#1085 id=1085 data-nosnippet>1085</a>            | <span class="self">Self</span>::DeviceNetbios
+<a href=#1086 id=1086 data-nosnippet>1086</a>            | <span class="self">Self</span>::DeviceAdSite
+<a href=#1087 id=1087 data-nosnippet>1087</a>            | <span class="self">Self</span>::DeviceGroups
+<a href=#1088 id=1088 data-nosnippet>1088</a>            | <span class="self">Self</span>::DeviceTags
+<a href=#1089 id=1089 data-nosnippet>1089</a>            | <span class="self">Self</span>::DeviceOsVersion
+<a href=#1090 id=1090 data-nosnippet>1090</a>            | <span class="self">Self</span>::DeviceOsEdition
+<a href=#1091 id=1091 data-nosnippet>1091</a>            | <span class="self">Self</span>::DeviceArch
+<a href=#1092 id=1092 data-nosnippet>1092</a>            | <span class="self">Self</span>::DeviceIsServer
+<a href=#1093 id=1093 data-nosnippet>1093</a>            | <span class="self">Self</span>::DeviceIsDomainController
+<a href=#1094 id=1094 data-nosnippet>1094</a>            | <span class="self">Self</span>::DeviceIsLaptop
+<a href=#1095 id=1095 data-nosnippet>1095</a>            | <span class="self">Self</span>::DeviceIsVdi
+<a href=#1096 id=1096 data-nosnippet>1096</a>            | <span class="self">Self</span>::DeviceIsTerminalServer
+<a href=#1097 id=1097 data-nosnippet>1097</a>            | <span class="self">Self</span>::SessionType
+<a href=#1098 id=1098 data-nosnippet>1098</a>            | <span class="self">Self</span>::SessionClientHostname
+<a href=#1099 id=1099 data-nosnippet>1099</a>            | <span class="self">Self</span>::SessionIsRemote
+<a href=#1100 id=1100 data-nosnippet>1100</a>            | <span class="self">Self</span>::UserIntegrityLevel
+<a href=#1101 id=1101 data-nosnippet>1101</a>            | <span class="self">Self</span>::UserOu
+<a href=#1102 id=1102 data-nosnippet>1102</a>            | <span class="self">Self</span>::DeviceOu
+<a href=#1103 id=1103 data-nosnippet>1103</a>            | <span class="self">Self</span>::DeviceOsBuild
+<a href=#1104 id=1104 data-nosnippet>1104</a>            | <span class="self">Self</span>::SessionId
+<a href=#1105 id=1105 data-nosnippet>1105</a>            | <span class="self">Self</span>::SessionClientIp
+<a href=#1106 id=1106 data-nosnippet>1106</a>            | <span class="self">Self</span>::NetIp
+<a href=#1107 id=1107 data-nosnippet>1107</a>            | <span class="self">Self</span>::NetMac
+<a href=#1108 id=1108 data-nosnippet>1108</a>            | <span class="self">Self</span>::NetDnsSuffix
+<a href=#1109 id=1109 data-nosnippet>1109</a>            | <span class="self">Self</span>::NetConnectedToServer
+<a href=#1110 id=1110 data-nosnippet>1110</a>            | <span class="self">Self</span>::NetLocation
+<a href=#1111 id=1111 data-nosnippet>1111</a>            | <span class="self">Self</span>::TimeWeekday
+<a href=#1112 id=1112 data-nosnippet>1112</a>            | <span class="self">Self</span>::TimeLocalTime
+<a href=#1113 id=1113 data-nosnippet>1113</a>            | <span class="self">Self</span>::TimeDate =&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#1114 id=1114 data-nosnippet>1114</a>        })
+<a href=#1115 id=1115 data-nosnippet>1115</a>    }
+<a href=#1116 id=1116 data-nosnippet>1116</a>}
+<a href=#1117 id=1117 data-nosnippet>1117</a>
+<a href=#1118 id=1118 data-nosnippet>1118</a><span class="doccomment">/// How a criterion compares the fact with its values (#32). Positive
+<a href=#1119 id=1119 data-nosnippet>1119</a>/// operators match if any value matches; negative operators (`not_*`)
+<a href=#1120 id=1120 data-nosnippet>1120</a>/// match if no value does, and never match a fact that is unknown.
+<a href=#1121 id=1121 data-nosnippet>1121</a></span><span class="attr">#[derive(
+<a href=#1122 id=1122 data-nosnippet>1122</a>    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+<a href=#1123 id=1123 data-nosnippet>1123</a>)]
+<a href=#1124 id=1124 data-nosnippet>1124</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#1125 id=1125 data-nosnippet>1125</a></span><span class="kw">pub enum </span>Operator {
+<a href=#1126 id=1126 data-nosnippet>1126</a>    <span class="doccomment">/// Equal to any value.
+<a href=#1127 id=1127 data-nosnippet>1127</a>    </span>Equals,
+<a href=#1128 id=1128 data-nosnippet>1128</a>    <span class="doccomment">/// Equal to none of the values.
+<a href=#1129 id=1129 data-nosnippet>1129</a>    </span>NotEquals,
+<a href=#1130 id=1130 data-nosnippet>1130</a>    <span class="doccomment">/// Starts with any value. On paths, the value must end at a component
+<a href=#1131 id=1131 data-nosnippet>1131</a>    /// boundary: `C:\Tools` does not match `C:\ToolsX`.
+<a href=#1132 id=1132 data-nosnippet>1132</a>    </span>StartsWith,
+<a href=#1133 id=1133 data-nosnippet>1133</a>    <span class="doccomment">/// Ends with any value.
+<a href=#1134 id=1134 data-nosnippet>1134</a>    </span>EndsWith,
+<a href=#1135 id=1135 data-nosnippet>1135</a>    <span class="doccomment">/// Contains any value.
+<a href=#1136 id=1136 data-nosnippet>1136</a>    </span>Contains,
+<a href=#1137 id=1137 data-nosnippet>1137</a>    <span class="doccomment">/// Contains none of the values.
+<a href=#1138 id=1138 data-nosnippet>1138</a>    </span>NotContains,
+<a href=#1139 id=1139 data-nosnippet>1139</a>    <span class="doccomment">/// Matches any wildcard pattern.
+<a href=#1140 id=1140 data-nosnippet>1140</a>    </span>Wildcard,
+<a href=#1141 id=1141 data-nosnippet>1141</a>    <span class="doccomment">/// Matches none of the wildcard patterns.
+<a href=#1142 id=1142 data-nosnippet>1142</a>    </span>NotWildcard,
+<a href=#1143 id=1143 data-nosnippet>1143</a>    <span class="doccomment">/// Matches any regular expression. Anchored at both ends, and run by a
+<a href=#1144 id=1144 data-nosnippet>1144</a>    /// linear-time engine without look-around or backreferences.
+<a href=#1145 id=1145 data-nosnippet>1145</a>    </span>Regex,
+<a href=#1146 id=1146 data-nosnippet>1146</a>    <span class="doccomment">/// Matches none of the regular expressions.
+<a href=#1147 id=1147 data-nosnippet>1147</a>    </span>NotRegex,
+<a href=#1148 id=1148 data-nosnippet>1148</a>    <span class="doccomment">/// Version equal to any value.
+<a href=#1149 id=1149 data-nosnippet>1149</a>    </span>VersionEq,
+<a href=#1150 id=1150 data-nosnippet>1150</a>    <span class="doccomment">/// Version greater than the value.
+<a href=#1151 id=1151 data-nosnippet>1151</a>    </span>VersionGt,
+<a href=#1152 id=1152 data-nosnippet>1152</a>    <span class="doccomment">/// Version greater than or equal to the value.
+<a href=#1153 id=1153 data-nosnippet>1153</a>    </span>VersionGe,
+<a href=#1154 id=1154 data-nosnippet>1154</a>    <span class="doccomment">/// Version less than the value.
+<a href=#1155 id=1155 data-nosnippet>1155</a>    </span>VersionLt,
+<a href=#1156 id=1156 data-nosnippet>1156</a>    <span class="doccomment">/// Version less than or equal to the value.
+<a href=#1157 id=1157 data-nosnippet>1157</a>    </span>VersionLe,
+<a href=#1158 id=1158 data-nosnippet>1158</a>    <span class="doccomment">/// Version within `[min, max]`, both inclusive. Takes exactly two
+<a href=#1159 id=1159 data-nosnippet>1159</a>    /// values, the minimum first.
+<a href=#1160 id=1160 data-nosnippet>1160</a>    </span>VersionBetween,
+<a href=#1161 id=1161 data-nosnippet>1161</a>    <span class="doccomment">/// The set holds any of the values (#33).
+<a href=#1162 id=1162 data-nosnippet>1162</a>    </span>MemberOf,
+<a href=#1163 id=1163 data-nosnippet>1163</a>    <span class="doccomment">/// The set holds none of the values (#33).
+<a href=#1164 id=1164 data-nosnippet>1164</a>    </span>NotMemberOf,
+<a href=#1165 id=1165 data-nosnippet>1165</a>    <span class="doccomment">/// The fact is true. Takes no values (#33).
+<a href=#1166 id=1166 data-nosnippet>1166</a>    </span>IsTrue,
+<a href=#1167 id=1167 data-nosnippet>1167</a>    <span class="doccomment">/// The fact is false. Takes no values (#33). On an unknown fact it is
+<a href=#1168 id=1168 data-nosnippet>1168</a>    /// unknown, like every other test.
+<a href=#1169 id=1169 data-nosnippet>1169</a>    </span>IsFalse,
+<a href=#1170 id=1170 data-nosnippet>1170</a>    <span class="doccomment">/// Number, level or date equal to any value (#32).
+<a href=#1171 id=1171 data-nosnippet>1171</a>    </span>Eq,
+<a href=#1172 id=1172 data-nosnippet>1172</a>    <span class="doccomment">/// Number, level or date equal to none of the values (#32).
+<a href=#1173 id=1173 data-nosnippet>1173</a>    </span>Ne,
+<a href=#1174 id=1174 data-nosnippet>1174</a>    <span class="doccomment">/// Greater than the value (#32).
+<a href=#1175 id=1175 data-nosnippet>1175</a>    </span>Gt,
+<a href=#1176 id=1176 data-nosnippet>1176</a>    <span class="doccomment">/// Greater than or equal to the value (#32).
+<a href=#1177 id=1177 data-nosnippet>1177</a>    </span>Ge,
+<a href=#1178 id=1178 data-nosnippet>1178</a>    <span class="doccomment">/// Less than the value (#32).
+<a href=#1179 id=1179 data-nosnippet>1179</a>    </span>Lt,
+<a href=#1180 id=1180 data-nosnippet>1180</a>    <span class="doccomment">/// Less than or equal to the value (#32).
+<a href=#1181 id=1181 data-nosnippet>1181</a>    </span>Le,
+<a href=#1182 id=1182 data-nosnippet>1182</a>    <span class="doccomment">/// Within `[min, max]`, both inclusive. Takes exactly two values, the
+<a href=#1183 id=1183 data-nosnippet>1183</a>    /// minimum first (#32).
+<a href=#1184 id=1184 data-nosnippet>1184</a>    </span>Between,
+<a href=#1185 id=1185 data-nosnippet>1185</a>    <span class="doccomment">/// The address is in any of the CIDR blocks, such as `10.0.0.0/8` or
+<a href=#1186 id=1186 data-nosnippet>1186</a>    /// `2001:db8::/32` (#32). On a set of addresses, any address may be.
+<a href=#1187 id=1187 data-nosnippet>1187</a>    </span>IpInCidr,
+<a href=#1188 id=1188 data-nosnippet>1188</a>    <span class="doccomment">/// The address is in any of the ranges, written `first-last` or, for
+<a href=#1189 id=1189 data-nosnippet>1189</a>    /// IPv4, `a.b.c.first-last` (#32).
+<a href=#1190 id=1190 data-nosnippet>1190</a>    </span>IpBetween,
+<a href=#1191 id=1191 data-nosnippet>1191</a>    <span class="doccomment">/// The IPv4 address matches any whole-octet pattern, such as `10.*.*.*`
+<a href=#1192 id=1192 data-nosnippet>1192</a>    /// (#32).
+<a href=#1193 id=1193 data-nosnippet>1193</a>    </span>IpWildcard,
+<a href=#1194 id=1194 data-nosnippet>1194</a>    <span class="doccomment">/// The set holds at least one of the values (#32). The same test as
+<a href=#1195 id=1195 data-nosnippet>1195</a>    /// `member_of`.
+<a href=#1196 id=1196 data-nosnippet>1196</a>    </span>AnyOf,
+<a href=#1197 id=1197 data-nosnippet>1197</a>    <span class="doccomment">/// The set holds every one of the values (#32).
+<a href=#1198 id=1198 data-nosnippet>1198</a>    </span>AllOf,
+<a href=#1199 id=1199 data-nosnippet>1199</a>    <span class="doccomment">/// The day of the week is any of the values, `mon` to `sun` (#32).
+<a href=#1200 id=1200 data-nosnippet>1200</a>    </span>WeekdayIn,
+<a href=#1201 id=1201 data-nosnippet>1201</a>    <span class="doccomment">/// The time of day is within `[start, end)`, both `HH:MM`. A window
+<a href=#1202 id=1202 data-nosnippet>1202</a>    /// whose end is before its start wraps midnight: `22:00` to `06:00`
+<a href=#1203 id=1203 data-nosnippet>1203</a>    /// (#32).
+<a href=#1204 id=1204 data-nosnippet>1204</a>    </span>TimeBetween,
+<a href=#1205 id=1205 data-nosnippet>1205</a>    <span class="doccomment">/// The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive
+<a href=#1206 id=1206 data-nosnippet>1206</a>    /// (#32).
+<a href=#1207 id=1207 data-nosnippet>1207</a>    </span>DateBetween,
+<a href=#1208 id=1208 data-nosnippet>1208</a>}
+<a href=#1209 id=1209 data-nosnippet>1209</a>
+<a href=#1210 id=1210 data-nosnippet>1210</a><span class="kw">impl </span>Operator {
+<a href=#1211 id=1211 data-nosnippet>1211</a>    <span class="doccomment">/// Whether a match means the fact equals or resembles a value, as opposed
+<a href=#1212 id=1212 data-nosnippet>1212</a>    /// to a negative test such as `not_equals`. Only positive tests identify
+<a href=#1213 id=1213 data-nosnippet>1213</a>    /// an object.
+<a href=#1214 id=1214 data-nosnippet>1214</a>    </span><span class="attr">#[must_use]
+<a href=#1215 id=1215 data-nosnippet>1215</a>    </span><span class="kw">pub const fn </span>is_positive(<span class="self">self</span>) -&gt; bool {
+<a href=#1216 id=1216 data-nosnippet>1216</a>        !<span class="macro">matches!</span>(
+<a href=#1217 id=1217 data-nosnippet>1217</a>            <span class="self">self</span>,
+<a href=#1218 id=1218 data-nosnippet>1218</a>            <span class="self">Self</span>::NotEquals
+<a href=#1219 id=1219 data-nosnippet>1219</a>                | <span class="self">Self</span>::NotContains
+<a href=#1220 id=1220 data-nosnippet>1220</a>                | <span class="self">Self</span>::NotWildcard
+<a href=#1221 id=1221 data-nosnippet>1221</a>                | <span class="self">Self</span>::NotRegex
+<a href=#1222 id=1222 data-nosnippet>1222</a>                | <span class="self">Self</span>::NotMemberOf
+<a href=#1223 id=1223 data-nosnippet>1223</a>                | <span class="self">Self</span>::Ne
+<a href=#1224 id=1224 data-nosnippet>1224</a>        )
+<a href=#1225 id=1225 data-nosnippet>1225</a>    }
+<a href=#1226 id=1226 data-nosnippet>1226</a>
+<a href=#1227 id=1227 data-nosnippet>1227</a>    <span class="doccomment">/// The positive operator that this one negates, or the operator itself
+<a href=#1228 id=1228 data-nosnippet>1228</a>    /// if it is positive. `not_contains` gives `contains`.
+<a href=#1229 id=1229 data-nosnippet>1229</a>    </span><span class="attr">#[must_use]
+<a href=#1230 id=1230 data-nosnippet>1230</a>    </span><span class="kw">pub const fn </span>positive(<span class="self">self</span>) -&gt; <span class="self">Self </span>{
+<a href=#1231 id=1231 data-nosnippet>1231</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#1232 id=1232 data-nosnippet>1232</a>            <span class="self">Self</span>::NotEquals =&gt; <span class="self">Self</span>::Equals,
+<a href=#1233 id=1233 data-nosnippet>1233</a>            <span class="self">Self</span>::NotContains =&gt; <span class="self">Self</span>::Contains,
+<a href=#1234 id=1234 data-nosnippet>1234</a>            <span class="self">Self</span>::NotWildcard =&gt; <span class="self">Self</span>::Wildcard,
+<a href=#1235 id=1235 data-nosnippet>1235</a>            <span class="self">Self</span>::NotRegex =&gt; <span class="self">Self</span>::Regex,
+<a href=#1236 id=1236 data-nosnippet>1236</a>            <span class="self">Self</span>::NotMemberOf =&gt; <span class="self">Self</span>::MemberOf,
+<a href=#1237 id=1237 data-nosnippet>1237</a>            <span class="self">Self</span>::Ne =&gt; <span class="self">Self</span>::Eq,
+<a href=#1238 id=1238 data-nosnippet>1238</a>            other =&gt; other,
+<a href=#1239 id=1239 data-nosnippet>1239</a>        }
+<a href=#1240 id=1240 data-nosnippet>1240</a>    }
+<a href=#1241 id=1241 data-nosnippet>1241</a>
+<a href=#1242 id=1242 data-nosnippet>1242</a>    <span class="doccomment">/// Whether the operator compares versions.
+<a href=#1243 id=1243 data-nosnippet>1243</a>    </span><span class="attr">#[must_use]
+<a href=#1244 id=1244 data-nosnippet>1244</a>    </span><span class="kw">pub const fn </span>is_version(<span class="self">self</span>) -&gt; bool {
+<a href=#1245 id=1245 data-nosnippet>1245</a>        <span class="macro">matches!</span>(
+<a href=#1246 id=1246 data-nosnippet>1246</a>            <span class="self">self</span>,
+<a href=#1247 id=1247 data-nosnippet>1247</a>            <span class="self">Self</span>::VersionEq
+<a href=#1248 id=1248 data-nosnippet>1248</a>                | <span class="self">Self</span>::VersionGt
+<a href=#1249 id=1249 data-nosnippet>1249</a>                | <span class="self">Self</span>::VersionGe
+<a href=#1250 id=1250 data-nosnippet>1250</a>                | <span class="self">Self</span>::VersionLt
+<a href=#1251 id=1251 data-nosnippet>1251</a>                | <span class="self">Self</span>::VersionLe
+<a href=#1252 id=1252 data-nosnippet>1252</a>                | <span class="self">Self</span>::VersionBetween
+<a href=#1253 id=1253 data-nosnippet>1253</a>        )
+<a href=#1254 id=1254 data-nosnippet>1254</a>    }
+<a href=#1255 id=1255 data-nosnippet>1255</a>
+<a href=#1256 id=1256 data-nosnippet>1256</a>    <span class="doccomment">/// Whether the operator compares text: the operators of path, file
+<a href=#1257 id=1257 data-nosnippet>1257</a>    /// name and text fields.
+<a href=#1258 id=1258 data-nosnippet>1258</a>    </span><span class="attr">#[must_use]
+<a href=#1259 id=1259 data-nosnippet>1259</a>    </span><span class="kw">pub const fn </span>is_text(<span class="self">self</span>) -&gt; bool {
+<a href=#1260 id=1260 data-nosnippet>1260</a>        <span class="macro">matches!</span>(
+<a href=#1261 id=1261 data-nosnippet>1261</a>            <span class="self">self</span>,
+<a href=#1262 id=1262 data-nosnippet>1262</a>            <span class="self">Self</span>::Equals
+<a href=#1263 id=1263 data-nosnippet>1263</a>                | <span class="self">Self</span>::NotEquals
+<a href=#1264 id=1264 data-nosnippet>1264</a>                | <span class="self">Self</span>::StartsWith
+<a href=#1265 id=1265 data-nosnippet>1265</a>                | <span class="self">Self</span>::EndsWith
+<a href=#1266 id=1266 data-nosnippet>1266</a>                | <span class="self">Self</span>::Contains
+<a href=#1267 id=1267 data-nosnippet>1267</a>                | <span class="self">Self</span>::NotContains
+<a href=#1268 id=1268 data-nosnippet>1268</a>                | <span class="self">Self</span>::Wildcard
+<a href=#1269 id=1269 data-nosnippet>1269</a>                | <span class="self">Self</span>::NotWildcard
+<a href=#1270 id=1270 data-nosnippet>1270</a>                | <span class="self">Self</span>::Regex
+<a href=#1271 id=1271 data-nosnippet>1271</a>                | <span class="self">Self</span>::NotRegex
+<a href=#1272 id=1272 data-nosnippet>1272</a>        )
+<a href=#1273 id=1273 data-nosnippet>1273</a>    }
+<a href=#1274 id=1274 data-nosnippet>1274</a>
+<a href=#1275 id=1275 data-nosnippet>1275</a>    <span class="doccomment">/// Whether the operator orders values: `eq` to `between`.
+<a href=#1276 id=1276 data-nosnippet>1276</a>    </span><span class="attr">#[must_use]
+<a href=#1277 id=1277 data-nosnippet>1277</a>    </span><span class="kw">pub const fn </span>is_ordered(<span class="self">self</span>) -&gt; bool {
+<a href=#1278 id=1278 data-nosnippet>1278</a>        <span class="macro">matches!</span>(
+<a href=#1279 id=1279 data-nosnippet>1279</a>            <span class="self">self</span>,
+<a href=#1280 id=1280 data-nosnippet>1280</a>            <span class="self">Self</span>::Eq | <span class="self">Self</span>::Ne | <span class="self">Self</span>::Gt | <span class="self">Self</span>::Ge | <span class="self">Self</span>::Lt | <span class="self">Self</span>::Le | <span class="self">Self</span>::Between
+<a href=#1281 id=1281 data-nosnippet>1281</a>        )
+<a href=#1282 id=1282 data-nosnippet>1282</a>    }
+<a href=#1283 id=1283 data-nosnippet>1283</a>
+<a href=#1284 id=1284 data-nosnippet>1284</a>    <span class="doccomment">/// Whether the operator tests IP addresses.
+<a href=#1285 id=1285 data-nosnippet>1285</a>    </span><span class="attr">#[must_use]
+<a href=#1286 id=1286 data-nosnippet>1286</a>    </span><span class="kw">pub const fn </span>is_network(<span class="self">self</span>) -&gt; bool {
+<a href=#1287 id=1287 data-nosnippet>1287</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::IpInCidr | <span class="self">Self</span>::IpBetween | <span class="self">Self</span>::IpWildcard)
+<a href=#1288 id=1288 data-nosnippet>1288</a>    }
+<a href=#1289 id=1289 data-nosnippet>1289</a>
+<a href=#1290 id=1290 data-nosnippet>1290</a>    <span class="doccomment">/// Whether the operator tests membership of a set.
+<a href=#1291 id=1291 data-nosnippet>1291</a>    </span><span class="attr">#[must_use]
+<a href=#1292 id=1292 data-nosnippet>1292</a>    </span><span class="kw">pub const fn </span>is_set(<span class="self">self</span>) -&gt; bool {
+<a href=#1293 id=1293 data-nosnippet>1293</a>        <span class="macro">matches!</span>(
+<a href=#1294 id=1294 data-nosnippet>1294</a>            <span class="self">self</span>,
+<a href=#1295 id=1295 data-nosnippet>1295</a>            <span class="self">Self</span>::MemberOf | <span class="self">Self</span>::NotMemberOf | <span class="self">Self</span>::AnyOf | <span class="self">Self</span>::AllOf
+<a href=#1296 id=1296 data-nosnippet>1296</a>        )
+<a href=#1297 id=1297 data-nosnippet>1297</a>    }
+<a href=#1298 id=1298 data-nosnippet>1298</a>
+<a href=#1299 id=1299 data-nosnippet>1299</a>    <span class="doccomment">/// Whether the operator takes regular expressions.
+<a href=#1300 id=1300 data-nosnippet>1300</a>    </span><span class="attr">#[must_use]
+<a href=#1301 id=1301 data-nosnippet>1301</a>    </span><span class="kw">pub const fn </span>is_regex(<span class="self">self</span>) -&gt; bool {
+<a href=#1302 id=1302 data-nosnippet>1302</a>        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Regex | <span class="self">Self</span>::NotRegex)
+<a href=#1303 id=1303 data-nosnippet>1303</a>    }
+<a href=#1304 id=1304 data-nosnippet>1304</a>
+<a href=#1305 id=1305 data-nosnippet>1305</a>    <span class="doccomment">/// The smallest and largest number of values the operator takes.
+<a href=#1306 id=1306 data-nosnippet>1306</a>    </span><span class="attr">#[must_use]
+<a href=#1307 id=1307 data-nosnippet>1307</a>    </span><span class="kw">pub const fn </span>value_count(<span class="self">self</span>) -&gt; (usize, usize) {
+<a href=#1308 id=1308 data-nosnippet>1308</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#1309 id=1309 data-nosnippet>1309</a>            <span class="self">Self</span>::VersionGt
+<a href=#1310 id=1310 data-nosnippet>1310</a>            | <span class="self">Self</span>::VersionGe
+<a href=#1311 id=1311 data-nosnippet>1311</a>            | <span class="self">Self</span>::VersionLt
+<a href=#1312 id=1312 data-nosnippet>1312</a>            | <span class="self">Self</span>::VersionLe
+<a href=#1313 id=1313 data-nosnippet>1313</a>            | <span class="self">Self</span>::Gt
+<a href=#1314 id=1314 data-nosnippet>1314</a>            | <span class="self">Self</span>::Ge
+<a href=#1315 id=1315 data-nosnippet>1315</a>            | <span class="self">Self</span>::Lt
+<a href=#1316 id=1316 data-nosnippet>1316</a>            | <span class="self">Self</span>::Le =&gt; (<span class="number">1</span>, <span class="number">1</span>),
+<a href=#1317 id=1317 data-nosnippet>1317</a>            <span class="self">Self</span>::VersionBetween | <span class="self">Self</span>::Between | <span class="self">Self</span>::TimeBetween | <span class="self">Self</span>::DateBetween =&gt; (<span class="number">2</span>, <span class="number">2</span>),
+<a href=#1318 id=1318 data-nosnippet>1318</a>            <span class="self">Self</span>::IsTrue | <span class="self">Self</span>::IsFalse =&gt; (<span class="number">0</span>, <span class="number">0</span>),
+<a href=#1319 id=1319 data-nosnippet>1319</a>            <span class="kw">_ </span>=&gt; (<span class="number">1</span>, <span class="kw">super</span>::limits::MAX_VALUES_PER_CRITERION),
+<a href=#1320 id=1320 data-nosnippet>1320</a>        }
+<a href=#1321 id=1321 data-nosnippet>1321</a>    }
+<a href=#1322 id=1322 data-nosnippet>1322</a>
+<a href=#1323 id=1323 data-nosnippet>1323</a>    <span class="doccomment">/// Whether the operator is valid on a field of this class: the static
+<a href=#1324 id=1324 data-nosnippet>1324</a>    /// compatibility table of #32.
+<a href=#1325 id=1325 data-nosnippet>1325</a>    </span><span class="attr">#[must_use]
+<a href=#1326 id=1326 data-nosnippet>1326</a>    </span><span class="kw">pub const fn </span>applies_to(<span class="self">self</span>, class: FieldClass) -&gt; bool {
+<a href=#1327 id=1327 data-nosnippet>1327</a>        <span class="kw">match </span>class {
+<a href=#1328 id=1328 data-nosnippet>1328</a>            FieldClass::Hash { .. }
+<a href=#1329 id=1329 data-nosnippet>1329</a>            | FieldClass::Digest
+<a href=#1330 id=1330 data-nosnippet>1330</a>            | FieldClass::Sid
+<a href=#1331 id=1331 data-nosnippet>1331</a>            | FieldClass::SessionType
+<a href=#1332 id=1332 data-nosnippet>1332</a>            | FieldClass::Guid =&gt; {
+<a href=#1333 id=1333 data-nosnippet>1333</a>                <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals)
+<a href=#1334 id=1334 data-nosnippet>1334</a>            }
+<a href=#1335 id=1335 data-nosnippet>1335</a>            FieldClass::Path | FieldClass::FileName | FieldClass::Text =&gt; <span class="self">self</span>.is_text(),
+<a href=#1336 id=1336 data-nosnippet>1336</a>            FieldClass::PrincipalName =&gt; <span class="self">self</span>.is_text() &amp;&amp; !<span class="self">self</span>.is_regex(),
+<a href=#1337 id=1337 data-nosnippet>1337</a>            FieldClass::Version =&gt; {
+<a href=#1338 id=1338 data-nosnippet>1338</a>                <span class="self">self</span>.is_version() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals)
+<a href=#1339 id=1339 data-nosnippet>1339</a>            }
+<a href=#1340 id=1340 data-nosnippet>1340</a>            FieldClass::PrincipalSet
+<a href=#1341 id=1341 data-nosnippet>1341</a>            | FieldClass::TagSet
+<a href=#1342 id=1342 data-nosnippet>1342</a>            | FieldClass::NameSet
+<a href=#1343 id=1343 data-nosnippet>1343</a>            | FieldClass::MacSet
+<a href=#1344 id=1344 data-nosnippet>1344</a>            | FieldClass::OidSet =&gt; <span class="self">self</span>.is_set(),
+<a href=#1345 id=1345 data-nosnippet>1345</a>            FieldClass::Bool =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::IsTrue | <span class="self">Self</span>::IsFalse),
+<a href=#1346 id=1346 data-nosnippet>1346</a>            FieldClass::Number | FieldClass::IntegrityLevel =&gt; <span class="self">self</span>.is_ordered(),
+<a href=#1347 id=1347 data-nosnippet>1347</a>            FieldClass::Date =&gt; <span class="self">self</span>.is_ordered() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::DateBetween),
+<a href=#1348 id=1348 data-nosnippet>1348</a>            FieldClass::DistinguishedName =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals),
+<a href=#1349 id=1349 data-nosnippet>1349</a>            FieldClass::Ip =&gt; <span class="self">self</span>.is_network() || <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Equals | <span class="self">Self</span>::NotEquals),
+<a href=#1350 id=1350 data-nosnippet>1350</a>            FieldClass::IpSet =&gt; <span class="self">self</span>.is_network() || <span class="self">self</span>.is_set(),
+<a href=#1351 id=1351 data-nosnippet>1351</a>            FieldClass::Weekday =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::WeekdayIn),
+<a href=#1352 id=1352 data-nosnippet>1352</a>            FieldClass::TimeOfDay =&gt; <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::TimeBetween),
+<a href=#1353 id=1353 data-nosnippet>1353</a>        }
+<a href=#1354 id=1354 data-nosnippet>1354</a>    }
+<a href=#1355 id=1355 data-nosnippet>1355</a>
+<a href=#1356 id=1356 data-nosnippet>1356</a>    <span class="doccomment">/// Whether the operator is valid on this field: the class table of
+<a href=#1357 id=1357 data-nosnippet>1357</a>    /// [`Self::applies_to`].
+<a href=#1358 id=1358 data-nosnippet>1358</a>    </span><span class="attr">#[must_use]
+<a href=#1359 id=1359 data-nosnippet>1359</a>    </span><span class="kw">pub const fn </span>applies_to_field(<span class="self">self</span>, field: Field) -&gt; bool {
+<a href=#1360 id=1360 data-nosnippet>1360</a>        <span class="self">self</span>.applies_to(field.class())
+<a href=#1361 id=1361 data-nosnippet>1361</a>    }
+<a href=#1362 id=1362 data-nosnippet>1362</a>
+<a href=#1363 id=1363 data-nosnippet>1363</a>    <span class="doccomment">/// Every operator, in declaration order.
+<a href=#1364 id=1364 data-nosnippet>1364</a>    </span><span class="kw">pub const </span>ALL: [<span class="self">Self</span>; <span class="number">35</span>] = [
+<a href=#1365 id=1365 data-nosnippet>1365</a>        <span class="self">Self</span>::Equals,
+<a href=#1366 id=1366 data-nosnippet>1366</a>        <span class="self">Self</span>::NotEquals,
+<a href=#1367 id=1367 data-nosnippet>1367</a>        <span class="self">Self</span>::StartsWith,
+<a href=#1368 id=1368 data-nosnippet>1368</a>        <span class="self">Self</span>::EndsWith,
+<a href=#1369 id=1369 data-nosnippet>1369</a>        <span class="self">Self</span>::Contains,
+<a href=#1370 id=1370 data-nosnippet>1370</a>        <span class="self">Self</span>::NotContains,
+<a href=#1371 id=1371 data-nosnippet>1371</a>        <span class="self">Self</span>::Wildcard,
+<a href=#1372 id=1372 data-nosnippet>1372</a>        <span class="self">Self</span>::NotWildcard,
+<a href=#1373 id=1373 data-nosnippet>1373</a>        <span class="self">Self</span>::Regex,
+<a href=#1374 id=1374 data-nosnippet>1374</a>        <span class="self">Self</span>::NotRegex,
+<a href=#1375 id=1375 data-nosnippet>1375</a>        <span class="self">Self</span>::VersionEq,
+<a href=#1376 id=1376 data-nosnippet>1376</a>        <span class="self">Self</span>::VersionGt,
+<a href=#1377 id=1377 data-nosnippet>1377</a>        <span class="self">Self</span>::VersionGe,
+<a href=#1378 id=1378 data-nosnippet>1378</a>        <span class="self">Self</span>::VersionLt,
+<a href=#1379 id=1379 data-nosnippet>1379</a>        <span class="self">Self</span>::VersionLe,
+<a href=#1380 id=1380 data-nosnippet>1380</a>        <span class="self">Self</span>::VersionBetween,
+<a href=#1381 id=1381 data-nosnippet>1381</a>        <span class="self">Self</span>::MemberOf,
+<a href=#1382 id=1382 data-nosnippet>1382</a>        <span class="self">Self</span>::NotMemberOf,
+<a href=#1383 id=1383 data-nosnippet>1383</a>        <span class="self">Self</span>::IsTrue,
+<a href=#1384 id=1384 data-nosnippet>1384</a>        <span class="self">Self</span>::IsFalse,
+<a href=#1385 id=1385 data-nosnippet>1385</a>        <span class="self">Self</span>::Eq,
+<a href=#1386 id=1386 data-nosnippet>1386</a>        <span class="self">Self</span>::Ne,
+<a href=#1387 id=1387 data-nosnippet>1387</a>        <span class="self">Self</span>::Gt,
+<a href=#1388 id=1388 data-nosnippet>1388</a>        <span class="self">Self</span>::Ge,
+<a href=#1389 id=1389 data-nosnippet>1389</a>        <span class="self">Self</span>::Lt,
+<a href=#1390 id=1390 data-nosnippet>1390</a>        <span class="self">Self</span>::Le,
+<a href=#1391 id=1391 data-nosnippet>1391</a>        <span class="self">Self</span>::Between,
+<a href=#1392 id=1392 data-nosnippet>1392</a>        <span class="self">Self</span>::IpInCidr,
+<a href=#1393 id=1393 data-nosnippet>1393</a>        <span class="self">Self</span>::IpBetween,
+<a href=#1394 id=1394 data-nosnippet>1394</a>        <span class="self">Self</span>::IpWildcard,
+<a href=#1395 id=1395 data-nosnippet>1395</a>        <span class="self">Self</span>::AnyOf,
+<a href=#1396 id=1396 data-nosnippet>1396</a>        <span class="self">Self</span>::AllOf,
+<a href=#1397 id=1397 data-nosnippet>1397</a>        <span class="self">Self</span>::WeekdayIn,
+<a href=#1398 id=1398 data-nosnippet>1398</a>        <span class="self">Self</span>::TimeBetween,
+<a href=#1399 id=1399 data-nosnippet>1399</a>        <span class="self">Self</span>::DateBetween,
+<a href=#1400 id=1400 data-nosnippet>1400</a>    ];
+<a href=#1401 id=1401 data-nosnippet>1401</a>}
+<a href=#1402 id=1402 data-nosnippet>1402</a>
+<a href=#1403 id=1403 data-nosnippet>1403</a><span class="doccomment">/// Adds to the generated schema of [`Criterion`] what the derive cannot
+<a href=#1404 id=1404 data-nosnippet>1404</a>/// say: `is_true` and `is_false` take no values, and every other operator
+<a href=#1405 id=1405 data-nosnippet>1405</a>/// needs at least one. Validation checks the exact count per operator.
+<a href=#1406 id=1406 data-nosnippet>1406</a></span><span class="kw">fn </span>values_by_operator(schema: <span class="kw-2">&amp;mut </span>schemars::Schema) {
+<a href=#1407 id=1407 data-nosnippet>1407</a>    <span class="kw">let </span>rule = <span class="macro">serde_json::json!</span>({
+<a href=#1408 id=1408 data-nosnippet>1408</a>        <span class="string">"if"</span>: {
+<a href=#1409 id=1409 data-nosnippet>1409</a>            <span class="string">"properties"</span>: { <span class="string">"operator"</span>: { <span class="string">"enum"</span>: [<span class="string">"is_true"</span>, <span class="string">"is_false"</span>] } },
+<a href=#1410 id=1410 data-nosnippet>1410</a>            <span class="string">"required"</span>: [<span class="string">"operator"</span>]
+<a href=#1411 id=1411 data-nosnippet>1411</a>        },
+<a href=#1412 id=1412 data-nosnippet>1412</a>        <span class="string">"then"</span>: { <span class="string">"properties"</span>: { <span class="string">"values"</span>: { <span class="string">"maxItems"</span>: <span class="number">0 </span>} } },
+<a href=#1413 id=1413 data-nosnippet>1413</a>        <span class="string">"else"</span>: {
+<a href=#1414 id=1414 data-nosnippet>1414</a>            <span class="string">"properties"</span>: { <span class="string">"values"</span>: { <span class="string">"minItems"</span>: <span class="number">1 </span>} },
+<a href=#1415 id=1415 data-nosnippet>1415</a>            <span class="string">"required"</span>: [<span class="string">"values"</span>]
+<a href=#1416 id=1416 data-nosnippet>1416</a>        }
+<a href=#1417 id=1417 data-nosnippet>1417</a>    });
+<a href=#1418 id=1418 data-nosnippet>1418</a>    schema.insert(<span class="string">"allOf"</span>.to_owned(), serde_json::Value::Array(<span class="macro">vec!</span>[rule]));
+<a href=#1419 id=1419 data-nosnippet>1419</a>}
 </code></pre></div></section></main></body></html>

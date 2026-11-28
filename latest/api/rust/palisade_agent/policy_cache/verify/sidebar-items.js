@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["agent_version"],"struct":["Examination","SignedEnvelopes"],"trait":["EnvelopeVerifier"],"type":["SharedTrust"]};

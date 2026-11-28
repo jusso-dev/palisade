@@ -36,7 +36,7 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-9cda0d46.js";
+            window.path_to_searchindex_js = "../../../../searchindex-a700fb1e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../../../toc-049dbba3.js"></script>
@@ -204,7 +204,7 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
 <tr><td>Path location</td><td><code>path.drive_type</code>, <code>path.bus</code>, <code>path.is_unc</code>, <code>path.is_ads</code>, <code>path.share</code>, <code>path.user_can_change_acl</code>; the <code>%REMOVABLE%</code> and <code>%HOT%</code> variables (the roots of mounted removable and hot-pluggable volumes)</td><td>weak: say where a file is, never which file; for denies and scoping, such as "block anything on a USB disk"</td></tr>
 <tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, <code>meta.legal_copyright</code>, <code>meta.language</code>, <code>meta.file_name_fallback</code>, ...</td><td>weak: easy to copy into another file</td></tr>
-<tr><td>File and image</td><td><code>meta.file_size</code> (a number), <code>meta.pe_machine</code>, <code>meta.pe_subsystem</code>, <code>meta.is_dotnet</code> (yes or no)</td><td>weak: describe a file, never name one</td></tr>
+<tr><td>File and image</td><td><code>meta.file_size</code> (a number), <code>meta.pe_machine</code>, <code>meta.pe_subsystem</code>, <code>meta.is_dotnet</code> (yes or no), <code>meta.detected_type</code> (from the content) and <code>meta.extension_type</code> (from the name), so a rule can block a PE renamed to <code>.pdf</code></td><td>weak: describe a file, never name one</td></tr>
 <tr><td>Windows Installer</td><td><code>msi.product_code</code>, <code>msi.upgrade_code</code>, <code>msi.package_code</code> (GUIDs, compared with or without braces, in either case), <code>msi.product_name</code>, <code>msi.manufacturer</code>, <code>msi.product_version</code></td><td>weak: the package's author writes them all</td></tr>
 </tbody>
 </table>

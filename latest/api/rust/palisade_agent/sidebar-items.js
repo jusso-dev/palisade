@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["boot","cli","clock","config","control","eventlog","host","inventory","lifecycle","logfile","platform","settings","simulate","subsystem","supervisor","telemetry"]};
+window.SIDEBAR_ITEMS = {"mod":["boot","cli","clock","config","control","eventlog","host","inventory","lifecycle","logfile","platform","policy_cache","settings","simulate","subsystem","supervisor","telemetry"]};
