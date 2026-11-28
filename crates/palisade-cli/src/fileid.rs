@@ -382,8 +382,23 @@ impl Trust {
             flat_algorithms: AlgorithmSet::DEFAULT | AlgorithmSet::SHA384 | AlgorithmSet::SHA512,
             hash_options: HashOptions::default(),
             max_in_memory: identity::MAX_IN_MEMORY,
+            content_rules: Some(builtin_rules()),
         }
     }
+}
+
+/// The built-in content tagging rules (#44). The CLI takes no organisation
+/// rules.
+fn builtin_rules() -> &'static palisade_fileid::tags::ContentRules {
+    static RULES: std::sync::OnceLock<palisade_fileid::tags::ContentRules> =
+        std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        #[expect(
+            clippy::expect_used,
+            reason = "the built-in rules are fixed and compiled by palisade-fileid's own tests"
+        )]
+        palisade_fileid::tags::ContentRules::new(None).expect("the built-in content rules compile")
+    })
 }
 
 /// The time the CLI checks signatures at. `pal fileid` is a one-shot

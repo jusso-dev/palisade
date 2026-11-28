@@ -85,11 +85,11 @@ fn scrub(v: &mut Value) {
                     o.insert(key.to_owned(), Value::String("<scrubbed>".to_owned()));
                 }
             }
-            if o.contains_key("timestamps") {
-                o.insert(
-                    "timestamps".to_owned(),
-                    Value::String("<scrubbed>".to_owned()),
-                );
+            // Times, and the OS cross-check (computed on Windows only).
+            for key in ["timestamps", "os_cross_check"] {
+                if o.contains_key(key) {
+                    o.insert(key.to_owned(), Value::String("<scrubbed>".to_owned()));
+                }
             }
             for (_, child) in o.iter_mut() {
                 scrub(child);

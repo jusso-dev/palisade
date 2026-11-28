@@ -9,6 +9,9 @@
     "trust"
   ],
   "content_sha256": "db0e2ef876ba59070a9579a660a88e2ffaa6f4233ea2c4ccd56149017dad9f56",
+  "content_tags": {
+    "status": "not_requested"
+  },
   "derived": {
     "effective_file_name": {
       "source": "original_file_name",
@@ -119,6 +122,7 @@
     "stream": null
   },
   "name_hint": null,
+  "os_cross_check": "<scrubbed>",
   "package": {
     "status": "not_requested"
   },

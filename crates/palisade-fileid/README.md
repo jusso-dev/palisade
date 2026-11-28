@@ -634,6 +634,11 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     only when a catalog lookup ran and can prove a miss; a format whose
     signatures are not read, and a script or installer no catalog lists, is
     `unverified`.
+  - The deep tier also tags content (`content_tags`, #44, with the
+    `content-rules` feature). The trust tier of a file on disk records the
+    OS trust-verification API's verdict next to this crate's
+    (`os_cross_check`, Windows with `os-trust`): a diagnostic that no
+    verdict reads (ADR 0018).
   - `hashes.msi_normalised_sha256` (Medium) and
     `hashes.script_normalised_sha256` (Weak) are the tolerant identities of
     #53 and #52, for explicit opt-in rules only.

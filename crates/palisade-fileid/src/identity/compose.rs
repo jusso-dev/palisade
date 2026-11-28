@@ -31,11 +31,12 @@ use crate::script::{
 use super::masquerade;
 use super::protected::ProtectedList;
 use super::record::{
-    AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary, Derived,
-    EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdentity, FsInfo,
-    Hashes, InstallerSummary, KindSummary, ManifestSummary, MotwSummary, PackageSummary, PathInfo,
-    PdbSummary, PeSummary, PublisherProduct, ScriptSummary, SectionSummary, SignatureSummary,
-    SigningState, SigningStateKind, Timestamps, TrustSource, TrustedSigner, VersionSummary,
+    AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary,
+    ContentTagsSummary, Derived, EffectiveName, ElevationSummary, EmbeddedState, ExportSummary,
+    Field, FileIdentity, FsInfo, Hashes, InstallerSummary, KindSummary, ManifestSummary,
+    MotwSummary, PackageSummary, PathInfo, PdbSummary, PeSummary, PublisherProduct, ScriptSummary,
+    SectionSummary, SignatureSummary, SigningState, SigningStateKind, Timestamps, TrustSource,
+    TrustedSigner, VersionSummary,
 };
 use super::strength;
 use super::tier::{Tier, Tiers};
@@ -75,6 +76,11 @@ pub struct IdentityContext<'a> {
     /// metadata and signatures are not read; their hashes are still
     /// streamed. Default [`MAX_IN_MEMORY`].
     pub max_in_memory: u64,
+    /// The content tagging rules the deep tier scans with (#44): the
+    /// built-in set, plus the organisation's from policy. `None` leaves
+    /// the tags unavailable.
+    #[cfg(feature = "content-rules")]
+    pub content_rules: Option<&'a crate::tags::ContentRules>,
 }
 
 impl IdentityContext<'_> {
@@ -101,8 +107,23 @@ impl IdentityContext<'_> {
             flat_algorithms: AlgorithmSet::DEFAULT,
             hash_options: HashOptions::default(),
             max_in_memory: MAX_IN_MEMORY,
+            #[cfg(feature = "content-rules")]
+            content_rules: Some(builtin_content_rules()),
         }
     }
+}
+
+/// The built-in content tagging rules, compiled once.
+#[cfg(feature = "content-rules")]
+fn builtin_content_rules() -> &'static crate::tags::ContentRules {
+    static RULES: std::sync::OnceLock<crate::tags::ContentRules> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        #[expect(
+            clippy::expect_used,
+            reason = "the built-in rules are fixed and compiled by the tags module's own tests"
+        )]
+        crate::tags::ContentRules::new(None).expect("the built-in content rules compile")
+    })
 }
 
 /// Why [`identify`] produced no record at all. Anything after the file is
@@ -165,7 +186,10 @@ pub fn identify(
     id.computed_tiers.insert(Tier::Stat);
 
     let content = Content::read(&mut file, len, tiers, ctx, &mut id);
-    compose(&mut id, content, tiers, ctx);
+    let pe_report = compose(&mut id, content, tiers, ctx);
+    if tiers.contains(Tier::Trust) {
+        id.os_cross_check = os_cross_check(&file, path, pe_report.as_ref());
+    }
     context_tier(&mut id, &file, tiers, ctx);
     finish(&mut id, ctx);
     Ok(id)
@@ -191,7 +215,11 @@ pub fn identify_bytes(
     id.computed_tiers.insert(Tier::Stat);
     let mut cursor = io::Cursor::new(bytes);
     let content = Content::read(&mut cursor, len, tiers, ctx, &mut id);
-    compose(&mut id, content, tiers, ctx);
+    let _ = compose(&mut id, content, tiers, ctx);
+    if tiers.contains(Tier::Trust) {
+        // The OS verifies files on disk, not uploads.
+        id.os_cross_check = Field::NotApplicable;
+    }
     if tiers.contains(Tier::Context) {
         id.fs.not_applicable_context();
     }
@@ -355,7 +383,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// The classify, hash and trust tiers.
-fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &IdentityContext<'_>) {
+/// Returns the PE image's signature report, when the trust tier read one,
+/// for the OS cross-check.
+fn compose(
+    id: &mut FileIdentity,
+    content: Content,
+    tiers: Tiers,
+    ctx: &IdentityContext<'_>,
+) -> Option<SignatureReport> {
     let info = content.bytes.as_deref().map(pe::parse);
     let pe_info = match &info {
         Some(Ok(p)) => Some(p),
@@ -444,13 +479,16 @@ fn compose(id: &mut FileIdentity, content: Content, tiers: Tiers, ctx: &Identity
         id.computed_tiers.insert(Tier::Hash);
     }
 
-    if tiers.contains(Tier::Trust) {
-        trust_tier(id, &content, pe_info, non_pe.as_ref(), ctx);
-    }
+    let pe_report = if tiers.contains(Tier::Trust) {
+        trust_tier(id, &content, pe_info, non_pe.as_ref(), ctx)
+    } else {
+        None
+    };
 
     if tiers.contains(Tier::Deep) {
         deep_tier(id, &content, is_pe, non_pe.as_ref(), ctx);
     }
+    pe_report
 }
 
 /// A non-PE format this crate reads signatures and identity from.
@@ -565,14 +603,14 @@ fn trust_tier(
     pe_info: Option<&PeInfo>,
     non_pe: Option<&NonPe>,
     ctx: &IdentityContext<'_>,
-) {
+) -> Option<SignatureReport> {
     let Some(hashes) = &content.hashes else {
         let why = "the trust tier needs the file's digests, which were not computed";
         id.signing_state = Field::Unavailable(why.to_owned());
         id.signatures = Field::Unavailable(why.to_owned());
         id.catalog_matches = Field::Unavailable(why.to_owned());
         id.error(Tier::Trust, "no_digests", why);
-        return;
+        return None;
     };
     let version = pe_info.and_then(|p| p.version_info.as_ref());
 
@@ -1037,6 +1075,8 @@ fn trust_tier(
     if id.signatures.is_computed() || (content.bytes.is_some() && pe_info.is_none()) {
         id.computed_tiers.insert(Tier::Trust);
     }
+    sigs.filter(|_| pe_info.is_some())
+        .map(|(report, _, _)| report)
 }
 
 /// Whether a catalog signer's chain is revoked, or its revocation state is
@@ -1782,11 +1822,17 @@ fn deep_tier(
     non_pe: Option<&NonPe>,
     ctx: &IdentityContext<'_>,
 ) {
-    let _ = ctx;
     const NOT_READ: &str = "the content could not be read";
     id.installer = Field::NotApplicable;
     id.package = Field::NotApplicable;
     id.script = Field::NotApplicable;
+    id.content_tags = content_tags(content.bytes.as_deref(), ctx);
+    if let Field::Unavailable(why) = &id.content_tags
+        && content.bytes.is_some()
+    {
+        let why = why.clone();
+        id.error(Tier::Deep, "content_tags_unavailable", why);
+    }
     if content.bytes.is_none() {
         // Too large to read, or a read that failed: what it is may still
         // be one of these, so nothing is "not applicable".
@@ -1808,9 +1854,12 @@ fn deep_tier(
         }
         return;
     }
-    // A PE image has no record here; its deep-tier content tags are not
-    // run yet, so the tier is not marked computed for it.
+    // A PE image has no installer, package or script record; its deep
+    // tier is its content tags.
     if is_pe {
+        if id.content_tags.is_computed() {
+            id.computed_tiers.insert(Tier::Deep);
+        }
         return;
     }
     match non_pe {
@@ -1827,9 +1876,104 @@ fn deep_tier(
         }
         None => {}
     }
-    if id.installer.is_computed() || id.package.is_computed() || id.script.is_computed() {
+    if id.installer.is_computed()
+        || id.package.is_computed()
+        || id.script.is_computed()
+        || id.content_tags.is_computed()
+    {
         id.computed_tiers.insert(Tier::Deep);
     }
+}
+
+/// The OS trust-verification API's verdict on the opened file's embedded
+/// signatures, compared with this library's (#48). Diagnostic only (ADR
+/// 0018): it is recorded and never read to decide. Only a PE image's
+/// signatures are compared.
+#[cfg(all(windows, feature = "os-trust"))]
+fn os_cross_check(
+    file: &std::fs::File,
+    path: &Path,
+    report: Option<&SignatureReport>,
+) -> Field<super::record::OsCrossCheckSummary> {
+    let Some(report) = report else {
+        return Field::NotApplicable;
+    };
+    match crate::win::trust::verify_file(file, path) {
+        Ok(os) => Field::Computed(cross_check_summary(&crate::authenticode::cross_check(
+            report, &os,
+        ))),
+        Err(e) => Field::Unavailable(e.to_string()),
+    }
+}
+
+#[cfg(not(all(windows, feature = "os-trust")))]
+fn os_cross_check(
+    _file: &std::fs::File,
+    _path: &Path,
+    report: Option<&SignatureReport>,
+) -> Field<super::record::OsCrossCheckSummary> {
+    match report {
+        None => Field::NotApplicable,
+        Some(_) if cfg!(windows) => {
+            Field::Unavailable("built without the os-trust feature".to_owned())
+        }
+        Some(_) => Field::Unavailable("the OS trust-verification API is Windows only".to_owned()),
+    }
+}
+
+/// The record's form of a cross-check. Kept apart from the OS call so it is
+/// tested on every OS.
+#[cfg_attr(not(all(windows, feature = "os-trust")), allow(dead_code))]
+fn cross_check_summary(c: &crate::authenticode::CrossCheck) -> super::record::OsCrossCheckSummary {
+    use crate::authenticode::Outcome;
+    super::record::OsCrossCheckSummary {
+        agrees: c.agrees(),
+        comparisons: c
+            .comparisons
+            .iter()
+            .map(|x| super::record::OsComparisonSummary {
+                os_index: x.os_index,
+                os_code: x.os.as_ref().map(|o| o.code),
+                outcome: match x.outcome {
+                    Outcome::Agree => "agree",
+                    Outcome::OsAcceptsRustRejects => "os_accepts_rust_rejects",
+                    Outcome::RustAcceptsOsRejects => "rust_accepts_os_rejects",
+                    Outcome::OnlyOs => "only_os",
+                    Outcome::OnlyRust => "only_rust",
+                    Outcome::NotComparable => "not_comparable",
+                }
+                .to_owned(),
+            })
+            .collect(),
+        secondary_count_differs: c.secondary_count_differs,
+    }
+}
+
+/// The content tags of `bytes` (#44). A file too large to be held in memory
+/// is not tagged here: the scan would need another read of the file.
+#[cfg(feature = "content-rules")]
+fn content_tags(bytes: Option<&[u8]>, ctx: &IdentityContext<'_>) -> Field<ContentTagsSummary> {
+    let Some(rules) = ctx.content_rules else {
+        return Field::Unavailable("no content rules in the context".to_owned());
+    };
+    let Some(bytes) = bytes else {
+        return Field::Unavailable("the file was not read into memory".to_owned());
+    };
+    let report = crate::tags::scan_bytes(bytes, rules, &crate::tags::ScanLimits::default());
+    Field::Computed(ContentTagsSummary {
+        tags: report.tags.clone(),
+        complete: report.status == crate::tags::ScanStatus::Complete,
+        builtin_version: report.builtin_version,
+        rules_version: report.rules_version,
+        rules_digest: report
+            .rules_digest
+            .map(|d| d.iter().map(|b| format!("{b:02x}")).collect()),
+    })
+}
+
+#[cfg(not(feature = "content-rules"))]
+fn content_tags(_bytes: Option<&[u8]>, _ctx: &IdentityContext<'_>) -> Field<ContentTagsSummary> {
+    Field::Unavailable("built without the content-rules feature".to_owned())
 }
 
 fn script_summary(r: &ScriptReport) -> ScriptSummary {
@@ -2027,6 +2171,43 @@ fn signing_state_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The OS cross-check is a diagnostic (ADR 0018): the record's summary
+    /// keeps an OS rejection of a signature this library accepts, as a
+    /// disagreement, for reading only.
+    #[test]
+    fn os_cross_check_summary_keeps_disagreements() {
+        use crate::authenticode::{
+            AuthenticodeStatus, CrossCheck, OsSignatureResult, OsTrustResult, Outcome, code,
+            cross_check,
+        };
+        let report = SignatureReport {
+            entries: Vec::new(),
+            signatures: Vec::new(),
+            primary: None,
+            signing_state: EmbeddedSigning::Unsigned,
+            tolerate_digest_mismatch: false,
+            image_status: AuthenticodeStatus::Conformant,
+            warnings: Vec::new(),
+        };
+        let os = OsTrustResult {
+            signatures: vec![OsSignatureResult {
+                index: 0,
+                code: code::TRUST_E_BAD_DIGEST,
+            }],
+            secondary_count: 0,
+            truncated: false,
+        };
+        let check: CrossCheck = cross_check(&report, &os);
+        assert_eq!(check.comparisons[0].outcome, Outcome::OnlyOs);
+        let summary = cross_check_summary(&check);
+        assert!(!summary.agrees);
+        assert_eq!(summary.comparisons[0].outcome, "only_os");
+        assert_eq!(
+            summary.comparisons[0].os_code,
+            Some(code::TRUST_E_BAD_DIGEST)
+        );
+    }
 
     #[test]
     fn signing_state_never_trusts_without_a_usable_signer() {
