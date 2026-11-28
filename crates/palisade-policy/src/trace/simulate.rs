@@ -603,6 +603,9 @@ impl FactsSnapshot {
             // Nor probed facts (#329): an `env.*`, `reg.*` or `fs.*`
             // criterion is unknown in a replay.
             probes: crate::context::Probes::default(),
+            // Nor the command line, which snapshots do not record for
+            // privacy (#18): a `process.*` criterion is unknown in a replay.
+            process: crate::context::ProcessContext::default(),
         };
         Ok(Inputs {
             facts,

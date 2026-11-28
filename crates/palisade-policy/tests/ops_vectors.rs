@@ -8,7 +8,9 @@ use std::fs;
 use std::path::Path;
 
 use palisade_core::path::VolumeMap;
-use palisade_policy::context::{Date, EvaluationContext, IntegrityLevel, Probe, Weekday};
+use palisade_policy::context::{
+    Date, EvaluationContext, IntegrityLevel, Probe, ProcessContext, Weekday,
+};
 use palisade_policy::facts::{ObjectFacts, PathFact, PathVariables};
 use palisade_policy::model::{ActionKind, Criterion};
 use palisade_policy::ops::net::{parse_ip, parse_mac};
@@ -73,6 +75,9 @@ fn context(table: Option<&toml::Value>) -> EvaluationContext {
             "time.weekday" => ctx.time.weekday = Some(Weekday::from_name(&text()).unwrap()),
             "time.minute" => ctx.time.minute_of_day = Some(u16::try_from(number()).unwrap()),
             "time.date" => ctx.time.date = Some(Date::parse(&text()).unwrap()),
+            "process.command_line" => {
+                ctx.process = ProcessContext::with_command_line(text());
+            }
             other => panic!("unknown context key `{other}`"),
         }
     }

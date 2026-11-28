@@ -138,6 +138,7 @@ fn full() -> EvaluationContext {
                 None,
                 crate::context::Probe::Present,
             ),
+        process: crate::context::ProcessContext::with_command_line("a.exe x"),
         ..EvaluationContext::default()
     }
 }
@@ -203,7 +204,7 @@ fn negated(c: &Criterion) -> Option<Criterion> {
 fn every_context_field_is_unknown_when_not_collected() {
     let empty = EvaluationContext::new();
     let fields: Vec<Field> = Field::ALL.into_iter().filter(|f| f.is_context()).collect();
-    assert_eq!(fields.len(), 45);
+    assert_eq!(fields.len(), 47);
     for field in fields {
         let c = sample(field);
         for c in std::iter::once(c.clone()).chain(negated(&c)) {

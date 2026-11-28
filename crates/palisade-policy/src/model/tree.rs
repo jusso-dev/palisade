@@ -152,6 +152,12 @@ pub struct Criterion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = 2048))]
     pub value_name: Option<String>,
+    /// Only for `process.argv`: the argument tested, from the start (0 is
+    /// the program name) or, when negative, from the end (-1 is the last).
+    /// Unset means any argument after the program name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = -255, max = 255))]
+    pub arg_index: Option<i16>,
 }
 
 impl Criterion {
@@ -175,6 +181,7 @@ impl Criterion {
             signer: None,
             target: None,
             value_name: None,
+            arg_index: None,
         }
     }
 
@@ -714,6 +721,19 @@ pub enum Field {
     /// as `fs.file`.
     #[serde(rename = "fs.folder")]
     FsFolder,
+    /// Context (#329): the command line the process was started with, as
+    /// the agent captured it at creation. Attacker-controlled: whoever
+    /// starts a process chooses its arguments, so it can only narrow a
+    /// rule.
+    #[serde(rename = "process.command_line")]
+    ProcessCommandLine,
+    /// Context (#329): the process's arguments, split as
+    /// `CommandLineToArgvW` splits them. With `arg_index`, the argument at
+    /// that position (0 is the program name, -1 the last); without it, any
+    /// argument after the program name. Attacker-controlled, as
+    /// `process.command_line`.
+    #[serde(rename = "process.argv")]
+    ProcessArgv,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -821,7 +841,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 97] = [
+    pub const ALL: [Self; 99] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -919,6 +939,8 @@ impl Field {
         Self::RegValue,
         Self::FsFile,
         Self::FsFolder,
+        Self::ProcessCommandLine,
+        Self::ProcessArgv,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -1071,6 +1093,7 @@ impl Field {
             Self::SignerEku => FieldClass::OidSet,
             Self::RegKey | Self::FsFile | Self::FsFolder => FieldClass::Presence,
             Self::EnvVar | Self::RegValue => FieldClass::ProbeValue,
+            Self::ProcessCommandLine | Self::ProcessArgv => FieldClass::Text,
         }
     }
 
@@ -1196,7 +1219,9 @@ impl Field {
             | Self::RegKey
             | Self::RegValue
             | Self::FsFile
-            | Self::FsFolder => return None,
+            | Self::FsFolder
+            | Self::ProcessCommandLine
+            | Self::ProcessArgv => return None,
         })
     }
 }

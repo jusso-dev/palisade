@@ -280,11 +280,16 @@ pub fn canonical_target(field: Field, target: &str) -> Result<String, String> {
 }
 
 /// Whether a criterion reads context a user controls (#33, #329): every
-/// `env.*` and `fs.*` criterion, and a `reg.*` criterion outside `HKLM`.
+/// `env.*`, `fs.*` and `process.*` criterion (whoever starts a process
+/// chooses its command line), and a `reg.*` criterion outside `HKLM`.
 #[must_use]
 pub fn is_user_controlled(c: &Criterion) -> bool {
     match c.field {
-        Field::EnvVar | Field::FsFile | Field::FsFolder => true,
+        Field::EnvVar
+        | Field::FsFile
+        | Field::FsFolder
+        | Field::ProcessCommandLine
+        | Field::ProcessArgv => true,
         Field::RegKey | Field::RegValue => {
             let hive = c
                 .target

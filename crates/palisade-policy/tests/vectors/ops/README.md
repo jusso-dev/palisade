@@ -21,7 +21,7 @@ A criterion that must not compile has `error = "<kind>"` instead of a fact and `
 
 Context keys are `user.groups`, `user.dn`, `user.integrity_level`, `device.os_build`, `device.dn`,
 `session.id`, `session.client_ip`, `net.ip`, `net.mac`, `net.dns_suffix`, `net.locations`, `time.weekday`,
-`time.minute` and `time.date`.
+`time.minute`, `time.date` and `process.command_line` (which also sets the split arguments).
 
 For a probed field (`env.var`, `reg.key`, `reg.value`, `fs.file`, `fs.folder`, #329), `probe` says what the agent
 found at the criterion's `target`: `"absent"`, `"present"`, `"other"` (a value no operator compares), a string, or a

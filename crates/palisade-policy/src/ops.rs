@@ -563,6 +563,8 @@ pub struct CompiledCriterion {
     /// The [`probe_key`](crate::context::probe::probe_key) of a probed
     /// field's target (#329).
     probe: Option<String>,
+    /// `arg_index`, for `process.argv` (#329).
+    arg_index: Option<i16>,
     values: Values,
 }
 
@@ -725,6 +727,7 @@ impl CompiledCriterion {
             safety_critical: c.safety_critical,
             signer: signer::compile_options(c),
             probe,
+            arg_index: c.arg_index,
             values,
         })
     }
@@ -963,6 +966,20 @@ impl CompiledCriterion {
                 result
             }
             (ContextFact::Text(fact), _) => self.eval_value(fact, notes),
+            (ContextFact::Args(args), _) => match self.arg_index {
+                // A position: no argument there is nothing to compare, so no
+                // comparison holds, and its negation does.
+                Some(i) => match crate::context::cmdline::arg_at(args, i) {
+                    Some(arg) => self.eval_value(arg, notes),
+                    None => Tri::NoMatch,
+                },
+                // Any argument after the program name.
+                None => args
+                    .iter()
+                    .skip(1)
+                    .map(|a| self.eval_value(a, notes))
+                    .fold(Tri::NoMatch, Tri::or),
+            },
             // A fact of another shape than the field's values: the
             // collector produced something this field does not hold.
             _ => {
@@ -1374,6 +1391,12 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
         out.push(CompileErrorKind::OptionNotApplicable(
             "target",
             "`env.var`, `reg.key`, `reg.value`, `fs.file` and `fs.folder`",
+        ));
+    }
+    if c.arg_index.is_some() && c.field != Field::ProcessArgv {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "arg_index",
+            "`process.argv`",
         ));
     }
     if c.value_name.is_some() && c.field != Field::RegValue {

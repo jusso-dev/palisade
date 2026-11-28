@@ -351,3 +351,35 @@ fn write_bundle_delta_fuzz_seeds() {
     other.base_bundle_hash = [0; 32];
     fs::write(dir.join("seed-delta-base"), other.to_bytes().unwrap()).unwrap();
 }
+
+/// The command lines of the operator vectors, and a few awkward shapes:
+/// quotes, backslashes and white space at the edges (#329).
+#[test]
+#[ignore = "writes files; run on demand to seed the fuzz corpus"]
+fn write_cmdline_fuzz_seeds() {
+    let dir = seed_dir();
+    let vectors =
+        fs::read_to_string(manifest_dir().join("tests/vectors/ops/cmdline.toml")).unwrap();
+    let table: toml::Table = vectors.parse().unwrap();
+    let mut lines: Vec<String> = table["case"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.get("context")?.get("process.command_line")?.as_str())
+        .map(str::to_owned)
+        .collect();
+    lines.extend(
+        [
+            "",
+            " ",
+            "\"",
+            "\"\"\"",
+            r#"a "b\\\"c" "d""e""#,
+            "a\t\tb  \\\\\\\"",
+        ]
+        .map(str::to_owned),
+    );
+    for (i, line) in lines.iter().enumerate() {
+        fs::write(dir.join(format!("seed-{i}")), line).unwrap();
+    }
+}

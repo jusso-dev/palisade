@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::Field;
 use crate::scope::ScopeFacts;
 
+pub mod cmdline;
 pub mod probe;
 pub use probe::{Probe, ProbeTarget, Probes, probe_targets};
 
@@ -51,6 +52,36 @@ pub struct EvaluationContext {
     /// values, files and folders the policy probes (#329,
     /// [`probe_targets`]).
     pub probes: Probes,
+    /// The process being started: its command line (#329).
+    pub process: ProcessContext,
+}
+
+/// The process a decision is about, as the agent saw it at creation (#8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessContext {
+    /// The command line, exactly as captured.
+    pub command_line: Option<String>,
+    /// Its arguments, split by [`cmdline::split_args`]. Set together with
+    /// `command_line` by [`ProcessContext::with_command_line`].
+    pub args: Option<Vec<String>>,
+}
+
+impl ProcessContext {
+    /// No process facts: every `process.*` criterion is unknown.
+    pub const EMPTY: Self = Self {
+        command_line: None,
+        args: None,
+    };
+
+    /// The command line, and its arguments split from it.
+    #[must_use]
+    pub fn with_command_line(command_line: impl Into<String>) -> Self {
+        let command_line = command_line.into();
+        Self {
+            args: Some(cmdline::split_args(&command_line)),
+            command_line: Some(command_line),
+        }
+    }
 }
 
 /// The user the process runs as, from its token and the directory.
@@ -444,6 +475,8 @@ pub(crate) enum ContextFact<'a> {
     Weekday(Weekday),
     /// Minutes since midnight.
     Minute(u16),
+    /// The arguments of a command line (#329).
+    Args(&'a [String]),
     /// A date.
     Date(Date),
 }
@@ -508,6 +541,7 @@ impl EvaluationContext {
             date: None,
         },
         probes: Probes::EMPTY,
+        process: ProcessContext::EMPTY,
     };
 
     /// No facts at all: every context criterion evaluates to unknown.
@@ -583,6 +617,8 @@ impl EvaluationContext {
                 .filter(|m| *m < 24 * 60)
                 .map(ContextFact::Minute),
             Field::TimeDate => t.date.map(ContextFact::Date),
+            Field::ProcessCommandLine => text(&self.process.command_line),
+            Field::ProcessArgv => self.process.args.as_deref().map(ContextFact::Args),
             _ => None,
         }
     }

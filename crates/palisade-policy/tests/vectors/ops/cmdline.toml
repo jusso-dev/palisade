@@ -1,0 +1,101 @@
+# Command-line criteria (#329): `process.command_line` tests the whole
+# command line, `process.argv` the arguments split as CommandLineToArgvW
+# splits them. Text is compared without case by default.
+
+[[case]]
+name = "the command line contains"
+criterion = { field = "process.command_line", operator = "contains", values = ["-EncodedCommand"] }
+context = { "process.command_line" = 'powershell.exe -encodedcommand SQBFAFgA' }
+expect = "match"
+
+[[case]]
+name = "the command line, case-sensitive"
+criterion = { field = "process.command_line", operator = "contains", values = ["-EncodedCommand"], case_sensitive = true }
+context = { "process.command_line" = 'powershell.exe -encodedcommand SQBFAFgA' }
+expect = "no_match"
+
+[[case]]
+name = "a regular expression on the command line, unanchored"
+criterion = { field = "process.command_line", operator = "regex", values = ['\s-(e|en|enc)\s'], anchored = false }
+context = { "process.command_line" = 'powershell.exe -enc SQBFAFgA' }
+expect = "match"
+
+[[case]]
+name = "no command line captured is unknown"
+criterion = { field = "process.command_line", operator = "contains", values = ["x"] }
+expect = "unknown"
+
+[[case]]
+name = "and so is its negation"
+criterion = { field = "process.command_line", operator = "not_contains", values = ["x"] }
+expect = "unknown"
+
+[[case]]
+name = "any argument after the program name"
+criterion = { field = "process.argv", operator = "equals", values = ["-s"] }
+context = { "process.command_line" = 'shutdown.exe -s -t 0' }
+expect = "match"
+
+[[case]]
+name = "the program name is not an argument"
+criterion = { field = "process.argv", operator = "equals", values = ["shutdown.exe"] }
+context = { "process.command_line" = 'shutdown.exe -r -t 30' }
+expect = "no_match"
+
+[[case]]
+name = "not_equals means no argument equals"
+criterion = { field = "process.argv", operator = "not_equals", values = ["-s"] }
+context = { "process.command_line" = 'shutdown.exe -r -t 30' }
+expect = "match"
+
+[[case]]
+name = "an argument by position"
+criterion = { field = "process.argv", operator = "equals", arg_index = 1, values = ["-r"] }
+context = { "process.command_line" = 'shutdown.exe -r -t 30' }
+expect = "match"
+
+[[case]]
+name = "the program name at position 0"
+criterion = { field = "process.argv", operator = "ends_with", arg_index = 0, values = ['\shutdown.exe'] }
+context = { "process.command_line" = '"C:\Windows\System32\shutdown.exe" -r' }
+expect = "match"
+
+[[case]]
+name = "the last argument"
+criterion = { field = "process.argv", operator = "equals", arg_index = -1, values = ["30"] }
+context = { "process.command_line" = 'shutdown.exe -r -t 30' }
+expect = "match"
+
+[[case]]
+name = "a position past the end compares nothing"
+criterion = { field = "process.argv", operator = "equals", arg_index = 9, values = ["x"] }
+context = { "process.command_line" = 'shutdown.exe -r' }
+expect = "no_match"
+
+[[case]]
+name = "a quoted argument is one argument"
+criterion = { field = "process.argv", operator = "equals", arg_index = 1, values = ['C:\Program Files\x.txt'] }
+context = { "process.command_line" = 'notepad.exe "C:\Program Files\x.txt"' }
+expect = "match"
+
+[[case]]
+name = "escaped quotes are split as the C runtime does"
+criterion = { field = "process.argv", operator = "equals", arg_index = 1, values = ['a"b'] }
+context = { "process.command_line" = 'x.exe a\"b' }
+expect = "match"
+
+[[case]]
+name = "a wildcard on any argument"
+criterion = { field = "process.argv", operator = "wildcard", values = ["-urlcache*"] }
+context = { "process.command_line" = 'certutil.exe -urlcache -f http://x/y z' }
+expect = "match"
+
+[[case]]
+name = "no command line, no arguments: unknown"
+criterion = { field = "process.argv", operator = "not_equals", values = ["-s"] }
+expect = "unknown"
+
+[[case]]
+name = "arg_index only on process.argv"
+criterion = { field = "process.command_line", operator = "contains", arg_index = 1, values = ["x"] }
+error = "option_not_applicable"

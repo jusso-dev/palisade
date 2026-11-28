@@ -125,7 +125,7 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
     }
     // A probed field (#329) tests what its target names: two targets are
     // two facts.
-    if a.target != b.target || a.value_name != b.value_name {
+    if a.target != b.target || a.value_name != b.value_name || a.arg_index != b.arg_index {
         return false;
     }
     let class = a.field.class();
