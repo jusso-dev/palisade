@@ -141,6 +141,10 @@ const POLICY_AT_REST_SEEDS: Seed = Seed {
     test: "policy_at_rest",
     name: "write_policy_at_rest_fuzz_seeds",
 };
+const COMMS_SEEDS: Seed = Seed {
+    test: "comms",
+    name: "write_comms_fuzz_seeds",
+};
 const POLICY_JSON_SEEDS: Seed = Seed {
     test: "fuzz_seeds",
     name: "write_policy_json_fuzz_seeds",
@@ -304,6 +308,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "sntp_reply",
                 dict: None,
                 seeds: &[SNTP_SEEDS],
+            },
+            Target {
+                name: "comms_messages",
+                dict: None,
+                seeds: &[COMMS_SEEDS],
             },
         ],
     },

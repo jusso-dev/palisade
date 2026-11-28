@@ -1450,6 +1450,7 @@ dependencies = [
 name = "palisade-proto"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "boon",
  "insta",
  "palisade-core",
@@ -1463,6 +1464,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "zeroize",
 ]
 
 [[package]]

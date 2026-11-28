@@ -229,6 +229,32 @@ fn domain_prefixes_are_distinct_and_nul_terminated() {
     assert!(!Domain::Policy.signed_by(KeyPurpose::RootCa));
     assert!(Domain::Unlock.signed_by(KeyPurpose::UnlockToken));
     assert!(!Domain::Unlock.signed_by(KeyPurpose::TrustSet));
+    // Only device keys sign enrolment proofs, and they are not in the
+    // inventory, so no purpose may.
+    for purpose in KeyPurpose::ALL {
+        assert!(!Domain::Enrol.signed_by(*purpose), "{purpose}");
+    }
+}
+
+#[test]
+fn no_signer_key_or_trust_set_key_serves_the_enrolment_domain() {
+    let mut signer = SoftwareSigner::new();
+    let root = signer
+        .generate(KeyPurpose::RootCa, SignatureAlgorithm::EcdsaP384Sha384)
+        .unwrap();
+    assert_eq!(
+        signer.sign(&root, Domain::Enrol, b"x"),
+        Err(SignerError::WrongPurpose {
+            purpose: KeyPurpose::RootCa,
+            domain: Domain::Enrol
+        })
+    );
+    let set = TrustSet::new(1, now(), &[SignatureAlgorithm::EcdsaP384Sha384]).unwrap();
+    let sig = Signature::new(root, SignatureAlgorithm::EcdsaP384Sha384, vec![0; 96]).unwrap();
+    assert_eq!(
+        set.verify(Domain::Enrol, b"x", &sig, now(), SkewTolerance::DEFAULT),
+        Err(VerifyError::UnknownKey(root))
+    );
 }
 
 // ---------------------------------------------------------------------------

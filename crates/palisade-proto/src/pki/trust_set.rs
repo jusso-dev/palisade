@@ -233,11 +233,15 @@ impl List {
         }
     }
 
-    const fn for_domain(domain: Domain) -> Self {
+    /// The list whose keys sign for `domain`. `None` for a domain no
+    /// trust-set key signs: device keys sign enrolment proofs, and no list
+    /// holds them.
+    const fn for_domain(domain: Domain) -> Option<Self> {
         match domain {
-            Domain::TrustSet => Self::Trust,
-            Domain::Policy => Self::Policy,
-            Domain::Unlock => Self::Unlock,
+            Domain::TrustSet => Some(Self::Trust),
+            Domain::Policy => Some(Self::Policy),
+            Domain::Unlock => Some(Self::Unlock),
+            Domain::Enrol => None,
         }
     }
 }
@@ -455,9 +459,10 @@ impl TrustSet {
 
     fn listed(&self, domain: Domain, kid: &Kid) -> Result<&TrustedKey, VerifyError> {
         let map = match List::for_domain(domain) {
-            List::Trust => &self.trust_keys,
-            List::Policy => &self.policy_keys,
-            List::Unlock => &self.unlock_keys,
+            Some(List::Trust) => &self.trust_keys,
+            Some(List::Policy) => &self.policy_keys,
+            Some(List::Unlock) => &self.unlock_keys,
+            None => return Err(VerifyError::UnknownKey(*kid)),
         };
         map.get(kid).ok_or(VerifyError::UnknownKey(*kid))
     }

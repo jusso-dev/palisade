@@ -15,6 +15,8 @@
 //! - [`lifecycle`]: renewal, expiry-alert and rotation-overlap schedules,
 //!   and trust-version adoption.
 //! - [`time`]: validity windows with clock-skew tolerance, and the clock.
+//! - [`leaf_key`]: the software device key: enrolment proofs of possession
+//!   and TLS handshake signatures (#223).
 //! - `issue` (feature `issuance`): X.509 certificates and revocation lists
 //!   for the CA hierarchy, signed through a [`Signer`].
 //!
@@ -29,6 +31,7 @@ pub(crate) mod crypto;
 #[cfg(feature = "issuance")]
 pub mod issue;
 pub mod key;
+pub mod leaf_key;
 pub mod lifecycle;
 pub mod signer;
 pub mod time;
@@ -64,11 +67,15 @@ pub enum Domain {
     Policy,
     /// A break-glass unlock token (#222). Signed by `unlock-token` keys.
     Unlock,
+    /// An enrolment request's proof of possession of the device key (#223).
+    /// Signed by a device key ([`leaf_key::LeafKey`]), never by a key
+    /// in a [`Signer`].
+    Enrol,
 }
 
 impl Domain {
     /// Every domain.
-    pub const ALL: &'static [Self] = &[Self::TrustSet, Self::Policy, Self::Unlock];
+    pub const ALL: &'static [Self] = &[Self::TrustSet, Self::Policy, Self::Unlock, Self::Enrol];
 
     /// The domain-separation prefix, including its terminating NUL byte.
     #[must_use]
@@ -77,6 +84,7 @@ impl Domain {
             Self::TrustSet => b"palisade-trustset-v1\0",
             Self::Policy => b"palisade-policy-v1\0",
             Self::Unlock => b"palisade-unlock-v1\0",
+            Self::Enrol => b"palisade-enrol-v1\0",
         }
     }
 
@@ -87,10 +95,13 @@ impl Domain {
             Self::TrustSet => "palisade-trustset-v1",
             Self::Policy => "palisade-policy-v1",
             Self::Unlock => "palisade-unlock-v1",
+            Self::Enrol => "palisade-enrol-v1",
         }
     }
 
-    /// Whether a key of `purpose` may sign for this domain.
+    /// Whether a key of `purpose` may sign for this domain. No purpose
+    /// signs [`Self::Enrol`]: only a device key does, which is not in the
+    /// key inventory.
     #[must_use]
     pub const fn signed_by(self, purpose: KeyPurpose) -> bool {
         matches!(
