@@ -23,7 +23,7 @@ use palisade_fileid::identity::{
     identify_bytes,
 };
 use palisade_policy::context::EvaluationContext;
-use palisade_policy::decision::Outcome;
+use palisade_policy::decision::{Outcome, ReasonCode};
 use palisade_policy::demand::FactSet;
 use palisade_policy::evaluate::{Evaluator, Subject};
 use palisade_policy::facts::{ObjectFacts, PathVariables};
@@ -272,6 +272,155 @@ fn metadata_maps_by_field() {
     assert_eq!(b.facts.get(P::MetaFileNameFallback), Some("signed.exe"));
 }
 
+/// `id` with its final path at `final_path` and the name fileid classified
+/// set to `classified`.
+fn at_final(mut id: FileIdentity, final_path: &str, classified: &str) -> FileIdentity {
+    id = with_fs(id, "os_volume", false);
+    if let Field::Computed(p) = &mut id.fs.path {
+        p.final_path = Some(final_path.into());
+        p.rule_key = Some(final_path.to_ascii_uppercase());
+    }
+    id.name.file_name = Some(classified.into());
+    id
+}
+
+/// #376: `meta.detected_type` and `meta.extension_type` from fileid's
+/// classification. What the name claims counts only for the opened
+/// file's final name; a kind fileid could not tell, or a classification
+/// that did not run, is absent.
+#[test]
+fn content_types_map_from_the_classification() {
+    let pe = || {
+        identify_bytes(
+            &PeBuilder::default().build(),
+            Some("report.pdf"),
+            Tiers::ALL,
+            &IdentityContext::untrusted(Y2030),
+        )
+    };
+    let id = pe();
+    let k = id.kind.computed().unwrap();
+    assert_eq!(k.content_kind, "pe");
+    assert_eq!(k.extension_kind, "inert");
+    // A byte upload: the content is known, the claimed name is not used.
+    let b = bridge(&id);
+    assert_eq!(b.facts.get(P::MetaDetectedType), Some("pe"));
+    assert_eq!(b.facts.get(P::MetaExtensionType), None);
+    // A PE renamed to `.pdf` on disk.
+    let b = bridge(&at_final(pe(), r"C:\Tools\report.pdf", "report.pdf"));
+    assert_eq!(b.facts.get(P::MetaDetectedType), Some("pe"));
+    assert_eq!(b.facts.get(P::MetaExtensionType), Some("inert"));
+    // A final name other than the one classified (a link): no claim.
+    let b = bridge(&at_final(pe(), r"C:\Tools\other.exe", "report.pdf"));
+    assert_eq!(b.facts.get(P::MetaExtensionType), None);
+    assert_eq!(b.facts.get(P::MetaDetectedType), Some("pe"));
+    // A script extension names its language; the field says `script`.
+    let mut ps = at_final(pe(), r"C:\Tools\run.ps1", "run.ps1");
+    if let Field::Computed(k) = &mut ps.kind {
+        k.extension_kind = "script:power_shell".into();
+    }
+    assert_eq!(bridge(&ps).facts.get(P::MetaExtensionType), Some("script"));
+    // A kind fileid could not tell is absent, as is an empty one.
+    for (content, extension) in [("unknown", "unknown"), ("", "")] {
+        let mut odd = at_final(pe(), r"C:\Tools\report.pdf", "report.pdf");
+        if let Field::Computed(k) = &mut odd.kind {
+            k.content_kind = content.into();
+            k.extension_kind = extension.into();
+        }
+        let b = bridge(&odd);
+        assert_eq!(b.facts.get(P::MetaDetectedType), None, "{content:?}");
+        assert_eq!(b.facts.get(P::MetaExtensionType), None, "{extension:?}");
+    }
+    // A kind the name decided (`.com`, which has no magic) counts only
+    // when that name is the final name.
+    let mut assisted = pe();
+    if let Field::Computed(k) = &mut assisted.kind {
+        k.content_kind = "com".into();
+        k.extension_assisted = true;
+    }
+    assert_eq!(bridge(&assisted).facts.get(P::MetaDetectedType), None);
+    let mut assisted = at_final(pe(), r"C:\Tools\tool.com", "tool.com");
+    if let Field::Computed(k) = &mut assisted.kind {
+        k.content_kind = "com".into();
+        k.extension_assisted = true;
+    }
+    assert_eq!(
+        bridge(&assisted).facts.get(P::MetaDetectedType),
+        Some("com")
+    );
+    // The classification did not run: both absent, never a default.
+    let mut none = at_final(pe(), r"C:\Tools\report.pdf", "report.pdf");
+    none.kind = Field::NotRequested;
+    let b = bridge(&none);
+    assert_eq!(b.facts.get(P::MetaDetectedType), None);
+    assert_eq!(b.facts.get(P::MetaExtensionType), None);
+}
+
+/// A deny on a PE renamed to a document applies to the bridged facts, and
+/// its negation cannot match a file whose type is not known.
+#[test]
+fn a_renamed_pe_is_denied_through_the_bridge() {
+    let renamed = at_final(
+        identify_bytes(
+            &PeBuilder::default().build(),
+            Some("report.pdf"),
+            Tiers::ALL,
+            &IdentityContext::untrusted(Y2030),
+        ),
+        r"C:\Tools\report.pdf",
+        "report.pdf",
+    );
+    let deny = |tree| {
+        PolicyBuilder::new()
+            .rule_set(RuleSetBuilder::blocklist(1).rule(RuleBuilder::deny(1, tree)))
+            .validate()
+    };
+    let masquerade = deny(palisade_policy::test_util::all(vec![
+        criterion(P::MetaDetectedType, Operator::Equals, &["pe"]),
+        criterion(P::MetaExtensionType, Operator::Equals, &["inert"]),
+    ]));
+    let reason = |facts: &ObjectFacts, policy: &ValidatedPolicy| {
+        Evaluator::new(policy)
+            .unwrap()
+            .evaluate(
+                &Subject {
+                    object_type: ObjectType::Executable,
+                    facts,
+                    variables: &PathVariables::new(),
+                    context: &EvaluationContext::new(),
+                },
+                TRACE,
+            )
+            .reason_code()
+    };
+    let b = bridge(&renamed);
+    assert_eq!(reason(&b.facts, &masquerade), ReasonCode::ExplicitDeny);
+    // An honest PE is not caught by the masquerade rule.
+    let honest = at_final(
+        identify_bytes(
+            &PeBuilder::default().build(),
+            Some("tool.exe"),
+            Tiers::ALL,
+            &IdentityContext::untrusted(Y2030),
+        ),
+        r"C:\Tools\tool.exe",
+        "tool.exe",
+    );
+    let b = bridge(&honest);
+    assert_eq!(b.facts.get(P::MetaExtensionType), Some("pe"));
+    assert_ne!(reason(&b.facts, &masquerade), ReasonCode::ExplicitDeny);
+    // A negated test of a type nobody computed is unknown, never a match.
+    let not_pe = deny(palisade_policy::test_util::all(vec![
+        criterion(P::PathDirectory, Operator::StartsWith, &[r"C:\Tools"]),
+        criterion(P::MetaDetectedType, Operator::NotEquals, &["pe"]),
+    ]));
+    let mut unclassified = renamed;
+    unclassified.kind = Field::NotRequested;
+    let b = bridge(&unclassified);
+    assert!(b.facts.get(P::MetaDetectedType).is_none());
+    assert_ne!(reason(&b.facts, &not_pe), ReasonCode::ExplicitDeny);
+}
+
 #[test]
 fn pe_names_cover_every_named_value() {
     for (machine, want) in [
@@ -425,11 +574,25 @@ fn path_facts_map_from_the_context_tier() {
     assert_eq!(p.drive_type, None);
 
     // A claimed path, a path with no final form, or one with no rule key
-    // (case-sensitive directory, unknown fold) is no path.
+    // because a component is in a case-sensitive directory, is no path.
     for change in [
         (|p: &mut PathInfo| p.claimed = true) as fn(&mut PathInfo),
         |p| p.final_path = None,
         |p| p.rule_key = None,
+        |p| {
+            p.rule_key = None;
+            p.final_case_sensitive = vec![1];
+        },
+        |p| {
+            p.rule_key = None;
+            p.final_case_sensitive = vec![1];
+            p.final_fold_unknown = true;
+        },
+        |p| {
+            p.rule_key = None;
+            p.final_fold_unknown = true;
+            p.claimed = true;
+        },
     ] {
         let mut id = with_fs(base.clone(), "os_volume", false);
         if let Field::Computed(p) = &mut id.fs.path {
@@ -437,6 +600,19 @@ fn path_facts_map_from_the_context_tier() {
         }
         assert!(bridge(&id).facts.path.is_none());
     }
+    // On a volume whose case folding is not known (#399), fileid gives no
+    // rule key; the path is kept, marked, so policy can still apply a deny
+    // that matches by key and never lets a path allow match.
+    let known = bridge(&with_fs(base.clone(), "os_volume", false));
+    assert!(!known.facts.path.unwrap().fold_unknown);
+    let mut odd = with_fs(base.clone(), "network", false);
+    if let Field::Computed(p) = &mut odd.fs.path {
+        p.rule_key = None;
+        p.final_fold_unknown = true;
+    }
+    let p = bridge(&odd).facts.path.unwrap();
+    assert!(p.fold_unknown);
+    assert_eq!(p.path.as_str(), r"C:\Tools\signed.exe");
 
     // The ACL tier did not run: no ACL facts, never "not writable".
     let mut no_acl = with_fs(base, "os_volume", false);
@@ -749,6 +925,9 @@ fn policies(id: &FileIdentity) -> Vec<ValidatedPolicy> {
         criterion(P::MetaPeMachine, Operator::Equals, &["amd64"]),
         criterion(P::MetaFileSize, Operator::Gt, &["10"]),
         criterion(P::PathDriveType, Operator::Equals, &["fixed"]),
+        criterion(P::MetaDetectedType, Operator::Equals, &["pe"]),
+        criterion(P::MetaExtensionType, Operator::Equals, &["pe"]),
+        criterion(P::PathFileName, Operator::Equals, &["signed.exe"]),
     ];
     let mut out = Vec::new();
     for tree in trees {
@@ -839,6 +1018,20 @@ fn removals() -> Vec<Removal> {
             id.fs.user_writable = Field::Unavailable("x".into())
         }),
         ("installer", |id| id.installer = Field::NotRequested),
+        ("kind", |id| id.kind = Field::NotRequested),
+        ("kind_unknown", |id| {
+            if let Field::Computed(k) = &mut id.kind {
+                k.content_kind = "unknown".into();
+                k.extension_kind = "unknown".into();
+            }
+        }),
+        // The volume's case folding becomes unknown (#399).
+        ("fold", |id| {
+            if let Field::Computed(p) = &mut id.fs.path {
+                p.rule_key = None;
+                p.final_fold_unknown = true;
+            }
+        }),
     ]
 }
 
@@ -869,7 +1062,7 @@ proptest! {
     #[test]
     fn removing_facts_never_relaxes_a_decision(
         which in 0usize..3,
-        mask in proptest::collection::vec(any::<bool>(), 15),
+        mask in proptest::collection::vec(any::<bool>(), 18),
     ) {
         let full = records().remove(which);
         let mut reduced = full.clone();
@@ -898,6 +1091,9 @@ fn removing_any_one_fact_never_relaxes_a_decision() {
         let a = bridge(&full);
         let policies = policies(&full);
         assert!(policies.len() >= 10, "{}", policies.len());
+        // The content types are bridged, so their removal is tested.
+        assert_eq!(a.facts.get(P::MetaDetectedType), Some("pe"));
+        assert_eq!(a.facts.get(P::MetaExtensionType), Some("pe"));
         // The trusted record is allowed by some rule, so the property is
         // tested against permissive decisions too.
         if full.trusted_signer().is_some() {

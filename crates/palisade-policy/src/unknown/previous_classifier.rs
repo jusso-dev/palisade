@@ -9,7 +9,7 @@ use palisade_core::path::{NormalizedPath, PathKind};
 
 use crate::facts::{PathFact, PathVariable, PathVariables};
 use crate::model::LocationClass;
-use crate::ops::fold;
+use crate::ops::fold_path;
 
 use crate::unknown::VolumeKind;
 
@@ -115,7 +115,7 @@ fn classify_one(
         }
         Some(VolumeKind::Fixed | VolumeKind::Network) | None => {}
     }
-    if !p.is_resolved() || path.short_name_unresolved {
+    if !p.is_resolved() || path.short_name_unresolved || path.fold_unknown {
         out.insert(L::UserWritableOther);
         return out;
     }
@@ -199,11 +199,11 @@ fn classify_one(
 /// Whether `path` is `base` or below it, without case, at a component
 /// boundary.
 fn under(path: &str, base: &str) -> bool {
-    let base = fold(base.trim_end_matches('\\'), false);
+    let base = fold_path(base.trim_end_matches('\\'), false);
     if base.is_empty() {
         return false;
     }
-    let path = fold(path, false);
+    let path = fold_path(path, false);
     path.strip_prefix(base.as_str())
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('\\'))
 }
@@ -215,7 +215,8 @@ fn in_users_dir(p: &NormalizedPath) -> bool {
     }
     let body = &p.without_stream()[p.root().len()..];
     let mut parts = body.split('\\').filter(|s| !s.is_empty());
-    matches!(parts.next(), Some(first) if fold(first, false) == "USERS") && parts.next().is_some()
+    matches!(parts.next(), Some(first) if fold_path(first, false) == "USERS")
+        && parts.next().is_some()
 }
 
 /// Whether a directory above the file, below the drive or share root, is
@@ -226,6 +227,9 @@ fn has_cache_component(p: &NormalizedPath) -> bool {
     let mut parts: Vec<&str> = body.split('\\').filter(|s| !s.is_empty()).collect();
     // The last component is the file itself.
     parts.pop();
-    let wanted: Vec<String> = CACHE_COMPONENTS.iter().map(|c| fold(c, false)).collect();
-    parts.iter().any(|c| wanted.contains(&fold(c, false)))
+    let wanted: Vec<String> = CACHE_COMPONENTS
+        .iter()
+        .map(|c| fold_path(c, false))
+        .collect();
+    parts.iter().any(|c| wanted.contains(&fold_path(c, false)))
 }

@@ -329,6 +329,9 @@ pub(crate) fn pool_facts() -> impl Strategy<Value = PoolFacts> {
                         fact.alias =
                             Some(palisade_core::path::normalize(PATHS[(k + 1) % PATHS.len()]));
                     }
+                    // The share's case folding is not known (#399), and
+                    // sometimes a local volume's.
+                    fact.fold_unknown = k % PATHS.len() == 2 || k == 5;
                     facts.path = Some(fact);
                 }
                 if let Some(list) = signers {

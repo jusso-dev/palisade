@@ -83,7 +83,7 @@ use crate::facts::{ObjectFacts, PathFact, PathVariable};
 use crate::model::{Action, Field, FieldClass, Match, ObjectType, UnknownAs};
 use crate::ops::Tri;
 use crate::ops::anchor::{LeafAnchor, decode_hex_into, leaf_anchor, probe_prefixes};
-use crate::ops::scratch::{with_buffer, with_folded};
+use crate::ops::scratch::{with_buffer, with_folded, with_path_folded};
 
 use super::{Compiled, Evaluator, Role, Subject};
 
@@ -499,7 +499,7 @@ impl IndexSet {
                         } else {
                             path.extension().unwrap_or("")
                         };
-                        with_folded(text, false, |f| lookup(map, f, out));
+                        with_path_folded(text, false, |f| lookup(map, f, out));
                         true
                     });
                 }
@@ -525,7 +525,7 @@ impl IndexSet {
                         }
                         _ => path.as_str(),
                     };
-                    with_folded(text, false, |folded| {
+                    with_path_folded(text, false, |folded| {
                         for prefix in probe_prefixes(folded) {
                             lookup(map, prefix, out);
                         }
@@ -616,8 +616,12 @@ fn lookup(map: &HashMap<String, Posting>, key: &str, out: &mut Postings) {
 /// Runs `f` with each spelling of the path that path criteria test: the
 /// path and its alias, if they are drive or UNC paths and the short name
 /// was resolved. Otherwise path criteria are `Unknown`, never `Match`.
-/// Returns whether the path was known: there is one, it is resolved, and
-/// `f` said every spelling was known.
+/// Returns whether the path was known: there is one, it is resolved, its
+/// volume's case folding is known, and `f` said every spelling was known.
+///
+/// On a volume whose folding is not known (#399) the keys are still
+/// probed, since a path test there can still match by key, but the path is
+/// not known: a test that missed by key may be `Unknown`.
 fn for_each_path_form(
     path: Option<&PathFact>,
     mut f: impl FnMut(&palisade_core::path::NormalizedPath) -> bool,
@@ -632,7 +636,7 @@ fn for_each_path_form(
     if let Some(alias) = path.alias.as_ref().filter(|a| a.is_resolved()) {
         known &= f(alias);
     }
-    known
+    known && !path.fold_unknown
 }
 
 /// The anchor of a match tree: the keys one of which the facts must hold

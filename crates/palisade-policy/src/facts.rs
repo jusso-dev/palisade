@@ -141,6 +141,17 @@ pub struct PathFact {
     /// criteria then evaluate to unknown, because the short name could be
     /// a spelling that a rule does not recognise.
     pub short_name_unresolved: bool,
+    /// The volume's case folding is not known to be the standard NTFS
+    /// upcase table ([`palisade_core::upcase`], #399): every network share,
+    /// and a local volume formatted with another table. Two names that the
+    /// standard table folds apart may be one name there (`ſetup.exe` and
+    /// `SETUP.EXE` on a server that folds with Unicode), so a path test
+    /// that misses by its folded key is not proof of a miss. A path test
+    /// is then `Unknown` whenever its result would make the rule less
+    /// strict: a miss of a `deny` or `audit`, and a match of a rule that
+    /// lets the object run, trusts it or excludes it. `false` when the
+    /// agent knows the table is the standard one, or did not say.
+    pub fold_unknown: bool,
     /// Whether any non-administrative principal can write the file or any
     /// directory above it, or change their permissions (#3, #4). `None`
     /// means it was not determined. A path only identifies an object
@@ -174,6 +185,7 @@ impl PathFact {
             path: normalize_with(raw, volumes),
             alias: None,
             short_name_unresolved: false,
+            fold_unknown: false,
             user_writable: None,
             volume: None,
             drive_type: None,
@@ -187,6 +199,23 @@ impl PathFact {
     pub const fn with_volume(mut self, volume: crate::unknown::VolumeKind) -> Self {
         self.volume = Some(volume);
         self
+    }
+
+    /// The same fact, on a volume whose case folding is not known
+    /// ([`Self::fold_unknown`]).
+    #[must_use]
+    pub const fn with_fold_unknown(mut self) -> Self {
+        self.fold_unknown = true;
+        self
+    }
+
+    /// Whether path names can be compared by their folded keys: the short
+    /// name was expanded, the path is a drive or UNC path, and the
+    /// volume's case folding is the standard one. A path that is an
+    /// identity anchor (a draft allow, a cached decision key) needs this.
+    #[must_use]
+    pub fn keys_reliable(&self) -> bool {
+        !self.short_name_unresolved && !self.fold_unknown && self.path.is_resolved()
     }
 
     /// The same fact, with `user_writable` set.

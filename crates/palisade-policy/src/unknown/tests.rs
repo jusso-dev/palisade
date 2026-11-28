@@ -4378,6 +4378,8 @@ enum Drop {
     Origin,
     Acl,
     Path,
+    /// The volume's case folding becomes unknown (#399).
+    Fold,
     Variable(PV),
 }
 
@@ -4444,17 +4446,21 @@ proptest! {
         // The generator only builds valid policies: a skipped case would
         // hide what it was meant to test.
         let v = d.validate().unwrap_or_else(|e| panic!("{e:#?}"));
-        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+        let build_folded = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>, fold_unknown: bool| {
             let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a'));
             if path {
                 let mut fact = PathFact::new(&raw, &VolumeMap::new());
                 fact.user_writable = writable;
                 fact.volume = volume;
+                fact.fold_unknown = fold_unknown;
                 f = f.with_path(fact);
             }
             f.location_class = supplied.clone();
             f.origin = origins.clone();
             f
+        };
+        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+            build_folded(volume, writable, path, origins, false)
         };
         // The case's own context, and the contexts that decide whether a
         // prompt or a restriction can apply, each with and without
@@ -4478,7 +4484,7 @@ proptest! {
                 let before = level(&build(volume, writable, true, &origins), &variables);
                 // Every fact, one at a time.
                 for drop in [
-                    Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path,
+                    Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path, Drop::Fold,
                     Drop::Variable(PV::Windir), Drop::Variable(PV::ProgramFiles), Drop::Variable(PV::UserProfile),
                     Drop::Variable(PV::AppData), Drop::Variable(PV::LocalAppData), Drop::Variable(PV::Temp), Drop::Variable(PV::Public),
                 ] {
@@ -4487,6 +4493,7 @@ proptest! {
                         Drop::Origin => level(&build(volume, writable, true, &None), &variables),
                         Drop::Acl => level(&build(volume, None, true, &origins), &variables),
                         Drop::Path => level(&build(volume, writable, false, &origins), &variables),
+                        Drop::Fold => level(&build_folded(volume, writable, true, &origins, true), &variables),
                         Drop::Variable(var) => level(&build(volume, writable, true, &origins), &without(&variables, var)),
                     };
                     prop_assert!(after >= before, "dropping {drop:?} ({session:?}, containment {containment:?}): {before:?} -> {after:?}");
@@ -4517,24 +4524,28 @@ proptest! {
         origins in prop::option::of(prop::collection::btree_set(prop::sample::select(OriginClass::ALL.to_vec()), 0..3)),
         supplied in prop::option::of(prop::collection::btree_set(prop::sample::select(LocationClass::ALL.to_vec()), 1..3)),
         drop in prop::sample::select(vec![
-            Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path,
+            Drop::Volume, Drop::Origin, Drop::Acl, Drop::Path, Drop::Fold,
             Drop::Variable(PV::Windir), Drop::Variable(PV::ProgramFiles), Drop::Variable(PV::UserProfile),
             Drop::Variable(PV::AppData), Drop::Variable(PV::LocalAppData), Drop::Variable(PV::Temp), Drop::Variable(PV::Public),
         ]),
     ) {
         let v = valid(doc(serde_json::json!({})));
-        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+        let build_folded = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>, fold_unknown: bool| {
             let mut f = ObjectFacts::new().with(Field::HashSha256, sha('a'));
             if path {
                 let mut fact = PathFact::new(&raw, &VolumeMap::new());
                 fact.user_writable = writable;
                 fact.volume = volume;
                 fact.short_name_unresolved = short_name;
+                fact.fold_unknown = fold_unknown;
                 f = f.with_path(fact);
             }
             f.location_class = supplied.clone();
             f.origin = origins.clone();
             f
+        };
+        let build = |volume: Option<VolumeKind>, writable: Option<bool>, path: bool, origins: &Option<BTreeSet<OriginClass>>| {
+            build_folded(volume, writable, path, origins, false)
         };
         let context = interactive_context();
         // Each class's value, read back from the decision.
@@ -4556,6 +4567,7 @@ proptest! {
             Drop::Origin => classes(&build(volume, writable, true, &None), &variables),
             Drop::Acl => classes(&build(volume, None, true, &origins), &variables),
             Drop::Path => classes(&build(volume, writable, false, &origins), &variables),
+            Drop::Fold => classes(&build_folded(volume, writable, true, &origins, true), &variables),
             Drop::Variable(var) => classes(&build(volume, writable, true, &origins), &without(&variables, var)),
         };
         for (i, (f, p)) in full.0.iter().zip(&partial.0).enumerate() {

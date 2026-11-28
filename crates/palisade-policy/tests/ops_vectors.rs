@@ -110,6 +110,9 @@ fn run_case(file: &str, case: &toml::Table) {
     if let Some(path) = case.get("path") {
         let mut p = PathFact::new(path.as_str().unwrap(), &VolumeMap::new());
         p.user_writable = case.get("user_writable").map(|w| w.as_bool().unwrap());
+        p.fold_unknown = case
+            .get("fold_unknown")
+            .is_some_and(|w| w.as_bool().unwrap());
         p.volume = match case.get("volume").map(|v| v.as_str().unwrap()) {
             None => None,
             Some("fixed") => Some(palisade_policy::unknown::VolumeKind::Fixed),

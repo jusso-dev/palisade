@@ -18,9 +18,12 @@
 //!   NFC-normalised before folding, and a case-sensitive comparison of NFC
 //!   strings that succeeds also succeeds after the simple upper-case
 //!   mapping, so keys and probes are always case-folded ([`fold`] with
-//!   `case_sensitive` off).
+//!   `case_sensitive` off). File names and extensions are folded as names
+//!   in a path ([`fold_path`](super::fold_path), #399): the value in NFC,
+//!   then upper-cased with the upcase table; the fact upper-cased only. An
+//!   exact match also matches after upper-casing, so the same holds.
 //! - Paths (`equals`, `starts_with`, `wildcard` on `path.full` and
-//!   `path.directory`): the folded fact starts with the value's literal
+//!   `path.directory`), folded as file names are: the folded fact starts with the value's literal
 //!   part. For a wildcard that is the text before its first `*`, `?` or
 //!   `[`. The key is that literal cut back to its last `\`, without the
 //!   `\`, so a probe only has to look at the fact's prefixes that end at a
@@ -38,7 +41,7 @@ use crate::context::{normalize_principal, normalize_sid};
 use crate::facts::PathVariable;
 use crate::model::{Criterion, Field, FieldClass, Operator};
 
-use super::{fold, normalize_hex, path_value};
+use super::{fold, fold_path_value, is_path_name, normalize_hex, path_value};
 
 /// The keys of one criterion's anchor.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,7 +181,16 @@ pub(crate) fn leaf_anchor(c: &Criterion) -> Option<LeafAnchor> {
         (FieldClass::Text | FieldClass::FileName, Operator::Equals) if is_text_field(field) => {
             Some(LeafAnchor::Text(
                 field,
-                c.values.iter().map(|v| fold(v, false)).collect(),
+                c.values
+                    .iter()
+                    .map(|v| {
+                        if is_path_name(field) {
+                            fold_path_value(v, false)
+                        } else {
+                            fold(v, false)
+                        }
+                    })
+                    .collect(),
             ))
         }
         (FieldClass::Path, Operator::Equals | Operator::StartsWith | Operator::Wildcard) => {
@@ -191,7 +203,7 @@ pub(crate) fn leaf_anchor(c: &Criterion) -> Option<LeafAnchor> {
                     variables.push(variable);
                     continue;
                 }
-                let folded = fold(&text, false);
+                let folded = fold_path_value(&text, false);
                 let literal = if wildcard {
                     match folded.find(['*', '?', '[']) {
                         // Only the components before the one that holds

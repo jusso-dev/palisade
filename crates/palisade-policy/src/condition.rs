@@ -347,7 +347,7 @@ impl CompiledMatch {
             Node::Not(child) => self.eval_node(child, !negated, eval).not(),
             Node::Leaf(leaf) => {
                 let criterion = &self.leaves[leaf as usize];
-                let evaluation = criterion.eval(eval.facts, eval.ctx);
+                let evaluation = criterion.eval_under(eval.facts, eval.ctx, negated);
                 eval.notes.extend(evaluation.notes);
                 if evaluation.result == Tri::Unknown
                     && eval.safety_critical

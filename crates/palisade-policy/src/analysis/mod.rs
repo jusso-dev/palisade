@@ -1375,6 +1375,10 @@ fn value_compared(c: &Criterion) -> bool {
 fn key(field: Field, v: &str) -> String {
     let v = match field.class() {
         FieldClass::Hash { .. } => crate::ops::normalize_hex(v).unwrap_or_else(|| v.to_owned()),
+        // Names in a path compare with the path fold (#399).
+        _ if crate::ops::is_path_name(field) => {
+            crate::ops::fold_path_value(&v.replace('/', "\\"), false)
+        }
         _ => crate::ops::fold(&v.replace('/', "\\"), false),
     };
     format!("{field:?}={v}")
@@ -1476,7 +1480,7 @@ fn corpus_share(c: &Criterion, corpus: &[String]) -> Option<u64> {
 /// `dir` (normalised): a literal by prefix in either direction, or a
 /// pattern that matches a file in `dir` or whose fixed part lies under it.
 fn path_test_reaches(c: &Criterion, dir: &str) -> bool {
-    let fold = |v: &str| crate::ops::fold(v, false);
+    let fold = |v: &str| crate::ops::fold_path_value(v, false);
     let d = fold(dir.trim_end_matches('\\'));
     let under = |a: &str, b: &str| {
         a.strip_prefix(b)

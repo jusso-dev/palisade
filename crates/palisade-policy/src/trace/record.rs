@@ -277,7 +277,7 @@ impl<'p> TracedRule<'p> {
         let mut nodes = vec![Tri::Unknown; self.nodes.len()];
         let mut leaves = Vec::with_capacity(self.leaves.len());
         for leaf in &self.leaves {
-            let e = leaf.compiled.eval(subject.facts, &ctx);
+            let e = leaf.compiled.eval_under(subject.facts, &ctx, leaf.negated);
             // As the evaluator (`CompiledMatch::eval_mandatory`): a
             // safety-critical criterion of a mandatory deny that is unknown
             // counts towards the deny applying (#32, #87).
