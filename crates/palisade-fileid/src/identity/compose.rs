@@ -1246,47 +1246,27 @@ fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
         Err(e) => Field::Unavailable(unavailable(&e)),
     };
 
-    // The access check reopens by path: its verdict is kept only if that
-    // path still names the opened file before and after it ran, so the
-    // record never pairs this file's ID and owner with another file's
-    // writability. Otherwise it is unavailable, and the path stays Weak.
-    let still_this_file = |p: &str| {
-        let opened = links::read_meta(file)
-            .ok()
-            .and_then(|m| m.file_id.zip(m.volume_serial));
-        let at_path = links::open_link_itself(Path::new(p))
-            .and_then(|f| links::read_meta(&f))
-            .ok()
-            .and_then(|m| m.file_id.zip(m.volume_serial));
-        opened.is_some() && opened == at_path
-    };
-    id.fs.user_writable = match &final_path {
-        Ok(p) if !still_this_file(p) => {
-            Field::Unavailable("the file's final path no longer names the opened file".to_owned())
-        }
-        Ok(p) => match access::assess_file(
-            Path::new(p),
-            &crate::fsctx::EvaluationOptions::default(),
-            AssessOptions::default(),
-            &mut WritabilityCache::default(),
-        ) {
-            Ok(_) if !still_this_file(p) => Field::Unavailable(
-                "the file's final path changed while its writability was read".to_owned(),
-            ),
-            Ok(w) => Field::Computed(super::record::WritableSummary {
-                path_user_writable: w.path_user_writable(),
-                file_user_writable: w.file_user_writable,
-                first_user_writable_ancestor: w.first_user_writable_ancestor.clone(),
-                change_perms_by_non_admin: w.change_perms_by_non_admin,
-                principals_with_write: w
-                    .principals_with_write
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            }),
-            Err(e) => Field::Unavailable(unavailable(&e)),
-        },
-        Err(e) => Field::Unavailable(unavailable(e)),
+    // The access check reads the target's descriptor through the open
+    // handle, and its folders from the handle's own final path, so the
+    // verdict is about this file even if its path is swapped meanwhile.
+    id.fs.user_writable = match access::assess_open_file(
+        file,
+        &crate::fsctx::EvaluationOptions::default(),
+        AssessOptions::default(),
+        &mut WritabilityCache::default(),
+    ) {
+        Ok(w) => Field::Computed(super::record::WritableSummary {
+            path_user_writable: w.path_user_writable(),
+            file_user_writable: w.file_user_writable,
+            first_user_writable_ancestor: w.first_user_writable_ancestor.clone(),
+            change_perms_by_non_admin: w.change_perms_by_non_admin,
+            principals_with_write: w
+                .principals_with_write
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        }),
+        Err(e) => Field::Unavailable(unavailable(&e)),
     };
 
     id.fs.streams = match links::read_streams(file) {

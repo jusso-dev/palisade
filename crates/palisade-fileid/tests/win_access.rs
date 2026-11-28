@@ -501,3 +501,83 @@ fn device_paths_are_rejected() {
         );
     }
 }
+
+/// The race left open in #344 (#60): a file is held open, its path is
+/// swapped for another file with a different ACL, and the assessment runs
+/// meanwhile. Assessing through the handle judges the opened file, whatever
+/// the path names now.
+#[test]
+fn assessing_an_open_file_ignores_a_swapped_path() {
+    use palisade_fileid::win::access::assess_open_file;
+    let dir = scratch("swap");
+    let locked = dir.0.join("locked.exe");
+    let writable = dir.0.join("writable.exe");
+    std::fs::write(&locked, b"MZ").unwrap();
+    std::fs::write(&writable, b"MZ").unwrap();
+    set_security_sddl(
+        &open_for_dacl(&locked),
+        &format!("O:BAD:P{ADMIN_ONLY}(A;;0x1200A9;;;BU)"),
+    )
+    .unwrap();
+    set_security_sddl(
+        &open_for_dacl(&writable),
+        &format!("O:BAD:P{ADMIN_ONLY}(A;;0x1301BF;;;BU)"),
+    )
+    .unwrap();
+    let opts = EvaluationOptions::default();
+    let mut cache = WritabilityCache::default();
+
+    // GENERIC_READ (with READ_CONTROL), sharing delete so it can be moved.
+    let open = OpenOptions::new()
+        .read(true)
+        .share_mode(0x7)
+        .open(&locked)
+        .unwrap();
+    let before = assess_open_file(&open, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(!before.file_user_writable, "{:?}", before.target);
+
+    // Move the opened file away and put the writable one at its name.
+    let moved = dir.0.join("moved.exe");
+    std::fs::rename(&locked, &moved).unwrap();
+    std::fs::rename(&writable, &locked).unwrap();
+    let by_path = assess_file(&locked, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(
+        by_path.file_user_writable,
+        "the path now names the other file"
+    );
+    let by_handle = assess_open_file(&open, &opts, AssessOptions::default(), &mut cache).unwrap();
+    assert!(
+        !by_handle.file_user_writable,
+        "the handle still judges the opened file: {:?}",
+        by_handle.target
+    );
+    drop(open);
+}
+
+/// A handle to a link itself, not its target, fails closed.
+#[test]
+fn assessing_an_open_link_itself_fails_closed() {
+    use palisade_fileid::win::access::assess_open_file;
+    let dir = scratch("openlink");
+    let target = dir.0.join("target");
+    std::fs::create_dir(&target).unwrap();
+    let link = dir.0.join("junction");
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let stub = open_for_security(&link).unwrap();
+    let w = assess_open_file(
+        &stub,
+        &EvaluationOptions::default(),
+        AssessOptions::default(),
+        &mut WritabilityCache::default(),
+    )
+    .unwrap();
+    assert!(w.file_user_writable, "{:?}", w.target);
+}
