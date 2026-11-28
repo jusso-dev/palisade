@@ -83,6 +83,12 @@
     <SetProperty Action="KeepMode" Id="MODE" Value="[R_MODE]" After="AppSearch" Sequence="execute" Condition="NOT MODE AND R_MODE" />
     <SetProperty Action="DefaultMode" Id="MODE" Value="audit" After="KeepMode" Sequence="execute" Condition="NOT MODE" />
 
+    <!-- "Server Core" on a server without the desktop shell (#68). The key
+         is the OS's, and readable by everyone. -->
+    <Property Id="INSTALLATION_TYPE">
+      <RegistrySearch Root="HKLM" Key="$(var.OsVersionKey)" Name="InstallationType" Type="raw" Bitness="always64" />
+    </Property>
+
     <InstallUISequence>
       <AppSearch Suppress="yes" />
     </InstallUISequence>
@@ -229,11 +235,12 @@
       <File Id="TrayExe" Source="$(var.BinDir)\palisade-tray.exe" KeyPath="yes" />
     </Component>
 
-    <!-- Every user's session starts the notifier at sign-in, unless NO_TRAY=1.
+    <!-- Every user's session starts the notifier at sign-in, unless NO_TRAY=1
+         or the server has no desktop shell (Server Core, #68).
          This and the other conditional components are transitive, so a
          repair or reinstall with a new value (NO_TRAY=1 REINSTALL=ALL)
          adds or removes them to match. -->
-    <Component Id="TrayAutostart" Directory="INSTALLFOLDER" Transitive="yes" Condition="NOT (NO_TRAY = &quot;1&quot;)">
+    <Component Id="TrayAutostart" Directory="INSTALLFOLDER" Transitive="yes" Condition="NOT (NO_TRAY = &quot;1&quot;) AND NOT (INSTALLATION_TYPE = &quot;Server Core&quot;)">
       <RegistryValue Root="HKLM" Key="$(var.RunKey)" Name="Palisade" Type="string" Value="&quot;[INSTALLFOLDER]palisade-tray.exe&quot;" KeyPath="yes" />
     </Component>
 

@@ -138,6 +138,7 @@ pub fn defines(root: &Path, inputs: &Inputs<'_>) -> Result<Vec<(String, String)>
             root.join(LICENSE_RTF).display().to_string(),
         ),
         ("RunKey".to_owned(), os_ids::RUN_KEY.to_owned()),
+        ("OsVersionKey".to_owned(), os_ids::OS_VERSION_KEY.to_owned()),
         (
             "Watchdog".to_owned(),
             if ships_watchdog(super::WINDOWS_BINARIES) {
@@ -557,6 +558,19 @@ mod tests {
         ));
         assert!(plain.contains("Apache License, Version 2.0"));
         assert!(plain.contains("MIT"));
+    }
+
+    /// Server Core has no desktop shell, so nothing starts the notifier
+    /// there (#68), whatever `NO_TRAY` says.
+    #[test]
+    fn server_core_never_starts_the_notifier() {
+        let wxs = source(SOURCES[0]);
+        assert!(wxs.contains(
+            r#"<Component Id="TrayAutostart" Directory="INSTALLFOLDER" Transitive="yes" Condition="NOT (NO_TRAY = &quot;1&quot;) AND NOT (INSTALLATION_TYPE = &quot;Server Core&quot;)">"#
+        ));
+        assert!(wxs.contains(
+            r#"<RegistrySearch Root="HKLM" Key="$(var.OsVersionKey)" Name="InstallationType" Type="raw" Bitness="always64" />"#
+        ));
     }
 
     #[test]

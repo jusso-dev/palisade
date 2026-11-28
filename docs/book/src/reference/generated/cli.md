@@ -120,6 +120,7 @@ Options:
 Usage: palisade-agent (--console | --service) [--config <path>]
        palisade-agent --simulate [--scenario <path>]
        palisade-agent --stash-enroll-token=<token>
+       palisade-agent --seal-image
        palisade-agent --help | --version
 
 Modes:
@@ -133,6 +134,10 @@ Modes:
                      Run by the installer, as SYSTEM: protect the
                      enrolment token for this machine and store it for
                      the agent's first enrolment. Windows only.
+  --seal-image       Windows, as an administrator with the service
+                     stopped: remove this device's identity before the
+                     image is generalised and captured, so every clone
+                     gets its own on first boot.
 
 Options:
   --config <path>    Configuration file. Without it, the agent reads

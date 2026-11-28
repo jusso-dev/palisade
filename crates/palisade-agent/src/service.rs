@@ -247,6 +247,8 @@ fn run(
     };
     // An enrolment token placed in the handoff file (#57).
     crate::bootstrap::on_start();
+    // The platform profile and the golden-image identity state (#68).
+    crate::image::on_start();
     let supervisor = match host::agent_supervisor(&loaded) {
         Ok(supervisor) => supervisor,
         Err(e) => {

@@ -72,5 +72,6 @@ term 17 d3d6de94c3ecdb0586fa5ed8597ba2703f25f2f0b36e52aa4342a9a1bc0f4335
 term 24 a08b9c73a69e701af4ccf8a94d1276e0009d7d865efa4c1bb2cb4efb08f755fa
 allow xtask/src/dist/os_ids.rs Windows application manifest XML namespaces and the HKLM Run key path, which the OS matches byte for byte (#22)
 allow crates/palisade-fileid/src/package/os_ids.rs Package, bundle and block map XML namespaces, which the OS matches byte for byte (#53)
+allow crates/palisade-agent/src/profile/os_ids.rs Registry paths of the OS product type, edition and session host settings, which the OS matches byte for byte (#68)
 allow crates/palisade-agent/src/eventlog/os_ids.rs The rendered event-log XML namespace, which the OS matches byte for byte (#58)
 allow crates/palisade-fileid/tests/fixtures/package/os_publisher_ids.txt Publisher strings and IDs the OS reports for its own packages, the test vectors that pin the publisher ID algorithm (#53)

@@ -11,6 +11,7 @@ pub const USAGE: &str = "\
 Usage: palisade-agent (--console | --service) [--config <path>]
        palisade-agent --simulate [--scenario <path>]
        palisade-agent --stash-enroll-token=<token>
+       palisade-agent --seal-image
        palisade-agent --help | --version
 
 Modes:
@@ -24,6 +25,10 @@ Modes:
                      Run by the installer, as SYSTEM: protect the
                      enrolment token for this machine and store it for
                      the agent's first enrolment. Windows only.
+  --seal-image       Windows, as an administrator with the service
+                     stopped: remove this device's identity before the
+                     image is generalised and captured, so every clone
+                     gets its own on first boot.
 
 Options:
   --config <path>    Configuration file. Without it, the agent reads
@@ -49,6 +54,8 @@ pub enum Mode {
     Version,
     /// Store an enrolment token for the agent (Windows; the installer).
     StashToken,
+    /// Seal a golden image (Windows).
+    SealImage,
 }
 
 /// Parsed command line.
@@ -87,9 +94,9 @@ impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoMode => f.write_str("choose a mode: --console, --service or --simulate"),
-            Self::ConflictingModes => {
-                f.write_str("--console, --service and --simulate are mutually exclusive")
-            }
+            Self::ConflictingModes => f.write_str(
+                "--console, --service, --simulate and --seal-image are mutually exclusive",
+            ),
             Self::MissingValue(opt) => write!(f, "{opt} needs a value"),
             Self::Duplicate(opt) => write!(f, "{opt} given more than once"),
             Self::Unknown(arg) => write!(f, "unrecognised argument `{arg}`"),
@@ -126,6 +133,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Args, CliError
             Some("--console") => set_mode(&mut mode, Mode::Console)?,
             Some("--service") => set_mode(&mut mode, Mode::Service)?,
             Some("--simulate") => set_mode(&mut mode, Mode::Simulate)?,
+            Some("--seal-image") => set_mode(&mut mode, Mode::SealImage)?,
             Some("-h" | "--help") => return Ok(only(Mode::Help)),
             Some("-V" | "--version") => return Ok(only(Mode::Version)),
             Some("--config") => set_path(&mut config, "--config", args.next())?,
@@ -140,8 +148,8 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Args, CliError
     if scenario.is_some() && mode != Mode::Simulate {
         return Err(CliError::WrongMode("--scenario"));
     }
-    // The simulator reads no agent configuration.
-    if config.is_some() && mode == Mode::Simulate {
+    // The simulator and the seal read no agent configuration.
+    if config.is_some() && matches!(mode, Mode::Simulate | Mode::SealImage) {
         return Err(CliError::WrongMode("--config"));
     }
     Ok(Args {
@@ -298,6 +306,27 @@ mod tests {
             assert!(!format!("{e:?}").contains(secret));
         }
         assert!(USAGE.contains("--stash-enroll-token"));
+    }
+
+    #[test]
+    fn seal_image_mode() {
+        assert_eq!(
+            parse_strs(&["--seal-image"]).unwrap(),
+            only(Mode::SealImage)
+        );
+        assert_eq!(
+            parse_strs(&["--seal-image", "--service"]),
+            Err(CliError::ConflictingModes)
+        );
+        assert_eq!(
+            parse_strs(&["--seal-image", "--config", "a.toml"]),
+            Err(CliError::WrongMode("--config"))
+        );
+        assert_eq!(
+            parse_strs(&["--seal-image", "--scenario", "s.toml"]),
+            Err(CliError::WrongMode("--scenario"))
+        );
+        assert!(USAGE.contains("--seal-image"));
     }
 
     #[test]

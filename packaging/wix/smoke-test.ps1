@@ -134,6 +134,11 @@ function Setting([string] $Name) { RegValue $SettingsKey $Name }
 # OS-defined path is written in one place only (xtask/src/dist/os_ids.rs).
 $script:RunKey = $null
 function RunValue { RegValue "HKLM:\$script:RunKey" 'Palisade' }
+# Server Core has no desktop shell: the package never starts the notifier
+# there (#68). The hosted runners have a desktop, so this is the usual
+# path; a Server Core VM (#26) takes the other.
+$script:ServerCore = $false
+function NotifierExpected { -not $script:ServerCore }
 
 function MachinePath { [Environment]::GetEnvironmentVariable('Path', 'Machine') }
 
@@ -154,6 +159,9 @@ $UpgradeCode = MsiProperty $CurrentMsi 'UpgradeCode'
 $OldVersion = MsiProperty $CurrentMsi 'ProductVersion'
 $NewVersion = MsiProperty $NextMsi 'ProductVersion'
 $script:RunKey = @(MsiQuery $CurrentMsi "SELECT ``Key`` FROM ``Registry`` WHERE ``Name`` = 'Palisade'")[0]
+$osKey = @(MsiQuery $CurrentMsi "SELECT ``Key`` FROM ``RegLocator`` WHERE ``Name`` = 'InstallationType'")[0]
+$script:ServerCore = (RegValue "HKLM:\$osKey" 'InstallationType') -eq 'Server Core'
+Write-Host "installation type: $(RegValue "HKLM:\$osKey" 'InstallationType')"
 Write-Host "package $CurrentMsi ($OldVersion), upgrade $NextMsi ($NewVersion), upgrade code $UpgradeCode"
 
 # --- The package itself --------------------------------------------------
@@ -299,7 +307,11 @@ Check ((Setting 'GroupKey') -eq 'smoke') 'GROUP_KEY is stored'
 Check ((Setting 'Proxy') -eq 'system') 'PROXY is stored'
 Check ((Setting 'Mode') -eq 'audit') 'MODE defaults to audit'
 Check ($null -eq (Setting 'SkipEnroll')) 'SKIP_ENROLL is not set'
-Check ((RunValue) -eq "`"$InstallDir\palisade-tray.exe`"") 'the notifier starts at sign-in'
+if (NotifierExpected) {
+  Check ((RunValue) -eq "`"$InstallDir\palisade-tray.exe`"") 'the notifier starts at sign-in'
+} else {
+  Check ($null -eq (RunValue)) 'Server Core: the notifier does not start at sign-in'
+}
 Check (-not ((MachinePath) -split ';' | Where-Object { $_.TrimEnd('\') -eq $InstallDir })) 'the install folder is not on PATH by default'
 
 # State the agent would have written, which no install step may remove.
@@ -331,7 +343,7 @@ Require ($r.Code -eq 0) 'a reinstall with NO_TRAY=1 succeeds' $r
 Check ($null -eq (RunValue)) 'a reinstall with NO_TRAY=1 removes the sign-in entry'
 $r = Msiexec 'reinstall-tray' @('/i', "`"$NextMsi`"", 'REINSTALL=ALL', 'REINSTALLMODE=amus', 'NO_TRAY=0')
 Require ($r.Code -eq 0) 'a reinstall with NO_TRAY=0 succeeds' $r
-Check ($null -ne (RunValue)) 'a reinstall with NO_TRAY=0 restores the sign-in entry'
+Check (($null -ne (RunValue)) -eq (NotifierExpected)) 'a reinstall with NO_TRAY=0 restores the sign-in entry (not on Server Core)'
 
 # --- Downgrade is refused -------------------------------------------------
 $r = Msiexec 'downgrade' @('/i', "`"$CurrentMsi`"")

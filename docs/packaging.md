@@ -161,7 +161,8 @@ deferred, as SYSTEM.
   again. The earlier values are read in the elevated part of the install only: the user-interface
   part of an interactive install runs unelevated and cannot read the key.
 - **Notifier.** `palisade-tray.exe` is started in every user's session at sign-in, from the
-  per-machine Run key, unless `NO_TRAY=1`. The conditional parts (this entry, `ADD_TO_PATH` and
+  per-machine Run key, unless `NO_TRAY=1` or the machine is Server Core, which has no desktop
+  shell (`InstallationType` is `Server Core`; see [Platforms](#platforms)). The conditional parts (this entry, `ADD_TO_PATH` and
   each stored setting) are re-evaluated on a repair or reinstall, so
   `msiexec /i <package> REINSTALL=ALL REINSTALLMODE=amus NO_TRAY=1` removes the entry, and
   `NO_TRAY=0` puts it back.
@@ -241,6 +242,66 @@ An upgrade or repair keeps a stored token not used yet. Removal leaves it in the
 folder with the agent's other state; removing data on uninstall belongs to #222. CI checks that a
 random token is in none of the verbose logs, is stored, opens with the machine's data protection to
 the same value, and has the folder's ACL.
+
+## Platforms
+
+How the agent and the package behave on each kind of Windows (#68). The agent reads its platform
+profile at every start (`palisade_agent::profile`) and logs it; enforcement is never relaxed by it.
+
+| Platform | Detected from (`HKLM`) | Behaviour |
+|---|---|---|
+| Client, x64 or ARM64 | `ProductType` `WinNT` | Device class `Workstation`. The ARM64 package is built and installed natively on ARM64. |
+| Server with a desktop | `ProductType` `ServerNT` | Device class `Server`. |
+| Server Core | `ServerNT` or `LanmanNT`, and `InstallationType` `Server Core` | Device class `Server`. The package never starts the notifier at sign-in, whatever `NO_TRAY` says, and the agent reports no interactive helpers (`Profile::interactive_helpers`), for the session helper (#56) and the notifier (#146). Nothing else differs: the service, ACLs and settings are the same. |
+| Domain controller | `ProductType` `LanmanNT` | Device class `Server`, with `Profile::domain_controller` set for server defaults (#65) and learning (E05). |
+| Session host server | `TSAppCompat` 1 (not on Server Core) | Device class `MultiSession`: one service per host. Per-session context comes with the session helper (#56) and events (#63). |
+| Multi-session client edition | `EditionID` `ServerRdsh` (it reports `ServerNT`) | Device class `MultiSession`. |
+
+A fact that cannot be read is logged and never switches a feature off: an unknown product type is a
+`Workstation` with a desktop.
+
+### Golden images, VDI and clones
+
+A device identity must never be shared by two machines. Before an image is generalised and
+captured:
+
+```bat
+sc.exe stop PalisadeAgent
+"%ProgramFiles%\Palisade\palisade-agent.exe" --seal-image
+```
+
+`--seal-image` (`palisade_agent::image::seal`) removes everything that identifies this device: the
+stored enrolment token and the handoff file, the device ID, key and certificate that enrolment
+(#223) will write, the record of the machine they were made on, and the event queue. It keeps the
+policy cache, so clones enforce the image's policy before their first check-in, the inventory, the
+install-time settings and the logs. It then writes `image.sealed`, recording the machine GUID
+(`SOFTWARE\…\Cryptography\MachineGuid`), which the OS generates again on a generalised image's
+first boot. If the GUID cannot be read, nothing is changed.
+
+At every start the agent decides its identity state (`image::identity_state`):
+
+| State | When | The device identity | Enrolment |
+|---|---|---|---|
+| `SealedTemplate` | Sealed, same machine GUID | Not used | Does not enrol, so the template never gets an identity its clones inherit |
+| `FirstBootClone` | Sealed, different GUID | Not used | Enrols with a new identity, then `finish_reidentify` clears the seal |
+| `CopiedIdentity` | No seal, but the identity was made on another GUID (an unsealed image was cloned) | Not used | Enrols again |
+| `Unknown` | The GUID cannot be read | Not used | Does not enrol |
+| `Normal` | Otherwise | Used | As configured |
+
+A non-persistent desktop that resets to the sealed image at every sign-out is a first-boot clone
+each time, and gets a new identity at each boot; stale-record clean-up and reuse by host name are
+the server's (#10, #223). The policy-driven VDI settings of #68 (`vdi.identity_mode`, delta
+inventory, flush on logoff) and further clone signals (SMBIOS UUID, machine SID) come with
+enrolment and the event pipeline.
+
+### What is verified where
+
+| Check | Where |
+|---|---|
+| Package install, upgrade, repair, removal, service, ACLs, token hand-over | CI `package` job, Windows x64 (`windows-latest`, a Server edition with a desktop) and Windows 11 ARM64 (`windows-11-arm`), natively |
+| Notifier autostart left out on Server Core | Package table check in `xtask` tests; the smoke test follows the runner's installation type, which on the hosted runners is never Server Core |
+| Profile detection, device class, seal and clone states | Unit tests on the mock registry, on every OS |
+| Server Core, domain controller, session host, multi-session client, sysprep and clones on real machines | Not yet: the VM harness (#26). Until then they are verified only by the unit tests above |
 
 ## Tests in CI
 
