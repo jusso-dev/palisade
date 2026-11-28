@@ -1069,6 +1069,9 @@ impl<'p> Tracer<'p> {
             if out_of_scope(i) {
                 continue;
             }
+            // Attribute rules are consulted only after a stage-4 allow
+            // (#329); otherwise their unknowns had no effect.
+            let consulted = r.stage != RuleStage::Attribute || after_allow(decider);
             let contributing = r.contributing(res);
             for ((leaf, lr), counts) in r.leaves.iter().zip(&res.leaves).zip(contributing) {
                 used.insert((leaf.criterion.field, Selector::of(leaf.criterion)));
@@ -1093,7 +1096,7 @@ impl<'p> Tracer<'p> {
                 }
                 // Only an unknown that left the rule's result unknown had an
                 // effect on it: one Kleene logic did not absorb.
-                if counts && lr.effective == Tri::Unknown && res.tree == Tri::Unknown {
+                if consulted && counts && lr.effective == Tri::Unknown && res.tree == Tri::Unknown {
                     let e = unknown.entry(leaf.criterion.field).or_default();
                     e.0.extend(lr.notes.iter().map(Note::as_str));
                     e.1.insert(unknown_effect(r));
@@ -1489,6 +1492,18 @@ fn role_of(r: RuleRef, decision: Option<&Decision>) -> MatchRole {
     }
 }
 
+/// Whether stage 4 allowed the object, so stage 5 ran (#329): an allow
+/// decided at stage 4, or an attribute deny that blocked one.
+fn after_allow(decider: Option<&TracedRule<'_>>) -> bool {
+    decider.is_some_and(|r| match r.stage {
+        RuleStage::Attribute => true,
+        RuleStage::Policy => {
+            crate::precedence::Verdict::of(&r.rule.action).is_some_and(|v| v.allows())
+        }
+        _ => false,
+    })
+}
+
 fn stages(
     decision: Option<&Decision>,
     decider: Option<&TracedRule<'_>>,
@@ -1527,8 +1542,12 @@ fn stages(
             let outcome = match position {
                 None => StageOutcome::Skipped,
                 Some(p) if i == p => StageOutcome::Decided,
-                // Attribute rules only run after an allow (#329), and a
-                // session stage only runs with a session.
+                // Attribute rules only run after a stage-4 allow (#329):
+                // then stage 5 ran and passed it on.
+                Some(_) if name == StageName::Attribute && after_allow(decider) => {
+                    StageOutcome::Passed
+                }
+                // A session stage only runs with a session.
                 Some(p) if i < p => match name {
                     // Stage 5 is only reached by an allow, which is a
                     // later stage only when stage 6 decided: never.

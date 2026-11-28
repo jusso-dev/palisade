@@ -610,7 +610,13 @@ impl<'p> Evaluator<'p> {
                             rule_id: rule.id,
                             errors,
                         })?,
-                        role: Role::Annotation,
+                        // An attribute rule's twin stays post-allow: it
+                        // annotates only an object stage 4 allowed (#329).
+                        role: if rule.attribute {
+                            Role::Attribute { deny: false }
+                        } else {
+                            Role::Annotation
+                        },
                         spec: compiled.spec,
                         unknown_as: UnknownAs::NoMatch,
                         unparseable: Unparseable::Unknown,
@@ -736,17 +742,17 @@ impl<'p> Evaluator<'p> {
 
     /// The inputs of stages 2 to 6 for one subject.
     fn inputs<'a>(&'a self, subject: &Subject<'a>, matched: &[&Compiled<'p>]) -> Inputs<'a> {
-        // An object is blocklisted when a rule that denies it matched, or a
-        // native `audit` entry of a blocklist set (a blocklist's watch
-        // entry: the user is not asked to allow it, #39). The `audit` twin
-        // of an expired rule never counts: an expired rule only annotates.
+        // An object is blocklisted when a mandatory or stage-4 deny matched
+        // it, or a native `audit` entry of a blocklist set (a blocklist's
+        // watch entry: the user is not asked to allow it, #39). The `audit`
+        // twin of an expired rule never counts: an expired rule only
+        // annotates. Nor does an attribute deny: it acts only after a
+        // stage-4 allow (#329), and stage 6 is never reached after one.
         // `ignore` is valid only in `mixed` sets and never denies.
         let blocklisted = matched.iter().any(|r| {
             !r.twin
-                && (matches!(
-                    r.role,
-                    Role::Mandatory | Role::Policy(Verdict::Deny) | Role::Attribute { deny: true }
-                ) || (r.role == Role::Annotation && r.set.kind == RuleSetKind::Blocklist))
+                && (matches!(r.role, Role::Mandatory | Role::Policy(Verdict::Deny))
+                    || (r.role == Role::Annotation && r.set.kind == RuleSetKind::Blocklist))
         });
         Inputs {
             six: StageSix::new(
@@ -982,7 +988,11 @@ impl<'p> Evaluator<'p> {
             let effective = self.mode_of(t, winner, &base, boot);
             let learning = effective.mode == Mode::Learning && full.unhandled();
             let directives = one.directives();
-            return full.relaxed(effective, directives, learning);
+            // The rerun may reach stage 5 past a deny set aside: its
+            // attribute audits annotate the object that now runs (#329).
+            return full
+                .relaxed(effective, directives, learning)
+                .with_annotations(one.decision.annotations().iter().copied());
         }
         let Some(_) = state.session else {
             return one
@@ -1010,6 +1020,7 @@ impl<'p> Evaluator<'p> {
         one.decision
             .with_overridden(one.dropped)
             .relaxed(effective, directives, false)
+            .with_annotations(two.decision.annotations().iter().copied())
     }
 
     /// The effective mode of a decision decided by `rule`, or by stage 6

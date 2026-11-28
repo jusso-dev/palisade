@@ -55,7 +55,7 @@
     },
     {
       "name": "attribute",
-      "outcome": "skipped",
+      "outcome": "passed",
       "candidates": 0,
       "duration_ns": null
     },

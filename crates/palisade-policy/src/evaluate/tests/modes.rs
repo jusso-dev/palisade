@@ -846,3 +846,40 @@ fn each_mode_reports_the_decisions_the_issue_lists() {
     assert_eq!(d.outcome(), Outcome::AllowedOverride);
     assert_eq!(report(&d), Report::Event);
 }
+
+#[test]
+fn a_relaxed_attribute_deny_keeps_the_attribute_audits() {
+    // An allow (set 1) narrowed by an attribute deny in an audit-mode set
+    // (set 2), with an attribute audit (#329). The deny is set aside, so the
+    // object runs, still annotated by the audit.
+    let narrow = crit("path.file_name", "equals", "tool.exe");
+    let mut doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![
+            (
+                1,
+                "mixed",
+                false,
+                false,
+                vec![
+                    rule(1, hash_a(), allow()),
+                    attribute(3, narrow.clone(), audit()),
+                ],
+            ),
+            (
+                2,
+                "blocklist",
+                false,
+                false,
+                vec![attribute(2, narrow, deny())],
+            ),
+        ],
+    );
+    doc.rule_sets[1].mode_override = Some(Mode::Audit);
+    let d = in_mode(&validated(doc), Mode::Enforce);
+    assert_eq!(d.outcome(), Outcome::AllowedAudit);
+    assert_eq!(winner(&d), Some(2));
+    assert_eq!(numbers(d.overridden()), vec![1]);
+    assert_eq!(numbers(d.annotations()), vec![3]);
+}

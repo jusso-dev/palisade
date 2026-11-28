@@ -601,6 +601,25 @@ fn a_blocklisted_object_is_never_promptable() {
 }
 
 #[test]
+fn an_attribute_deny_without_an_allow_leaves_the_object_promptable() {
+    // A post-allow attribute rule (#329) has no effect on an object stage 4
+    // did not allow: it does not make the object blocklisted.
+    let attribute = serde_json::json!({
+        "id": rule_id(1), "name": "Narrow", "attribute": true,
+        "match": {"criterion": {"field": "hash.sha256", "operator": "equals", "values": [sha('a')]}},
+        "action": {"type": "deny"},
+    });
+    let v = valid(doc_with(
+        serde_json::json!({"default": "prompt", "prompt": {"fallback": "detect"}}),
+        &[(SET, "mixed", false, vec![attribute])],
+    ));
+    let facts = object(&[LocationClass::Temp], &[]);
+    let d = decide_with(&v, ObjectType::Executable, &facts, &interactive_context());
+    assert_eq!(d.outcome(), Outcome::PendingUser);
+    assert_eq!(d.unknown().unwrap().fallback, None);
+}
+
+#[test]
 fn preexisting_files_are_blocked_unless_the_baseline_allows_them() {
     let v = valid(doc(serde_json::json!({"default": "detect"})));
     let d = decide(
