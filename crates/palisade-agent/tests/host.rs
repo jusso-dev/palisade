@@ -22,7 +22,13 @@ async fn run_until_starts_then_stops_on_request() {
     let supervisor = host::supervisor(&loaded).unwrap();
     assert_eq!(
         supervisor.start_order(),
-        ["config", "clock", "inventory", "policy_cache"]
+        [
+            "config",
+            "clock",
+            "event-pipeline",
+            "inventory",
+            "policy_cache"
+        ]
     );
     let mut started = false;
     let (request, report) = host::run_until(supervisor, || started = true, async {
@@ -38,6 +44,7 @@ async fn run_until_starts_then_stops_on_request() {
         [
             ("policy_cache", StopOutcome::Clean),
             ("inventory", StopOutcome::Clean),
+            ("event-pipeline", StopOutcome::Clean),
             ("clock", StopOutcome::Clean),
             ("config", StopOutcome::Clean)
         ]

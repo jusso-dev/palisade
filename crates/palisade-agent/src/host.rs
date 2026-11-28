@@ -302,19 +302,39 @@ impl Subsystem for ConfigSubsystem {
 /// [`ConfigSubsystem::subscribe`] receiver), declare their dependencies, and
 /// push them after the subsystems they depend on.
 pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
+    with_events(loaded, None).0
+}
+
+/// [`builtin_subsystems`] with the event pipeline (#63) spooling to
+/// `spool_dir` (in memory when `None`), and the pipeline's intake for the
+/// OS subsystems.
+fn with_events(
+    loaded: &LoadedConfig,
+    spool_dir: Option<std::path::PathBuf>,
+) -> (Vec<Arc<dyn Subsystem>>, crate::pipeline::intake::Intake) {
     let config = Arc::new(ConfigSubsystem::new(loaded.clone()));
     let clock = Arc::new(ClockMonitor::new(SystemClock));
+    // No server connection until #62: everything stays in the spool.
+    let events = Arc::new(
+        crate::pipeline::subsystem::EventPipeline::new(
+            SystemClock,
+            spool_dir,
+            Arc::new(crate::pipeline::upload::OfflineUploader),
+        )
+        .with_clock_jumps(clock.subscribe()),
+    );
     let inventory = Arc::new(crate::inventory::subsystem::InventorySubsystem::for_platform());
     // Not enrolled until #62: the first-install policy, and every bundle
     // refused. Enrolment supplies the target, store and record key.
     let policy = Arc::new(crate::policy_cache::PolicyCacheSubsystem::new(
         Arc::new(crate::policy_cache::PolicyCache::unenrolled(
             palisade_policy::engine::EngineConfig::default(),
-            Arc::new(crate::policy_cache::BoundedSink::default()),
+            Arc::new(events.policy_sink()),
         )),
         Arc::new(SystemClock),
     ));
-    vec![config, clock, inventory, policy]
+    let intake = events.intake();
+    (vec![config, clock, events, inventory, policy], intake)
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the
@@ -427,8 +447,12 @@ fn supervisor_with(
 /// (#59). Kept apart from [`supervisor`] so tests never start the
 /// machine-wide trace session.
 pub fn agent_supervisor(loaded: &LoadedConfig) -> Result<Supervisor, SupervisorError> {
-    let mut subsystems = builtin_subsystems(loaded);
-    subsystems.extend(crate::telemetry::os_subsystems());
+    let spool_dir = crate::pipeline::subsystem::spool_dir().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "no spool directory; events are kept in memory");
+        None
+    });
+    let (mut subsystems, intake) = with_events(loaded, spool_dir);
+    subsystems.extend(crate::telemetry::os_subsystems(intake));
     supervisor_with(subsystems, loaded, boot::current())
 }
 
