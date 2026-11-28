@@ -1,0 +1,31 @@
+---
+source: crates/palisade-policy/tests/presets.rs
+---
+{
+  "all": [
+    {
+      "criterion": {
+        "field": "signer.publisher",
+        "operator": "equals",
+        "values": [
+          "Example Ltd"
+        ]
+      }
+    },
+    {
+      "criterion": {
+        "field": "user.is_admin",
+        "operator": "is_false"
+      }
+    },
+    {
+      "criterion": {
+        "field": "device.hostname",
+        "operator": "wildcard",
+        "values": [
+          "WS-*"
+        ]
+      }
+    }
+  ]
+}
