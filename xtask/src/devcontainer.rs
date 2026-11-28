@@ -53,6 +53,74 @@ mod tests {
     /// `cargo xtask ci` checks every tool before it runs a step, so the
     /// image must have all of them, including the MSRV toolchain and
     /// actionlint, which are not cargo-installed.
+    /// Programs the workspace's tests spawn on Linux that the slim base
+    /// image lacks, with the Debian package that provides each.
+    const TEST_PROGRAMS: &[(&str, &str)] = &[("kill", "procps")];
+    /// Programs the tests spawn on Linux that the base image already has
+    /// (`coreutils`, which every Debian image includes).
+    const IN_BASE_IMAGE: &[&str] = &["mkfifo"];
+    /// Programs only the Windows tests spawn; they never run in the image.
+    const WINDOWS_ONLY: &[&str] = &[
+        "attrib",
+        "certutil",
+        "cmd",
+        "cmd.exe",
+        "diskpart",
+        "fsutil",
+        "icacls",
+        "net",
+        "powershell",
+        "powershell.exe",
+    ];
+
+    #[test]
+    fn the_image_has_every_program_the_tests_spawn() {
+        let dockerfile = read(".devcontainer/Dockerfile");
+        let install = dockerfile
+            .split("apt-get install")
+            .nth(1)
+            .and_then(|rest| rest.split("&& rm -rf").next())
+            .unwrap();
+        for (program, package) in TEST_PROGRAMS {
+            assert!(
+                install.split_whitespace().any(|w| w == *package),
+                "the image must install {package} for `{program}`, which the tests run"
+            );
+        }
+        // Every program a test spawns by a literal name is either listed
+        // above or a Rust tool, so a new one cannot be missed.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut spawned = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(root.join("crates")).unwrap() {
+            let tests = entry.unwrap().path().join("tests");
+            let Ok(files) = std::fs::read_dir(&tests) else {
+                continue;
+            };
+            for file in files {
+                let path = file.unwrap().path();
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for piece in text.split("Command::new(\"").skip(1) {
+                    if let Some((name, _)) = piece.split_once('"') {
+                        spawned.insert(name.to_owned());
+                    }
+                }
+            }
+        }
+        assert!(spawned.contains("kill"), "{spawned:?}");
+        for name in &spawned {
+            let known = TEST_PROGRAMS.iter().any(|(p, _)| p == name)
+                || IN_BASE_IMAGE.contains(&name.as_str())
+                || WINDOWS_ONLY.contains(&name.as_str());
+            assert!(
+                known,
+                "a test spawns `{name}`: add it to TEST_PROGRAMS with the Debian package the image must install, or to IN_BASE_IMAGE or WINDOWS_ONLY"
+            );
+        }
+    }
+
     #[test]
     fn the_image_has_every_tool_xtask_ci_needs() {
         let dockerfile = read(".devcontainer/Dockerfile");
