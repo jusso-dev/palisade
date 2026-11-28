@@ -275,7 +275,8 @@ impl Subsystem for ConfigSubsystem {
 pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
     let config = Arc::new(ConfigSubsystem::new(loaded.clone()));
     let clock = Arc::new(ClockMonitor::new(SystemClock));
-    vec![config, clock]
+    let inventory = Arc::new(crate::inventory::subsystem::InventorySubsystem::for_platform());
+    vec![config, clock, inventory]
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the

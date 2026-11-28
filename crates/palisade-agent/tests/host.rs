@@ -20,7 +20,7 @@ async fn run_until_starts_then_stops_on_request() {
         source: None,
     };
     let supervisor = host::supervisor(&loaded).unwrap();
-    assert_eq!(supervisor.start_order(), ["config", "clock"]);
+    assert_eq!(supervisor.start_order(), ["config", "clock", "inventory"]);
     let mut started = false;
     let (request, report) = host::run_until(supervisor, || started = true, async {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -33,6 +33,7 @@ async fn run_until_starts_then_stops_on_request() {
     assert_eq!(
         report.outcomes,
         [
+            ("inventory", StopOutcome::Clean),
             ("clock", StopOutcome::Clean),
             ("config", StopOutcome::Clean)
         ]
