@@ -94,7 +94,8 @@ pub use record::{
     MasqueradeReason, MotwSummary, NameInfo, NotYetDefined, OwnerSummary, PackageSummary, PathInfo,
     PdbSummary, PeSummary, Pending, PublisherProduct, ReparseSummary, SCHEMA_VERSION,
     ScriptSummary, SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary,
-    Timestamps, TrustSource, TrustedSigner, VersionSummary, VolumeSummary, WritableSummary,
+    StreamsSummary, Timestamps, TrustSource, TrustedSigner, VersionSummary, VolumeSummary,
+    WritableSummary,
 };
 pub use strength::{AttributeStrength, IdentityStrength};
 pub use tier::{Tier, TierParseError, Tiers};
@@ -113,9 +114,16 @@ impl FileIdentity {
     /// last-write or creation time, or a different content digest; and when
     /// both records hold attributes derived from the content, unless both
     /// carry the same content digest. Otherwise an attribute only one record
-    /// has is not compared. Without a change journal (off Windows, or on a
-    /// volume without one), a file rewritten in place with the same size and
-    /// restored times is not detected by the file system fields.
+    /// has is not compared.
+    ///
+    /// The file ID and change journal stamp are read by the context tier
+    /// only, so they are compared only between two records that both ran
+    /// it. What joins an execution-time record (T0 to T3) to a later one
+    /// (T4 and T5) is the content digest: the deep tier reads the content
+    /// too, so both carry one and must agree. A later record of the context
+    /// tier alone carries no digest, and is joined on the path, final path,
+    /// size and times; a file rewritten in place with the same size and
+    /// restored times is not detected then.
     pub fn merge(&mut self, other: Self, ctx: &IdentityContext<'_>) -> bool {
         fn differ<T: PartialEq>(a: Option<T>, b: Option<T>) -> bool {
             matches!((a, b), (Some(a), Some(b)) if a != b)

@@ -1203,8 +1203,9 @@ fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
     };
 
     id.fs.streams = match links::read_streams(file) {
-        Ok(s) => Field::Computed(
-            s.streams
+        Ok(s) => Field::Computed(super::record::StreamsSummary {
+            streams: s
+                .streams
                 .iter()
                 .map(|st| super::record::StreamSummary {
                     name: st.name.clone(),
@@ -1213,7 +1214,8 @@ fn read_fs_details(id: &mut FileIdentity, file: &std::fs::File) {
                     executable_content: st.is_executable_content,
                 })
                 .collect(),
-        ),
+            truncated: s.truncated,
+        }),
         Err(e) => Field::Unavailable(unavailable(&e)),
     };
 

@@ -877,6 +877,16 @@ pub struct WritableSummary {
     pub principals_with_write: Vec<String>,
 }
 
+/// A file's alternate data streams (#54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StreamsSummary {
+    /// The named streams, as far as they were listed.
+    pub streams: Vec<StreamSummary>,
+    /// The OS listing stopped at its limit: more streams exist than are
+    /// listed, so the absence of one proves nothing.
+    pub truncated: bool,
+}
+
 /// One alternate data stream (#54).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StreamSummary {
@@ -1111,7 +1121,7 @@ pub struct FsInfo {
     /// strength unless this is computed and says it is not.
     pub user_writable: Field<WritableSummary>,
     /// Alternate data streams (context tier, #54).
-    pub streams: Field<Vec<StreamSummary>>,
+    pub streams: Field<StreamsSummary>,
     /// The reparse point the path names, if any (context tier, #54).
     /// `Computed(None)` means it is not a reparse point.
     pub reparse: Field<Option<ReparseSummary>>,

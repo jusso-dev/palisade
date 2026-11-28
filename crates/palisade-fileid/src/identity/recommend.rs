@@ -289,7 +289,15 @@ pub fn recommend(id: &FileIdentity) -> Recommendation {
     // non-administrators can write the path, or its writability is not
     // known (ISM-1392).
     if id.fs.path.computed().is_some_and(|p| !p.claimed) {
+        let local = id
+            .fs
+            .volume
+            .computed()
+            .is_some_and(|v| matches!(v.location.as_str(), "os_volume" | "other_fixed"));
         let why = match id.fs.user_writable.computed() {
+            Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin && !local => {
+                "path rule refused: the volume is not a local fixed disk, so its permissions do not protect the path"
+            }
             Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin => {
                 "path rule not recommended: the path is not writable by non-administrators, but a content or signer rule identifies the file itself"
             }

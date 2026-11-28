@@ -7,8 +7,8 @@
 //! | Class | Attributes |
 //! |---|---|
 //! | Strong | flat SHA-256 (and SHA-384, SHA-512); Authenticode SHA-256 of a conformant image; the chain identity (thumbprints, TBS hashes) of a trusted signer |
-//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; the normalised MSI hash; the package family name of a package whose valid signature a trusted signer made; a path that is not user-writable |
-//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; the normalised script hash; the package family name of a package no trusted signer binds; an installer's product and upgrade codes and `Manufacturer`; a user-writable path, or one whose writability is unknown |
+//! | Medium | a trusted publisher, alone or with product, file name and version; `OriginalFilename` under a trusted signature; the SHA-256 page hash value; the normalised MSI hash; the package family name of a package whose valid signature a trusted signer made; a path on a local fixed disk that is not user-writable |
+//! | Weak | `CompanyName`, `ProductName`, `FileDescription` and `InternalName`; `OriginalFilename` on a file no trusted signer covers; an untrusted signer; the file name; the normalised script hash; the package family name of a package no trusted signer binds; an installer's product and upgrade codes and `Manufacturer`; a user-writable path, one whose writability is unknown, or one on a network, removable or unknown volume |
 //! | Insecure | SHA-1 and MD5 digests of any kind; the digest of an empty file; the Authenticode digest of a non-conformant image; a catalog match that relies on SHA-1 |
 //!
 //! An attribute that is not in the record has no entry.
@@ -288,7 +288,20 @@ pub fn classify(id: &FileIdentity) -> Vec<AttributeStrength> {
         // Medium only when the access check proved that no
         // non-administrator can write the file or any folder above it on
         // its real or lexical chain. Unknown counts as user-writable.
+        // The ACL is only worth something on a local fixed disk: a network
+        // share's server, or whoever holds a removable disk, decides what
+        // its folders hold whatever they say.
+        let local = id
+            .fs
+            .volume
+            .computed()
+            .is_some_and(|v| matches!(v.location.as_str(), "os_volume" | "other_fixed"));
         out.push(match id.fs.user_writable.computed() {
+            Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin && !local => entry(
+                "path",
+                Weak,
+                "the volume is not a local fixed disk (or its kind is not known), so its permissions do not protect the path",
+            ),
             Some(w) if !w.path_user_writable && !w.change_perms_by_non_admin => entry(
                 "path",
                 Medium,

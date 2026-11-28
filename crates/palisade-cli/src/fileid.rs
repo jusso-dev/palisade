@@ -583,8 +583,14 @@ fn inspect_streams(
             return true;
         }
     };
+    // A listing cut short at the OS limit cannot show which streams
+    // exist: the ones listed are identified, and the run fails.
     let mut failed = false;
-    for stream in streams.iter().filter(|s| s.benign.is_none()) {
+    if let Some(why) = streams_incomplete(streams) {
+        report_failure(host, &why, format);
+        failed = true;
+    }
+    for stream in streams.streams.iter().filter(|s| s.benign.is_none()) {
         let mut name = host.as_os_str().to_owned();
         name.push(":");
         name.push(&stream.name);
@@ -601,6 +607,17 @@ fn inspect_streams(
         }
     }
     failed
+}
+
+/// Why a stream listing cannot be relied on to name every stream: the OS
+/// stopped at its limit.
+fn streams_incomplete(streams: &identity::StreamsSummary) -> Option<String> {
+    streams.truncated.then(|| {
+        format!(
+            "it has more streams than the OS lists ({} listed); the rest were not identified",
+            streams.streams.len()
+        )
+    })
 }
 
 fn report_failure(path: &Path, message: &str, format: Format) {
@@ -1015,6 +1032,19 @@ fn explain(path: &Path, json_out: bool, args: &TrustArgs) -> Result<ExitCode, Fa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stream listing the OS cut short fails `--include-ads` (#344
+    /// review m1); a complete one does not.
+    #[test]
+    fn a_truncated_stream_list_fails() {
+        let mut streams = identity::StreamsSummary {
+            streams: Vec::new(),
+            truncated: false,
+        };
+        assert!(streams_incomplete(&streams).is_none());
+        streams.truncated = true;
+        assert!(streams_incomplete(&streams).is_some_and(|w| w.contains("more streams")));
+    }
 
     #[test]
     fn pem_decodes() {

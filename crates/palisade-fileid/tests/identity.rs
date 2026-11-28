@@ -550,6 +550,19 @@ fn path_strength_follows_proven_writability() {
     std::fs::write(&path, &image).unwrap();
     let mut id = identify(&path, Tiers::ALL, &ctx()).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
+    let volume = |location: &str| {
+        Field::Computed(palisade_fileid::identity::VolumeSummary {
+            fs_type: Some("ntfs".to_owned()),
+            location: location.to_owned(),
+            drive_type: None,
+            bus_type: None,
+            is_hotplug: Some(false),
+            is_os_volume: Some(location == "os_volume"),
+            serial: None,
+            supports_owner: true,
+        })
+    };
+    id.fs.volume = volume("os_volume");
     let path_strength = |id: &palisade_fileid::identity::FileIdentity| {
         strength::classify(id)
             .into_iter()
@@ -594,4 +607,18 @@ fn path_strength_follows_proven_writability() {
             "{field:?}"
         );
     }
+    // #344 review m2: a proven-safe ACL counts only on a local fixed disk.
+    id.fs.user_writable = Field::Computed(safe);
+    for (location, want) in [
+        ("other_fixed", IdentityStrength::Medium),
+        ("network", IdentityStrength::Weak),
+        ("removable", IdentityStrength::Weak),
+        ("virtual_disk", IdentityStrength::Weak),
+        ("unknown", IdentityStrength::Weak),
+    ] {
+        id.fs.volume = volume(location);
+        assert_eq!(path_strength(&id), Some(want), "{location}");
+    }
+    id.fs.volume = Field::Unavailable("not read".to_owned());
+    assert_eq!(path_strength(&id), Some(IdentityStrength::Weak));
 }
