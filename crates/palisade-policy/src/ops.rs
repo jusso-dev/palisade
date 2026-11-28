@@ -560,6 +560,9 @@ pub struct CompiledCriterion {
     safety_critical: bool,
     /// The `signer` options, for signer fields.
     signer: signer::SignerOpts,
+    /// The [`probe_key`](crate::context::probe::probe_key) of a probed
+    /// field's target (#329).
+    probe: Option<String>,
     values: Values,
 }
 
@@ -613,6 +616,8 @@ enum Values {
     /// A time window, in minutes since midnight: `[start, end)`, wrapping
     /// midnight when `end < start`.
     TimeWindow(u16, u16),
+    /// `exists` on a probed target (#329): no values.
+    Exists,
 }
 
 /// A value that can be ordered: a whole number, an integrity level or a
@@ -692,6 +697,24 @@ impl CompiledCriterion {
         let case_sensitive = c.case_sensitive.unwrap_or(false);
         let anchored = c.anchored.unwrap_or(true);
         let values = compile_values(c.field, operator, case_sensitive, anchored, &c.values)?;
+        let probe = match (c.field.is_probe(), c.target.as_deref()) {
+            (false, _) => None,
+            (true, None) => {
+                return Err(whole(CompileErrorKind::InvalidValue(
+                    "this field needs a `target`: what to probe".to_owned(),
+                )));
+            }
+            (true, Some(t)) => Some(
+                crate::context::probe::probe_key(c.field, t, c.value_name.as_deref()).ok_or_else(
+                    || {
+                        let why = crate::context::probe::canonical_target(c.field, t)
+                            .err()
+                            .unwrap_or_default();
+                        whole(CompileErrorKind::InvalidValue(why))
+                    },
+                )?,
+            ),
+        };
         Ok(Self {
             field: c.field,
             negated: !c.operator.is_positive(),
@@ -701,6 +724,7 @@ impl CompiledCriterion {
             include_sub_ous: c.include_sub_ous.unwrap_or(false),
             safety_critical: c.safety_critical,
             signer: signer::compile_options(c),
+            probe,
             values,
         })
     }
@@ -755,6 +779,15 @@ impl CompiledCriterion {
     }
 
     fn eval_positive(&self, facts: &ObjectFacts, ctx: &EvalContext<'_>, notes: &mut Notes) -> Tri {
+        if let Some(key) = &self.probe {
+            return match ctx.context.probes.get_by_key(key) {
+                Some(probe) => self.eval_probe(probe, notes),
+                None => {
+                    notes.insert(Note::FactMissing);
+                    Tri::Unknown
+                }
+            };
+        }
         if self.field.is_context() {
             return match ctx.context.fact(self.field) {
                 Some(fact) => self.eval_context(fact, notes),
@@ -939,6 +972,35 @@ impl CompiledCriterion {
         }
     }
 
+    /// What the agent found at a probed target (#329). The operator is
+    /// positive here; `eval` negates it.
+    fn eval_probe(&self, probe: &crate::context::Probe, notes: &mut Notes) -> Tri {
+        use crate::context::Probe;
+        match (probe, &self.values) {
+            (Probe::Absent, Values::Exists) => Tri::NoMatch,
+            (_, Values::Exists) => Tri::Match,
+            // Nothing to compare: no comparison holds, so its negation does.
+            (Probe::Absent, _) => Tri::NoMatch,
+            (Probe::Number(n), Values::Ordered(_) | Values::OrderedRange(..)) => {
+                self.ordered(Ordinal::Number(*n))
+            }
+            (Probe::Text(t), Values::Ordered(_) | Values::OrderedRange(..)) => match number(t) {
+                Some(n) => self.ordered(Ordinal::Number(n)),
+                None => malformed(notes),
+            },
+            (Probe::Number(n), _) => scratch::with_buffer(|text| {
+                use core::fmt::Write as _;
+                text.clear();
+                let _ = write!(text, "{n}");
+                self.eval_value(text, notes)
+            }),
+            (Probe::Text(t), _) => self.eval_value(t, notes),
+            // A key, file or folder has no value, and a binary value none
+            // this can compare.
+            (Probe::Present | Probe::Other, _) => malformed(notes),
+        }
+    }
+
     /// A fact stored in [`ObjectFacts`] by field: a number, a yes-or-no
     /// fact or a GUID is read from its text first (#328), and text that is
     /// not one is malformed, so unknown; anything else is a hash, text or
@@ -1029,7 +1091,8 @@ impl CompiledCriterion {
             | Values::Macs(_)
             | Values::Dns(_)
             | Values::Weekdays(_)
-            | Values::TimeWindow(..) => {
+            | Values::TimeWindow(..)
+            | Values::Exists => {
                 notes.insert(Note::FactMalformed);
                 Tri::Unknown
             }
@@ -1307,6 +1370,18 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
             "`user.ou` and `device.ou`",
         ));
     }
+    if c.target.is_some() && !c.field.is_probe() {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "target",
+            "`env.var`, `reg.key`, `reg.value`, `fs.file` and `fs.folder`",
+        ));
+    }
+    if c.value_name.is_some() && c.field != Field::RegValue {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "value_name",
+            "`reg.value`",
+        ));
+    }
     out
 }
 
@@ -1424,6 +1499,28 @@ fn compile_values(
         // The operator alone says what the fact must be; the number of
         // values (none) is checked with the operator.
         FieldClass::Bool => Values::Bool(operator == Operator::IsTrue),
+        // `exists` and `not_exists` (#329), with no values.
+        FieldClass::Presence | FieldClass::ProbeValue if operator == Operator::Exists => {
+            Values::Exists
+        }
+        // A registry number is compared as a number.
+        FieldClass::ProbeValue if operator.is_ordered() => {
+            let parsed = each(values, |v| {
+                number(v).map(Ordinal::Number).ok_or_else(|| {
+                    invalid("expected a whole number from 0 to 18446744073709551615, in decimal")
+                })
+            })?;
+            match (operator, parsed.as_slice()) {
+                (Operator::Between, [min, max]) if min > max => {
+                    return Err(vec![CompileError {
+                        value: Some(1),
+                        kind: invalid("the maximum is below the minimum"),
+                    }]);
+                }
+                (Operator::Between, [min, max]) => Values::OrderedRange(*min, *max),
+                _ => Values::Ordered(parsed),
+            }
+        }
         FieldClass::Number | FieldClass::IntegrityLevel | FieldClass::Date => {
             let parse = |v: &str| -> Result<Ordinal, CompileErrorKind> {
                 match field.class() {
@@ -1531,7 +1628,11 @@ fn compile_values(
                 Ok(fold(&v.replace('/', "\\"), case_sensitive))
             })?),
         },
-        FieldClass::FileName | FieldClass::Text | FieldClass::PrincipalName => {
+        FieldClass::FileName
+        | FieldClass::Text
+        | FieldClass::PrincipalName
+        | FieldClass::ProbeValue
+        | FieldClass::Presence => {
             let check = |v: &str| {
                 if field == Field::PathExtension && v.starts_with('.') {
                     return Err(invalid("write the extension without its leading `.`"));

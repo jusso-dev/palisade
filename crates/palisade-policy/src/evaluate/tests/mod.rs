@@ -1024,3 +1024,41 @@ fn a_disabled_or_unmatched_catch_all_leaves_the_unknown_policy() {
     let d = decide(&validated(doc));
     assert_eq!(winner(&d), None);
 }
+
+#[test]
+fn a_probed_fact_never_relaxes_a_decision_when_it_is_missing() {
+    // An allow narrowed by a machine-hive key, and a deny of the same file
+    // unless a kill-switch file exists. With nothing probed, the allow does
+    // not apply and the deny does not apply either: the unknown policy
+    // blocks (#329, ADR 0018).
+    let key = serde_json::json!({"criterion": {"field": "reg.key", "operator": "exists", "target": "HKLM\\Software\\Approved"}});
+    let allow_rule = rule(1, serde_json::json!({"all": [hash_a(), key]}), allow());
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(1, "mixed", false, false, vec![allow_rule])],
+    );
+    let policy = validated(doc);
+    let d = decide(&policy);
+    assert_eq!(d.reason_code(), ReasonCode::ImplicitDenyUnknown);
+    // Probed and present: the allow applies.
+    let variables = PathVariables::new();
+    let mut context = EvaluationContext::new();
+    context.probes.insert(
+        Field::RegKey,
+        "HKEY_LOCAL_MACHINE\\SOFTWARE\\approved",
+        None,
+        crate::context::Probe::Present,
+    );
+    let facts = facts();
+    let d = Evaluator::new(&policy).unwrap().evaluate(
+        &Subject {
+            object_type: ObjectType::Executable,
+            facts: &facts,
+            variables: &variables,
+            context: &context,
+        },
+        TRACE,
+    );
+    assert_eq!(d.outcome(), Outcome::Allowed);
+}

@@ -157,6 +157,11 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         .boxed(),
         // Never used: yes-or-no operators take no values.
         (FieldClass::Bool, _) => Just(String::new()).boxed(),
+        // Never used either: `exists` takes no values (#329).
+        (FieldClass::Presence, _) => Just(String::new()).boxed(),
+        (FieldClass::ProbeValue, op) if op.is_ordered() => {
+            (0u64..100_000).prop_map(|n| n.to_string()).boxed()
+        }
         (FieldClass::PrincipalName, _) => "[A-Z]{1,8}\\\\[a-z0-9.]{1,12}".boxed(),
         (FieldClass::Number, _) => (0u64..100_000).prop_map(|n| n.to_string()).boxed(),
         (FieldClass::IntegrityLevel, _) => proptest::sample::select(
@@ -222,7 +227,7 @@ fn value_for(class: FieldClass, operator: Operator) -> BoxedStrategy<String> {
         }
         (FieldClass::Path, _) => "[A-Za-z]:\\\\[A-Za-z0-9 _\\\\.-]{1,40}".boxed(),
         (FieldClass::FileName, _) => "[A-Za-z0-9 _-]{1,30}(\\.[a-z]{1,4})?".boxed(),
-        (FieldClass::Text, _) => "[A-Za-z0-9 ,.\u{e9}-]{1,40}".boxed(),
+        (FieldClass::Text | FieldClass::ProbeValue, _) => "[A-Za-z0-9 ,.\u{e9}-]{1,40}".boxed(),
     }
 }
 
@@ -249,7 +254,9 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
                     }
                     // Numbers and dates sort as their text when padded;
                     // numbers are compared as numbers.
-                    Operator::Between if class == FieldClass::Number => {
+                    Operator::Between
+                        if matches!(class, FieldClass::Number | FieldClass::ProbeValue) =>
+                    {
                         values.sort_by_key(|v| v.parse::<u64>().unwrap_or(0));
                     }
                     Operator::Between if class == FieldClass::IntegrityLevel => {
@@ -267,8 +274,18 @@ pub fn criterion() -> impl Strategy<Value = Criterion> {
                     }
                     _ => {}
                 }
+                // A probed field needs a target (#329), here in the
+                // machine hive or a fixed path; `user_controlled_context`
+                // is tested on its own.
+                let target = match field {
+                    Field::EnvVar => Some("PALISADE_TEST".to_owned()),
+                    Field::RegKey | Field::RegValue => Some("HKLM\\Software\\Example".to_owned()),
+                    Field::FsFile | Field::FsFolder => Some("C:\\Example\\flag".to_owned()),
+                    _ => None,
+                };
                 Criterion {
                     case_sensitive: case,
+                    target,
                     ..Criterion::new(field, operator, values)
                 }
             })

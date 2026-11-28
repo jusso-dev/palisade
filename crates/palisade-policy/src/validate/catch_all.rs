@@ -126,4 +126,6 @@ impl Validator {
 }
 
 #[cfg(test)]
+mod probe_tests;
+#[cfg(test)]
 mod tests;

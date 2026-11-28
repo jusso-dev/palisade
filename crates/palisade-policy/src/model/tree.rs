@@ -140,6 +140,18 @@ pub struct Criterion {
     /// option's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signer: Option<Box<SignerOptions>>,
+    /// Only for `env.*`, `reg.*` and `fs.*` fields, which need it: what the
+    /// criterion probes (#329). An environment variable's name; a registry
+    /// key, starting with its hive (`HKLM`, `HKCU`, `HKU` or `HKCR`, or
+    /// the long names); or a drive or UNC path, with no wildcard or stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 2048))]
+    pub target: Option<String>,
+    /// Only for `reg.value`: the name of the value. Unset means the key's
+    /// default value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 2048))]
+    pub value_name: Option<String>,
 }
 
 impl Criterion {
@@ -161,6 +173,23 @@ impl Criterion {
             include_sub_ous: None,
             safety_critical: false,
             signer: None,
+            target: None,
+            value_name: None,
+        }
+    }
+
+    /// A criterion that probes `target` (#329): an `env.*`, `reg.*` or
+    /// `fs.*` field.
+    #[must_use]
+    pub fn probe<S: Into<String>>(
+        field: Field,
+        operator: Operator,
+        target: impl Into<String>,
+        values: impl IntoIterator<Item = S>,
+    ) -> Self {
+        Self {
+            target: Some(target.into()),
+            ..Self::new(field, operator, values)
         }
     }
 }
@@ -659,6 +688,32 @@ pub enum Field {
     /// `meta.extension_type` `inert`.
     #[serde(rename = "meta.extension_type")]
     MetaExtensionType,
+    /// Context (#329): the value of the environment variable `target` in
+    /// the process's environment block. User-controlled: a user sets their
+    /// own environment, so it can only narrow a rule.
+    #[serde(rename = "env.var")]
+    EnvVar,
+    /// Context (#329): whether the registry key `target` exists, such as
+    /// `HKLM\\Software\\Vendor\\App`. Keys under `HKCU`, `HKU` and
+    /// `HKCR` are user-controlled.
+    #[serde(rename = "reg.key")]
+    RegKey,
+    /// Context (#329): the registry value `value_name` (unset: the key's
+    /// default value) of the key `target`. A `REG_DWORD` or `REG_QWORD` is
+    /// a number, which `eq` to `between` compare; text is compared as
+    /// text. Values under `HKCU`, `HKU` and `HKCR` are user-controlled.
+    #[serde(rename = "reg.value")]
+    RegValue,
+    /// Context (#329): whether the file `target` exists. User-controlled:
+    /// whether a user can create or remove a file depends on where it is,
+    /// which a policy cannot see, so every file-system test is treated as
+    /// one a user may control (ADR 0018).
+    #[serde(rename = "fs.file")]
+    FsFile,
+    /// Context (#329): whether the folder `target` exists. User-controlled,
+    /// as `fs.file`.
+    #[serde(rename = "fs.folder")]
+    FsFolder,
 }
 
 /// The type of a field's value, which decides the operators it accepts and
@@ -720,6 +775,14 @@ pub enum FieldClass {
     /// A GUID, such as `{12345678-9ABC-DEF0-1234-56789ABCDEF0}`, compared
     /// with or without braces, in either case (#328).
     Guid,
+    /// Whether something the criterion's `target` names exists: a registry
+    /// key, a file or a folder (#329). Only `exists` and `not_exists`.
+    Presence,
+    /// A value the criterion's `target` names, which may be absent: an
+    /// environment variable or a registry value (#329). `exists`,
+    /// `not_exists`, the text operators, and `eq` to `between` for a
+    /// number.
+    ProbeValue,
 }
 
 impl FieldClass {
@@ -734,6 +797,7 @@ impl FieldClass {
                 | Self::PrincipalName
                 | Self::TagSet
                 | Self::NameSet
+                | Self::ProbeValue
         )
     }
 }
@@ -757,7 +821,7 @@ pub enum Strength {
 
 impl Field {
     /// Every field, in declaration order.
-    pub const ALL: [Self; 92] = [
+    pub const ALL: [Self; 97] = [
         Self::HashSha256,
         Self::HashSha384,
         Self::HashSha512,
@@ -850,6 +914,11 @@ impl Field {
         Self::PathUserCanChangeAcl,
         Self::MetaDetectedType,
         Self::MetaExtensionType,
+        Self::EnvVar,
+        Self::RegKey,
+        Self::RegValue,
+        Self::FsFile,
+        Self::FsFolder,
     ];
 
     /// Whether the field is read from the object's signatures
@@ -895,6 +964,16 @@ impl Field {
     #[must_use]
     pub const fn has_position(self) -> bool {
         matches!(self, Self::SignerTbsHash | Self::SignerSpkiSha256)
+    }
+
+    /// Whether the field probes the system at a `target` (#329): an
+    /// environment variable, a registry key or value, a file or a folder.
+    #[must_use]
+    pub const fn is_probe(self) -> bool {
+        matches!(
+            self,
+            Self::EnvVar | Self::RegKey | Self::RegValue | Self::FsFile | Self::FsFolder
+        )
     }
 
     /// Whether the field describes the context of an evaluation (the user,
@@ -990,6 +1069,8 @@ impl Field {
             | Self::MetaExtensionType => FieldClass::Text,
             Self::PathIsUnc | Self::PathIsAds | Self::PathUserCanChangeAcl => FieldClass::Bool,
             Self::SignerEku => FieldClass::OidSet,
+            Self::RegKey | Self::FsFile | Self::FsFolder => FieldClass::Presence,
+            Self::EnvVar | Self::RegValue => FieldClass::ProbeValue,
         }
     }
 
@@ -1110,7 +1191,12 @@ impl Field {
             | Self::NetLocation
             | Self::TimeWeekday
             | Self::TimeLocalTime
-            | Self::TimeDate => return None,
+            | Self::TimeDate
+            | Self::EnvVar
+            | Self::RegKey
+            | Self::RegValue
+            | Self::FsFile
+            | Self::FsFolder => return None,
         })
     }
 }
@@ -1205,6 +1291,11 @@ pub enum Operator {
     /// The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive
     /// (#32).
     DateBetween,
+    /// What the criterion's `target` names exists (#329). Takes no values.
+    Exists,
+    /// What the criterion's `target` names does not exist (#329). Takes no
+    /// values. Unknown when the agent did not look, like every negation.
+    NotExists,
 }
 
 impl Operator {
@@ -1221,6 +1312,7 @@ impl Operator {
                 | Self::NotRegex
                 | Self::NotMemberOf
                 | Self::Ne
+                | Self::NotExists
         )
     }
 
@@ -1235,6 +1327,7 @@ impl Operator {
             Self::NotRegex => Self::Regex,
             Self::NotMemberOf => Self::MemberOf,
             Self::Ne => Self::Eq,
+            Self::NotExists => Self::Exists,
             other => other,
         }
     }
@@ -1315,7 +1408,7 @@ impl Operator {
             | Self::Lt
             | Self::Le => (1, 1),
             Self::VersionBetween | Self::Between | Self::TimeBetween | Self::DateBetween => (2, 2),
-            Self::IsTrue | Self::IsFalse => (0, 0),
+            Self::IsTrue | Self::IsFalse | Self::Exists | Self::NotExists => (0, 0),
             _ => (1, super::limits::MAX_VALUES_PER_CRITERION),
         }
     }
@@ -1350,6 +1443,12 @@ impl Operator {
             FieldClass::IpSet => self.is_network() || self.is_set(),
             FieldClass::Weekday => matches!(self, Self::WeekdayIn),
             FieldClass::TimeOfDay => matches!(self, Self::TimeBetween),
+            FieldClass::Presence => matches!(self, Self::Exists | Self::NotExists),
+            FieldClass::ProbeValue => {
+                self.is_text()
+                    || self.is_ordered()
+                    || matches!(self, Self::Exists | Self::NotExists)
+            }
         }
     }
 
@@ -1361,7 +1460,7 @@ impl Operator {
     }
 
     /// Every operator, in declaration order.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 37] = [
         Self::Equals,
         Self::NotEquals,
         Self::StartsWith,
@@ -1397,6 +1496,8 @@ impl Operator {
         Self::WeekdayIn,
         Self::TimeBetween,
         Self::DateBetween,
+        Self::Exists,
+        Self::NotExists,
     ];
 }
 
@@ -1406,7 +1507,7 @@ impl Operator {
 fn values_by_operator(schema: &mut schemars::Schema) {
     let rule = serde_json::json!({
         "if": {
-            "properties": { "operator": { "enum": ["is_true", "is_false"] } },
+            "properties": { "operator": { "enum": ["is_true", "is_false", "exists", "not_exists"] } },
             "required": ["operator"]
         },
         "then": { "properties": { "values": { "maxItems": 0 } } },

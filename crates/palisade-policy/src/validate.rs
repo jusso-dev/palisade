@@ -265,6 +265,10 @@ pub enum ErrorCode {
     /// A `first_match` policy has no enabled `catch_all` rule, so objects
     /// no rule matches fall to the unknown policy (#35, #329). A warning.
     CatchAllMissing,
+    /// A rule reads context a user controls: an environment variable, a
+    /// file or folder, or a registry key outside `HKLM` (#33, #329). It can
+    /// only narrow the rule, and a user can change it. A warning.
+    UserControlledContext,
 }
 
 impl ErrorCode {
@@ -350,6 +354,7 @@ impl ErrorCode {
             Self::InvalidCatchAll => "invalid_catch_all",
             Self::PermitAllUnconfirmed => "permit_all_unconfirmed",
             Self::CatchAllMissing => "catch_all_missing",
+            Self::UserControlledContext => "user_controlled_context",
         }
     }
 
@@ -366,7 +371,8 @@ impl ErrorCode {
             | Self::ComplianceWeakened
             | Self::SignatureStatusRelaxed
             | Self::UnindexedRules
-            | Self::CatchAllMissing => Severity::Warning,
+            | Self::CatchAllMissing
+            | Self::UserControlledContext => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -844,7 +850,11 @@ impl Validator {
                 format!("{criteria} criteria; at most {max_criteria} are allowed"),
             );
         }
+        let mut user_controlled: Option<String> = None;
         for (c, path) in ordered {
+            if user_controlled.is_none() && crate::context::probe::is_user_controlled(c) {
+                user_controlled = Some(path.clone());
+            }
             // The operator's own count is checked in `criterion`, against
             // the fixed maximum; a policy's tighter limit is checked here.
             if c.values.len() > max_values && c.values.len() <= MAX_VALUES_PER_CRITERION {
@@ -861,6 +871,30 @@ impl Validator {
             self.signer_options(&path, c, rule.action.kind());
         }
 
+        // User-controlled context (#33, #329). The identity anchor below
+        // keeps it from being the only reason a rule that lets an object
+        // run matches; a catch-all has no anchor, so one that lets objects
+        // run may not read it at all.
+        if let Some(at) = user_controlled {
+            if rule.catch_all && rule.action.kind().permits() {
+                self.push(
+                    ErrorCode::InvalidCatchAll,
+                    &at,
+                    "a catch-all that lets objects run cannot read context a user controls: it would be the only reason an object runs",
+                );
+            } else {
+                let effect = if rule.action.kind().needs_identity() {
+                    "it only narrows the rule, but a user can satisfy it"
+                } else {
+                    "a user can change it to keep the rule from applying"
+                };
+                self.push(
+                    ErrorCode::UserControlledContext,
+                    &at,
+                    format!("this criterion reads context a user controls (an environment variable, a file or folder, or a registry key outside `HKLM`): {effect}"),
+                );
+            }
+        }
         // The recursive analysis is bounded by the depth limit, so it only
         // runs on trees that passed it.
         // Every action that lets an object run, trusts it or excludes it
@@ -953,6 +987,24 @@ impl Validator {
                 "`safety_critical` only applies in a mandatory blocklist",
             );
         }
+        // A probed field needs a valid target (#329).
+        if c.field.is_probe() {
+            match c
+                .target
+                .as_deref()
+                .map(|t| crate::context::probe::canonical_target(c.field, t))
+            {
+                None => self.push(
+                    ErrorCode::InvalidValue,
+                    &format!("{base}/target"),
+                    format!("`{}` needs a `target`: what to probe", serde_name(&c.field)),
+                ),
+                Some(Err(why)) => {
+                    self.push(ErrorCode::InvalidValue, &format!("{base}/target"), why)
+                }
+                Some(Ok(_)) => {}
+            }
+        }
         let (min, max) = c.operator.value_count();
         if c.values.len() < min || c.values.len() > max {
             let expected = if min == max {
@@ -999,7 +1051,12 @@ impl Validator {
         // A misplaced option was reported above and does not change the
         // values, so the bounds are still checked, without the options:
         // the author sees both findings in one pass.
+        let target_ok = !c.field.is_probe()
+            || c.target
+                .as_deref()
+                .is_some_and(|t| crate::context::probe::canonical_target(c.field, t).is_ok());
         let well_formed = all_ok
+            && target_ok
             && case_ok
             && c.operator.applies_to_field(c.field)
             && (min..=max).contains(&c.values.len());

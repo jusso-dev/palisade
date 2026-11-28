@@ -239,6 +239,11 @@ matcher.
 | `path.user_can_change_acl` | Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328). |
 | `meta.detected_type` | What the file's content is, from its bytes (#30, #328): `pe`, `msi`, `script`, `zip`, `lnk`, `text` and so on, in `palisade-fileid`'s names. `unknown` is a missing fact. |
 | `meta.extension_type` | What the file's name claims it is, from its extension (#30, #328): one of the `Self::MetaDetectedType` names, or `none` (no extension), `inert` (a document or media extension) or `other`. A PE renamed to `.pdf` has `meta.detected_type` `pe` and `meta.extension_type` `inert`. |
+| `env.var` | Context (#329): the value of the environment variable `target` in the process's environment block. User-controlled: a user sets their own environment, so it can only narrow a rule. |
+| `reg.key` | Context (#329): whether the registry key `target` exists, such as `HKLM\\Software\\Vendor\\App`. Keys under `HKCU`, `HKU` and `HKCR` are user-controlled. |
+| `reg.value` | Context (#329): the registry value `value_name` (unset: the key's default value) of the key `target`. A `REG_DWORD` or `REG_QWORD` is a number, which `eq` to `between` compare; text is compared as text. Values under `HKCU`, `HKU` and `HKCR` are user-controlled. |
+| `fs.file` | Context (#329): whether the file `target` exists. User-controlled: whether a user can create or remove a file depends on where it is, which a policy cannot see, so every file-system test is treated as one a user may control (ADR 0018). |
+| `fs.folder` | Context (#329): whether the folder `target` exists. User-controlled, as `fs.file`. |
 
 ## FindingSeverity
 
@@ -368,6 +373,8 @@ match if no value does, and never match a fact that is unknown.
 | `weekday_in` | The day of the week is any of the values, `mon` to `sun` (#32). |
 | `time_between` | The time of day is within `[start, end)`, both `HH:MM`. A window whose end is before its start wraps midnight: `22:00` to `06:00` (#32). |
 | `date_between` | The date is within `[from, to]`, both `YYYY-MM-DD` and inclusive (#32). |
+| `exists` | What the criterion's `target` names exists (#329). Takes no values. |
+| `not_exists` | What the criterion's `target` names does not exist (#329). Takes no values. Unknown when the agent did not look, like every negation. |
 
 ## Os
 

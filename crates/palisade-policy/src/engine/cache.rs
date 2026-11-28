@@ -780,7 +780,15 @@ impl KeyPlan {
                 // The members the policy names are in the subject key, and
                 // whether one is malformed too.
                 Field::UserGroups | Field::DeviceGroups => {}
+                // Probed facts (#329) are keyed by target, not by field:
+                // the whole table is hashed, once.
+                f if f.is_probe() => {}
                 _ => hash_context_fact(ctx, *field, seed, &mut h),
+            }
+        }
+        if self.fields.iter().any(|f| f.is_probe()) {
+            for (key, probe) in ctx.probes.iter() {
+                (key, probe).hash(&mut h);
             }
         }
         h.finish()
