@@ -956,7 +956,7 @@ impl Validator {
 
     fn criterion(&mut self, base: &str, c: &Criterion, mandatory: bool) {
         let class = c.field.class();
-        if !c.operator.applies_to_field(c.field) {
+        if !c.operator_fits() {
             self.push(
                 ErrorCode::OperatorFieldMismatch,
                 &format!("{base}/operator"),
@@ -1011,6 +1011,20 @@ impl Validator {
                 ),
             );
         }
+        // A hash set test (#368) names one version of one set: an evaluated
+        // policy never says `latest`, so every agent reads the same set.
+        if let Some(r) = c.set
+            && r.pin == crate::library::Pin::Latest
+        {
+            self.push(
+                ErrorCode::UnresolvedRef,
+                &format!("{base}/set/pin"),
+                format!(
+                    "hash set {} is not pinned to a version; build the effective policy from the hierarchy (#37), which pins it",
+                    r.id
+                ),
+            );
+        }
         // A probed field needs a valid target (#329).
         if c.field.is_probe() {
             match c
@@ -1029,7 +1043,7 @@ impl Validator {
                 Some(Ok(_)) => {}
             }
         }
-        let (min, max) = c.operator.value_count();
+        let (min, max) = c.value_count();
         if c.values.len() < min || c.values.len() > max {
             let expected = if min == max {
                 format!("exactly {min} is required")
@@ -1082,10 +1096,10 @@ impl Validator {
         let well_formed = all_ok
             && target_ok
             && case_ok
-            && c.operator.applies_to_field(c.field)
+            && c.operator_fits()
             && (min..=max).contains(&c.values.len());
         // Ranges and windows are checked across their two values.
-        if well_formed && self.compile_values && c.operator.value_count() == (2, 2) {
+        if well_formed && self.compile_values && c.value_count() == (2, 2) {
             let without_options;
             let c = if options_ok {
                 c
@@ -1096,6 +1110,7 @@ impl Validator {
                     include_sub_ous: None,
                     signer: None,
                     arg_index: None,
+                    set: None,
                     ..c.clone()
                 };
                 &without_options

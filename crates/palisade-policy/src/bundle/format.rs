@@ -39,7 +39,12 @@ use crate::library::{LibraryContent, LibraryId};
 use crate::model::{Metadata, PolicyDocument, PolicyId};
 
 /// The bundle format this crate writes and reads.
-pub const FORMAT_VERSION: u16 = 1;
+///
+/// - 1: the first format (#43).
+/// - 2: library hash sets (#368) as sorted raw 32-byte SHA-256 digests
+///   ([`SetContent::HashSet`]), which `member_of` criteria name by ID and
+///   version, and hash-set patches in deltas.
+pub const FORMAT_VERSION: u16 = 2;
 
 /// The default size limit of one bundle, 64 MiB (#43).
 pub const DEFAULT_MAX_BYTES: usize = 64 << 20;
@@ -184,8 +189,9 @@ impl SourceRevisions {
 }
 
 /// One library version inlined in a bundle, for the sets that scopes read
-/// (#37, #38). Match-tree references are already expanded in an effective
-/// policy, so only principal, device, network and schedule sets appear.
+/// (#37, #38) and the hash sets that criteria name (#368). Other
+/// match-tree references are already expanded in an effective policy, so
+/// only principal, device, network, schedule and hash sets appear.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InlineLibrary {
@@ -209,6 +215,13 @@ pub enum SetContent {
     NetworkSet(Vec<String>),
     /// One schedule, as JSON.
     ScheduleSet(Vec<String>),
+    /// SHA-256 digests (#368), for `member_of` criteria on `field`.
+    HashSet {
+        /// The hash field the set is for.
+        field: crate::model::Field,
+        /// The digests: one byte string, sorted, without repeats.
+        digests: crate::hashset::Digests,
+    },
 }
 
 impl SetContent {
@@ -220,6 +233,12 @@ impl SetContent {
             LibraryContent::DeviceSet { devices } => Self::DeviceSet(devices.clone()),
             LibraryContent::NetworkSet { entries } => Self::NetworkSet(entries.clone()),
             LibraryContent::ScheduleSet { entries } => Self::ScheduleSet(entries.clone()),
+            LibraryContent::HashSet { field, hashes } if crate::hashset::field_allowed(*field) => {
+                Self::HashSet {
+                    field: *field,
+                    digests: crate::hashset::Digests::from_hex(hashes).ok()?,
+                }
+            }
             _ => return None,
         })
     }

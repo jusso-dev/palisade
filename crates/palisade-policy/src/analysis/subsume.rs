@@ -128,6 +128,11 @@ pub fn criterion_covers(a: &Criterion, b: &Criterion) -> bool {
     if a.target != b.target || a.value_name != b.value_name || a.arg_index != b.arg_index {
         return false;
     }
+    // A hash set test (#368) holds its values in the set: two sets, or a
+    // set and listed values, are not compared here.
+    if a.set.is_some() || b.set.is_some() {
+        return a.set == b.set && a.operator == b.operator && a.field == b.field;
+    }
     let class = a.field.class();
     if matches!(class, FieldClass::Version)
         && let (Some(ra), Some(rb)) = (range(a), range(b))

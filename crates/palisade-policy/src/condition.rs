@@ -265,6 +265,27 @@ impl CompiledMatch {
         &self.leaves
     }
 
+    /// Compiles `tree` and binds its library hash sets (#368) from `sets`.
+    ///
+    /// # Errors
+    ///
+    /// As [`compile`](Self::compile).
+    pub fn compile_with(
+        tree: &Match,
+        sets: &dyn crate::scope::ScopeLibrary,
+    ) -> Result<Self, Vec<TreeError>> {
+        let mut out = Self::compile(tree)?;
+        out.bind_sets(sets);
+        Ok(out)
+    }
+
+    /// Binds every library hash set criterion (#368) from `sets`.
+    pub fn bind_sets(&mut self, sets: &dyn crate::scope::ScopeLibrary) {
+        for leaf in &mut self.leaves {
+            leaf.bind_set(sets);
+        }
+    }
+
     /// Evaluates the tree against one object's facts and the context.
     #[must_use]
     pub fn eval(&self, facts: &ObjectFacts, ctx: &EvalContext<'_>) -> TreeEvaluation {

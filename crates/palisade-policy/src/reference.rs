@@ -225,21 +225,11 @@ pub fn policy(size: Size, model: PrecedenceModel) -> ValidatedPolicy {
 /// If it does not compile, which a test checks.
 #[must_use]
 pub fn bundle(size: Size, model: PrecedenceModel) -> Vec<u8> {
-    use crate::bundle::{BundleLimits, Header, Source, SourceRevisions, Target, TargetScope};
+    use crate::bundle::{BundleLimits, Source, SourceRevisions};
     let policy = policy(size, model);
     let catalogue = match crate::library::Catalogue::new(Vec::new()) {
         Ok(c) => c,
         Err(e) => panic!("an empty catalogue: {e:?}"),
-    };
-    let id = |n: u8| {
-        let mut b = [0u8; 16];
-        b[6] = 0x70;
-        b[8] = 0x80;
-        b[15] = n;
-        palisade_core::Uuid7::from_bytes(b)
-    };
-    let (Some(tenant), Some(group)) = (id(1), id(2)) else {
-        panic!("not UUIDv7s");
     };
     let p = &policy.document().policy;
     let source = Source {
@@ -253,18 +243,105 @@ pub fn bundle(size: Size, model: PrecedenceModel) -> Vec<u8> {
         facts: crate::analysis::Facts::default(),
         admin: None,
     };
-    let header = Header::new(
+    match crate::bundle::compile(&source, reference_header(), &BundleLimits::DEFAULT) {
+        Ok(c) => c.bytes,
+        Err(e) => panic!("the reference policy does not compile into a bundle: {e}"),
+    }
+}
+
+/// The ID of the reference hash set library (#368).
+pub const HASH_SET_ID: &str = "01936b2e-8c4a-7b3d-9f21-0a1b2c3d5e70";
+
+/// The reference policy with its hash set as one first-class library set
+/// (#368) instead of rules of 25 hashes: one `member_of` rule naming the
+/// set, and the set itself, compiled into bundle bytes, which carry the
+/// digests raw.
+///
+/// # Panics
+///
+/// If it does not build, which a test checks.
+#[must_use]
+pub fn hash_set_bundle(size: Size, model: PrecedenceModel) -> Vec<u8> {
+    use crate::bundle::{BundleLimits, Source, SourceRevisions};
+    use crate::library::{Catalogue, Library, LibraryRef, Pin, Visibility};
+    let mut doc = document(size, model);
+    let set_id: crate::library::LibraryId =
+        match serde_json::from_value(serde_json::json!(HASH_SET_ID)) {
+            Ok(id) => id,
+            Err(e) => panic!("not a library ID: {e}"),
+        };
+    // The hash rules give way to one rule that names the set.
+    let per = 25;
+    let hash_rules = usize::try_from(size.hashes() / per).unwrap_or(usize::MAX);
+    let set = &mut doc.rule_sets[0];
+    let mut rule = set.rules[0].clone();
+    set.rules.drain(..hash_rules);
+    rule.match_ = crate::model::Match::Criterion(crate::model::Criterion::in_hash_set(
+        crate::model::Field::HashSha256,
+        LibraryRef {
+            id: set_id,
+            pin: Pin::Version(1),
+        },
+        false,
+    ));
+    set.rules.push(rule);
+    let policy = match doc.validate() {
+        Ok(p) => p,
+        Err(e) => panic!("the hash set policy does not validate: {e:?}"),
+    };
+    let hashes: Vec<String> = (0..size.hashes()).map(hash).collect();
+    let library: Library = match serde_json::from_value(serde_json::json!({
+        "id": HASH_SET_ID,
+        "version": 1,
+        "name": "Reference hashes",
+        "realm": "global",
+        "content": {"kind": "hash_set", "field": "hash.sha256", "hashes": hashes},
+    })) {
+        Ok(l) => l,
+        Err(e) => panic!("not a library: {e}"),
+    };
+    let catalogue = match Catalogue::new(vec![library]) {
+        Ok(c) => c,
+        Err(e) => panic!("the catalogue does not build: {e:?}"),
+    };
+    let p = &policy.document().policy;
+    let source = Source {
+        policy: &policy,
+        catalogue: &catalogue,
+        from: Visibility::Global,
+        sources: SourceRevisions {
+            policies: vec![(p.id, p.revision)],
+            libraries: Vec::new(),
+        },
+        facts: crate::analysis::Facts::default(),
+        admin: None,
+    };
+    match crate::bundle::compile(&source, reference_header(), &BundleLimits::DEFAULT) {
+        Ok(c) => c.bytes,
+        Err(e) => panic!("the hash set policy does not compile into a bundle: {e}"),
+    }
+}
+
+fn reference_header() -> crate::bundle::Header {
+    use crate::bundle::{Header, Target, TargetScope};
+    let id = |n: u8| {
+        let mut b = [0u8; 16];
+        b[6] = 0x70;
+        b[8] = 0x80;
+        b[15] = n;
+        palisade_core::Uuid7::from_bytes(b)
+    };
+    let (Some(tenant), Some(group)) = (id(1), id(2)) else {
+        panic!("not UUIDv7s");
+    };
+    Header::new(
         Target {
             tenant,
             scope: TargetScope::Group(group),
         },
         1,
         1_764_201_600_000_000,
-    );
-    match crate::bundle::compile(&source, header, &BundleLimits::DEFAULT) {
-        Ok(c) => c.bytes,
-        Err(e) => panic!("the reference policy does not compile into a bundle: {e}"),
-    }
+    )
 }
 
 /// The SHA-256 the mandatory deny blocks.

@@ -215,7 +215,7 @@ fn raw_signature(
 const KAT_BUNDLE: &[u8] = include_bytes!("../../../tests/fixtures/policy_envelope/minimal.cbor");
 const KAT_ENVELOPE: &[u8] =
     include_bytes!("../../../tests/fixtures/policy_envelope/minimal.envelope");
-const KAT_BUNDLE_HASH: &str = "3b5fe5f805e1a0871ca716d61648879a7b9e5bab1364a9426711705a64347052";
+const KAT_BUNDLE_HASH: &str = "a624aa7585a0d12980d89669d8cec784402631420c145f939d6979f7c591d958";
 
 /// RFC 8032 section 7.1, test 1: the secret key, as unencrypted PKCS#8 v1.
 const RFC8032_PKCS8: &str = "302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
@@ -225,8 +225,8 @@ const KAT_ED25519_SPKI: &str =
 const KAT_ED25519_KID: &str = "06e3fd8fda29bb60ab59557de61edb0a";
 /// A P-384 key generated with OpenSSL for the vector; its private key was
 /// not kept.
-const KAT_P384_SPKI: &str = "3076301006072a8648ce3d020106052b8104002203620004886a9b772c4ecd25a43bbbe6a7a679eda87fa29788ef1bd0ca4d8a5b05cf6e3fe55c41f142f6b9aacef80bdc218774de0895b9dafc5b4b3b6bda0e690caa7c05c2767316f724dd1ad2686126ef13e5fe3082bc10bfe60bb7512a582ee74788e4";
-const KAT_P384_KID: &str = "40fb11deead902ade737a589b37a8abe";
+const KAT_P384_SPKI: &str = "3076301006072a8648ce3d020106052b81040022036200045bf848ff22bf5364e1b1722790be027f193ac7b4affc23aa745576d2b6d40c8856ffda589989765b60f517f55884224471f6babb6400010b909ca7e898c6fc414abdbae1515d7a747ee2bf2aa0bd6a3fde1fb01c7064bc2b60f3c99a54758c85";
+const KAT_P384_KID: &str = "d98c2236b95d8d85eda888ffd0c7acea";
 
 /// A trust set accepting both algorithms that lists the known-answer
 /// keys of `listed` only.

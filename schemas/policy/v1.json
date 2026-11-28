@@ -386,18 +386,27 @@
             ]
           },
           "if": {
-            "properties": {
-              "operator": {
-                "enum": [
-                  "is_true",
-                  "is_false",
-                  "exists",
-                  "not_exists"
+            "anyOf": [
+              {
+                "properties": {
+                  "operator": {
+                    "enum": [
+                      "is_true",
+                      "is_false",
+                      "exists",
+                      "not_exists"
+                    ]
+                  }
+                },
+                "required": [
+                  "operator"
+                ]
+              },
+              {
+                "required": [
+                  "set"
                 ]
               }
-            },
-            "required": [
-              "operator"
             ]
           },
           "then": {
@@ -471,6 +480,17 @@
         "safety_critical": {
           "description": "Only in a mandatory blocklist: when the fact is unknown, this\ncriterion counts towards the deny applying (`match`, or `no_match`\nunder an odd number of `not` nodes), so the shipped blocklists fail\nclosed (#32, #87). Unset means `false`.",
           "type": "boolean"
+        },
+        "set": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LibraryRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only for `member_of` and `not_member_of` on a SHA-256 hash field\n(`hash.sha256`, `hash.authenticode_sha256`, `hash.page_sha256`,\n`hash.msi_fuzzy_sha256`): the library hash set the fact is tested\nagainst (#368), by ID and pinned version, instead of `values`. The\nhierarchy pins `latest` to the version it resolves; a bundle carries\nthe set itself. A set the evaluator does not have at that version,\nfor that field, is unknown, so it never lets an allow match."
         },
         "signer": {
           "anyOf": [

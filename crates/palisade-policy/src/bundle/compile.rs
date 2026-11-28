@@ -85,7 +85,9 @@ pub enum CompileError {
     /// readable within the agents' limits or not valid.
     Invalid(String),
     /// A scope references a library set that is not in the catalogue at a
-    /// pinned version, or is not a set a scope can read.
+    /// pinned version, or is not a set a scope can read; or a criterion
+    /// names a hash set (#368) that is not in the catalogue at its pinned
+    /// version as a SHA-256 hash set.
     UnresolvedSet {
         /// The library.
         id: LibraryId,
@@ -236,6 +238,42 @@ pub fn compile(
     if let Some(e) = failed {
         return Err(e);
     }
+    // Every hash set a criterion names (#368), at its pinned version.
+    // Validation already refused an unpinned one.
+    for r in criterion_sets(&doc) {
+        let Pin::Version(v) = r.pin else {
+            return Err(CompileError::UnresolvedSet {
+                id: r.id,
+                pin: r.pin,
+            });
+        };
+        if inlined.contains(&(r.id, v)) {
+            continue;
+        }
+        let lib = source
+            .catalogue
+            .resolve(&r, source.from)
+            .ok()
+            .filter(|l| l.version == v);
+        let Some((lib, content)) = lib.and_then(|l| Some((l, SetContent::of(&l.content)?))) else {
+            return Err(CompileError::UnresolvedSet {
+                id: r.id,
+                pin: r.pin,
+            });
+        };
+        if !matches!(content, SetContent::HashSet { .. }) {
+            return Err(CompileError::UnresolvedSet {
+                id: r.id,
+                pin: r.pin,
+            });
+        }
+        inlined.insert((lib.id, lib.version));
+        libraries.push(InlineLibrary {
+            id: lib.id,
+            resolved_version: lib.version,
+            content,
+        });
+    }
     // The evidence record names every set version the bundle carries.
     let mut sources = source.sources.clone();
     sources
@@ -264,6 +302,23 @@ pub fn compile(
         bytes,
         gate,
     })
+}
+
+/// Every library hash set a criterion of `doc` names (#368), each once.
+fn criterion_sets(doc: &crate::model::PolicyDocument) -> BTreeSet<crate::library::LibraryRef> {
+    let mut out = BTreeSet::new();
+    for rule in doc.rule_sets.iter().flat_map(|s| &s.rules) {
+        let mut stack = vec![&rule.match_];
+        while let Some(node) = stack.pop() {
+            if let crate::model::Match::Criterion(c) = node
+                && let Some(r) = c.set
+            {
+                out.insert(r);
+            }
+            stack.extend(node.children());
+        }
+    }
+    out
 }
 
 /// A compiled bundle.
@@ -351,6 +406,21 @@ impl ScopeLibrary for BundleSets {
         match self.get(set)? {
             // A validated set holds exactly one schedule, as JSON.
             SetContent::ScheduleSet(e) if e.len() == 1 => serde_json::from_str(&e[0]).ok(),
+            _ => None,
+        }
+    }
+
+    fn hash_set(
+        &self,
+        set: &SetRef,
+        field: crate::model::Field,
+    ) -> Option<crate::hashset::Digests> {
+        // Only the exact version a criterion pins (#368).
+        if set.pin == Pin::Latest {
+            return None;
+        }
+        match self.get(set)? {
+            SetContent::HashSet { field: f, digests } if *f == field => Some(digests.clone()),
             _ => None,
         }
     }

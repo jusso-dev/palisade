@@ -118,10 +118,21 @@ fn published_keys_never_change() {
 }
 
 #[test]
-fn every_key_is_from_format_version_one_so_far() {
-    // `k` is the constructor the table uses; a key added in a later format
-    // version will need its own `since`.
-    assert!(KEYS.iter().all(|key| key.since == 1));
+fn every_key_is_from_format_version_one_or_two() {
+    // `k` is format 1's constructor and `k2` format 2's (#368). Within the
+    // table a key's format never goes down.
+    assert!(KEYS.iter().all(|key| matches!(key.since, 1 | 2)));
+    assert!(
+        KEYS.iter()
+            .filter(|key| key.critical())
+            .map(|key| key.since)
+            .is_sorted()
+    );
+    assert!(
+        KEYS.iter()
+            .all(|key| key.since <= crate::bundle::format::FORMAT_VERSION)
+    );
+    assert_eq!(k2(1, "x").since, 2);
     assert_eq!(
         k(7, "x"),
         Key {

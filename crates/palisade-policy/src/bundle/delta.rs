@@ -15,9 +15,16 @@
 //! - a rule set whose own fields changed, or that is new, is replaced
 //!   whole, without its rules (`put_rule_set`), and one that is gone is
 //!   removed (`remove_rule_set`);
-//! - the header, the policy (without its rule sets), the libraries, the
-//!   source revisions and the metadata digest are replaced whole when they
-//!   changed.
+//! - the header, the policy (without its rule sets), the source revisions
+//!   and the metadata digest are replaced whole when they changed;
+//! - inlined libraries are added or replaced (`put_library`) and removed
+//!   (`remove_library`) by ID and version. A new version of a hash set
+//!   (#368) is sent as the digests it adds to and removes from a version
+//!   the base holds (`patch_hash_set`) when that is smaller than the set.
+//!   The patch is strict (every digest removed is in the base set, none
+//!   added is), and the result is checked against `result_bundle_hash`
+//!   like every other operation, so a patch can only rebuild the exact
+//!   set the server signed.
 //!
 //! The delta is itself encoded with [`to_bytes`](BundleDelta::to_bytes),
 //! canonically, so #225 can sign it with both hashes. The server sends a
@@ -29,11 +36,14 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::cbor::{self, Limits, Value};
+use super::format::SetContent;
 use super::format::{
     Body, BundleError, BundleLimits, Header, InlineLibrary, PolicyBundle, Sha256Digest,
     SourceRevisions, bundle_hash,
 };
 use super::serial;
+use crate::hashset::{Digests, DigestsError};
+use crate::library::LibraryId;
 use crate::model::{Policy, PolicyDocument, Rule, RuleId, RuleSet, RuleSetId};
 
 /// One change.
@@ -55,6 +65,30 @@ pub enum Op {
     PutLibraries(Vec<InlineLibrary>),
     /// Replaces the source revisions.
     PutSources(SourceRevisions),
+    /// Adds or replaces one inlined library version.
+    PutLibrary(Box<InlineLibrary>),
+    /// Removes one inlined library version.
+    RemoveLibrary(LibraryId, u32),
+    /// Adds or replaces a hash set version (#368), built from another
+    /// version of the same set that the base holds.
+    PatchHashSet(Box<HashSetPatch>),
+}
+
+/// A hash set version as the change from another version of the same set
+/// (#368).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HashSetPatch {
+    /// The set.
+    pub id: LibraryId,
+    /// The version the base holds, which the patch starts from.
+    pub base_version: u32,
+    /// The version the patch gives.
+    pub resolved_version: u32,
+    /// The digests the new version adds.
+    pub add: Digests,
+    /// The digests the new version removes.
+    pub remove: Digests,
 }
 
 /// How to turn one bundle into another.
@@ -81,6 +115,11 @@ pub enum DeltaError {
     MissingRuleSet(RuleSetId),
     /// An operation removes a rule that the base does not have.
     MissingRule(RuleId),
+    /// An operation removes or patches a library version that the base
+    /// does not have, or patches one that is not a hash set.
+    MissingLibrary(LibraryId, u32),
+    /// A hash set patch does not fit its base set (#368).
+    Patch(DigestsError),
     /// The result does not hash to `result_bundle_hash`.
     ResultMismatch,
     /// A bundle does not encode.
@@ -95,6 +134,8 @@ impl core::fmt::Display for DeltaError {
             Self::WrongBase => f.write_str("the delta is for another base bundle"),
             Self::MissingRuleSet(id) => write!(f, "the base has no rule set {id}"),
             Self::MissingRule(id) => write!(f, "the base has no rule {id}"),
+            Self::MissingLibrary(id, v) => write!(f, "the base has no library {id} v{v} to change"),
+            Self::Patch(e) => write!(f, "the hash set patch does not apply: {e}"),
             Self::ResultMismatch => f.write_str("the result does not match the delta's hash"),
             Self::Encode(e) => write!(f, "the bundle does not encode: {e}"),
             Self::Decode(e) => write!(f, "the delta does not read: {e}"),
@@ -150,9 +191,7 @@ pub fn diff(old: &PolicyBundle, new: &PolicyBundle) -> Result<BundleDelta, Delta
             }
         }
     }
-    if old.body.libraries() != new.body.libraries() {
-        ops.push(Op::PutLibraries(new.body.libraries().to_vec()));
-    }
+    library_ops(old.body.libraries(), new.body.libraries(), &mut ops);
     if old.body.source_revisions() != new.body.source_revisions() {
         ops.push(Op::PutSources(new.body.source_revisions().clone()));
     }
@@ -223,6 +262,18 @@ pub fn apply(
             }
             Op::PutLibraries(l) => libraries = l.clone(),
             Op::PutSources(s) => sources = s.clone(),
+            Op::PutLibrary(l) => put_library(&mut libraries, (**l).clone()),
+            Op::RemoveLibrary(id, v) => {
+                let before = libraries.len();
+                libraries.retain(|l| (l.id, l.resolved_version) != (*id, *v));
+                if libraries.len() == before {
+                    return Err(DeltaError::MissingLibrary(*id, *v));
+                }
+            }
+            Op::PatchHashSet(p) => {
+                let patched = patch_hash_set(&libraries, p)?;
+                put_library(&mut libraries, patched);
+            }
         }
     }
     doc.rule_sets = sets.into_values().collect();
@@ -239,6 +290,87 @@ pub fn apply(
     // left to fail on the next load.
     PolicyBundle::decode(&bytes, limits).map_err(DeltaError::Decode)?;
     Ok((bundle, bytes))
+}
+
+/// The library operations from `old` to `new`, both sorted by ID and
+/// version: additions and replacements first, each a hash set patch where
+/// that is smaller than the set, then removals, so a patch can start from
+/// a version the result no longer holds.
+fn library_ops(old: &[InlineLibrary], new: &[InlineLibrary], ops: &mut Vec<Op>) {
+    let key = |l: &InlineLibrary| (l.id, l.resolved_version);
+    for l in new {
+        if old.iter().any(|o| o == l) {
+            continue;
+        }
+        match best_patch(old, l) {
+            Some(p) => ops.push(Op::PatchHashSet(Box::new(p))),
+            None => ops.push(Op::PutLibrary(Box::new(l.clone()))),
+        }
+    }
+    for l in old {
+        if !new.iter().any(|n| key(n) == key(l)) {
+            ops.push(Op::RemoveLibrary(l.id, l.resolved_version));
+        }
+    }
+}
+
+/// The smallest patch that gives hash set `new` from a version of the same
+/// set in `old`, if one is smaller than the set itself.
+fn best_patch(old: &[InlineLibrary], new: &InlineLibrary) -> Option<HashSetPatch> {
+    let SetContent::HashSet { field, digests } = &new.content else {
+        return None;
+    };
+    old.iter()
+        .filter(|o| o.id == new.id)
+        .filter_map(|o| match &o.content {
+            SetContent::HashSet {
+                field: f,
+                digests: base,
+            } if f == field => {
+                let (add, remove) = base.diff(digests);
+                Some(HashSetPatch {
+                    id: new.id,
+                    base_version: o.resolved_version,
+                    resolved_version: new.resolved_version,
+                    add,
+                    remove,
+                })
+            }
+            _ => None,
+        })
+        .filter(|p| p.add.len() + p.remove.len() < digests.len())
+        .min_by_key(|p| (p.add.len() + p.remove.len(), p.base_version))
+}
+
+/// Adds `library`, replacing any library of the same ID and version.
+fn put_library(libraries: &mut Vec<InlineLibrary>, library: InlineLibrary) {
+    libraries.retain(|l| (l.id, l.resolved_version) != (library.id, library.resolved_version));
+    libraries.push(library);
+}
+
+/// The hash set `p` gives from the version it starts from in `libraries`.
+fn patch_hash_set(
+    libraries: &[InlineLibrary],
+    p: &HashSetPatch,
+) -> Result<InlineLibrary, DeltaError> {
+    let missing = DeltaError::MissingLibrary(p.id, p.base_version);
+    let base = libraries
+        .iter()
+        .find(|l| (l.id, l.resolved_version) == (p.id, p.base_version))
+        .ok_or_else(|| missing.clone())?;
+    let SetContent::HashSet { field, digests } = &base.content else {
+        return Err(missing);
+    };
+    Ok(InlineLibrary {
+        id: p.id,
+        resolved_version: p.resolved_version,
+        content: SetContent::HashSet {
+            field: *field,
+            digests: digests
+                .patch(&p.add, &p.remove)
+                .map_err(DeltaError::Patch)?,
+        },
+    })
 }
 
 /// Whether to send `delta` rather than the full bundle of `full_len` bytes:

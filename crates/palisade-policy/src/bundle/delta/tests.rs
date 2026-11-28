@@ -314,7 +314,20 @@ fn library_and_source_changes_travel_as_replacements() {
     };
     let (old, new) = (make(1, 1), make(2, 2));
     let delta = round_trip(&old, &new);
-    assert!(delta.ops.iter().any(|o| matches!(o, Op::PutLibraries(_))));
+    // One library version out, one in: per library, not the whole list.
+    assert!(
+        delta
+            .ops
+            .iter()
+            .any(|o| matches!(o, Op::RemoveLibrary(_, 1)))
+    );
+    assert!(
+        delta
+            .ops
+            .iter()
+            .any(|o| matches!(o, Op::PutLibrary(l) if l.resolved_version == 2))
+    );
+    assert!(!delta.ops.iter().any(|o| matches!(o, Op::PutLibraries(_))));
     assert!(delta.ops.iter().any(|o| matches!(o, Op::PutSources(_))));
 }
 
@@ -389,4 +402,126 @@ fn malformed_deltas_are_refused_by_name() {
         read(&text_key),
         Err(DeltaError::Decode(BundleError::Shape(_)))
     ));
+}
+
+// --- Hash set patches (#368) -----------------------------------------------
+
+fn hash_set(
+    version: u32,
+    digits: impl IntoIterator<Item = u8>,
+) -> crate::bundle::format::InlineLibrary {
+    crate::bundle::format::InlineLibrary {
+        id: crate::library::LibraryId(crate::test_util::policy_id(68).0),
+        resolved_version: version,
+        content: crate::bundle::format::SetContent::HashSet {
+            field: crate::model::Field::HashSha256,
+            digests: crate::hashset::Digests::from_digests(digits.into_iter().map(|n| [n; 32])),
+        },
+    }
+}
+
+fn with_libraries(
+    libraries: Vec<crate::bundle::format::InlineLibrary>,
+    version: u64,
+) -> PolicyBundle {
+    PolicyBundle::new(
+        header(version),
+        Body::new(base(), libraries, SourceRevisions::default()).unwrap(),
+    )
+}
+
+#[test]
+fn a_new_hash_set_version_travels_as_a_patch() {
+    let old = with_libraries(vec![hash_set(1, 0..100)], 1);
+    let new = with_libraries(vec![hash_set(2, (2..100).chain([200, 201]))], 2);
+    let delta = round_trip(&old, &new);
+    let patch = delta
+        .ops
+        .iter()
+        .find_map(|o| match o {
+            Op::PatchHashSet(p) => Some(p),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!((patch.base_version, patch.resolved_version), (1, 2));
+    assert_eq!((patch.add.len(), patch.remove.len()), (2, 2));
+    assert!(
+        delta
+            .ops
+            .iter()
+            .any(|o| matches!(o, Op::RemoveLibrary(_, 1)))
+    );
+    // Far smaller than the set.
+    assert!(delta.to_bytes().unwrap().len() < new.to_bytes().unwrap().len() / 2);
+}
+
+#[test]
+fn a_patch_bigger_than_the_set_is_sent_whole() {
+    let old = with_libraries(vec![hash_set(1, 0..10)], 1);
+    let new = with_libraries(vec![hash_set(2, 100..105)], 2);
+    let delta = round_trip(&old, &new);
+    assert!(delta.ops.iter().any(|o| matches!(o, Op::PutLibrary(_))));
+    assert!(!delta.ops.iter().any(|o| matches!(o, Op::PatchHashSet(_))));
+}
+
+#[test]
+fn a_patch_that_does_not_fit_its_base_is_refused() {
+    let old = with_libraries(vec![hash_set(1, 0..100)], 1);
+    let new = with_libraries(vec![hash_set(2, 1..100)], 2);
+    let good = diff(&old, &new).unwrap();
+    let old_bytes = old.to_bytes().unwrap();
+    let limits = BundleLimits::DEFAULT;
+    let edit = |f: &dyn Fn(&mut HashSetPatch)| {
+        let mut d = good.clone();
+        for op in &mut d.ops {
+            if let Op::PatchHashSet(p) = op {
+                f(p);
+            }
+        }
+        apply(&old_bytes, &d, &limits)
+    };
+    let digests = |ns: &[u8]| crate::hashset::Digests::from_digests(ns.iter().map(|n| [*n; 32]));
+    use crate::hashset::DigestsError;
+    assert_eq!(
+        edit(&|p| p.remove = digests(&[150])).unwrap_err(),
+        DeltaError::Patch(DigestsError::RemoveMissing)
+    );
+    assert_eq!(
+        edit(&|p| p.add = digests(&[5])).unwrap_err(),
+        DeltaError::Patch(DigestsError::AddPresent)
+    );
+    assert!(matches!(
+        edit(&|p| p.base_version = 9).unwrap_err(),
+        DeltaError::MissingLibrary(_, 9)
+    ));
+    // A patch that applies but gives another set than was signed.
+    assert_eq!(
+        edit(&|p| p.remove = digests(&[1])).unwrap_err(),
+        DeltaError::ResultMismatch
+    );
+    // A patch on a library that is not a hash set.
+    let net = crate::bundle::format::InlineLibrary {
+        content: crate::bundle::format::SetContent::NetworkSet(vec!["10.0.0.0/8".to_owned()]),
+        ..hash_set(1, [])
+    };
+    let net_old = with_libraries(vec![net], 1);
+    let mut d = good.clone();
+    d.base_bundle_hash = net_old.bundle_hash().unwrap();
+    assert!(matches!(
+        apply(&net_old.to_bytes().unwrap(), &d, &limits).unwrap_err(),
+        DeltaError::MissingLibrary(_, 1)
+    ));
+    // Removing a library the base does not hold.
+    let mut d = good;
+    d.ops = vec![Op::RemoveLibrary(net_old.body.libraries()[0].id, 7)];
+    assert!(matches!(
+        apply(&old_bytes, &d, &limits).unwrap_err(),
+        DeltaError::MissingLibrary(_, 7)
+    ));
+    for e in [
+        DeltaError::MissingLibrary(net_old.body.libraries()[0].id, 1),
+        DeltaError::Patch(DigestsError::AddPresent),
+    ] {
+        assert!(!e.to_string().is_empty());
+    }
 }

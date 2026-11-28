@@ -297,15 +297,19 @@ fn unknown_body_keys_follow_their_sign() {
 #[test]
 fn a_newer_format_or_schema_is_refused_by_name() {
     let (header_map, body) = parts(&bytes_of(sample()));
-    let newer = join(
-        with_entry(header_map.clone(), key("format_version"), Value::Uint(2)),
-        body.clone(),
-    );
-    assert_eq!(decode(&newer), Err(BundleError::UnsupportedFormat(2)));
-    assert_eq!(
-        decode_header(&newer, &BundleLimits::DEFAULT),
-        Err(BundleError::UnsupportedFormat(2))
-    );
+    // A newer format, and format 1, which had no hash sets (#368): a
+    // format 1 reader must not be handed format 2 sets, nor the reverse.
+    for v in [3, 1] {
+        let other = join(
+            with_entry(header_map.clone(), key("format_version"), Value::Uint(v)),
+            body.clone(),
+        );
+        assert_eq!(decode(&other), Err(BundleError::UnsupportedFormat(v)));
+        assert_eq!(
+            decode_header(&other, &BundleLimits::DEFAULT),
+            Err(BundleError::UnsupportedFormat(v))
+        );
+    }
     let schema = Value::Array(vec![Value::Uint(2), Value::Uint(0), Value::Uint(0)]);
     let newer = join(with_entry(header_map, key("schema_version"), schema), body);
     assert_eq!(

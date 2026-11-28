@@ -25,6 +25,7 @@
 //! | `match_fragment` | its tree |
 //! | `application_definition` | its one tree, or `any` of its trees |
 //! | `hash_set`, `publisher_set`, `path_set` | one criterion on the set's field, or `any` of criteria of at most 25 values each |
+//! | a `hash_set` of more than 800 SHA-256 hashes | one `member_of` criterion that names the set at its resolved version (#368) |
 //!
 //! Rule set libraries are assigned to a hierarchy node, not referenced from
 //! a tree. Principal, device, network and schedule sets are read by scopes
@@ -558,6 +559,21 @@ impl HashSetIndex {
 }
 
 impl Library {
+    /// The digests of a SHA-256 hash set on `field` (#368), or `None` for
+    /// another kind, another field, or an entry that is not a SHA-256
+    /// (which validation rejects).
+    #[must_use]
+    pub fn hash_digests(&self, field: Field) -> Option<crate::hashset::Digests> {
+        match &self.content {
+            LibraryContent::HashSet { field: f, hashes }
+                if *f == field && crate::hashset::field_allowed(field) =>
+            {
+                crate::hashset::Digests::from_hex(hashes).ok()
+            }
+            _ => None,
+        }
+    }
+
     /// A sorted index of a hash set, or `None` for another kind.
     #[must_use]
     pub fn hash_index(&self) -> Option<HashSetIndex> {
@@ -1091,7 +1107,36 @@ impl Catalogue {
                 budget,
                 used,
             )?)),
-            Match::Criterion(c) => Match::Criterion(c.clone()),
+            Match::Criterion(c) => {
+                let mut c = c.clone();
+                // A hash set test (#368) is pinned to the version its
+                // reference resolves to, like a scope's set.
+                if let Some(r) = c.set {
+                    let at = format!("{pointer}/criterion/set");
+                    let lib = self.resolve(&r, from).map_err(|mut e| {
+                        e.path.clone_from(&at);
+                        e
+                    })?;
+                    let fits = matches!(&lib.content, LibraryContent::HashSet { field, .. } if *field == c.field)
+                        && crate::hashset::field_allowed(c.field);
+                    if !fits {
+                        return Err(err(
+                            LibraryCode::RefKindNotAllowed,
+                            at,
+                            format!(
+                                "library {} is not a SHA-256 hash set on the criterion's field",
+                                lib.label()
+                            ),
+                        ));
+                    }
+                    used.insert((lib.id, lib.version));
+                    c.set = Some(LibraryRef {
+                        id: lib.id,
+                        pin: Pin::Version(lib.version),
+                    });
+                }
+                Match::Criterion(c)
+            }
             Match::Ref(r) => {
                 let at = format!("{pointer}/ref");
                 let lib = self.resolve_tree_ref(r, from).map_err(|mut e| {
@@ -1173,8 +1218,9 @@ impl Catalogue {
 impl Catalogue {
     /// A set as criteria of at most 25 values each, under `any` if there
     /// are several. A rule tests at most 32 criteria, so at most 800
-    /// entries fit; a larger set is matched through the compiled index
-    /// (#42). The entries were made canonical once, in [`Catalogue::new`].
+    /// entries fit. A larger SHA-256 hash set becomes one criterion that
+    /// names the set (#368); any other larger set is refused. The entries
+    /// were made canonical once, in [`Catalogue::new`].
     fn set_tree(
         &self,
         lib: &Library,
@@ -1185,6 +1231,31 @@ impl Catalogue {
     ) -> Result<Match, LibraryError> {
         let entries = match self.sets.get(&(lib.id, lib.version)) {
             Some(Inline::Entries(entries)) => entries,
+            // A large SHA-256 hash set is first-class (#368): one criterion
+            // that names the set at this version, matched through the set
+            // the bundle carries.
+            Some(Inline::TooLarge(_))
+                if matches!(lib.content, LibraryContent::HashSet { .. })
+                    && crate::hashset::field_allowed(field) =>
+            {
+                *budget = budget.checked_sub(1).ok_or_else(|| {
+                    err(
+                        LibraryCode::RefTooDeep,
+                        at,
+                        format!(
+                            "the tree has more than {MAX_EXPANDED_NODES} nodes once its references are replaced"
+                        ),
+                    )
+                })?;
+                return Ok(Match::Criterion(Criterion::in_hash_set(
+                    field,
+                    LibraryRef {
+                        id: lib.id,
+                        pin: Pin::Version(lib.version),
+                    },
+                    false,
+                )));
+            }
             Some(Inline::TooLarge(count)) => {
                 return Err(err(
                     LibraryCode::SetTooLarge,
@@ -1226,8 +1297,8 @@ impl Catalogue {
     }
 }
 
-/// Every `ref` node in a tree, with its pointer relative to the tree (the
-/// node's own pointer, without `/ref`), in document order.
+/// Every `ref` node in a tree, and every hash set a criterion names
+/// (#368), with its pointer relative to the tree, in document order.
 #[must_use]
 pub fn refs_in(tree: &Match) -> Vec<(String, LibraryRef)> {
     let mut out = Vec::new();
@@ -1246,7 +1317,11 @@ pub fn refs_in(tree: &Match) -> Vec<(String, LibraryRef)> {
             }
             Match::Not(child) => stack.push((child, format!("{path}/not"))),
             Match::Ref(r) => out.push((format!("{path}/ref"), *r)),
-            Match::Criterion(_) => {}
+            Match::Criterion(c) => {
+                if let Some(r) = c.set {
+                    out.push((format!("{path}/criterion/set"), r));
+                }
+            }
         }
     }
     out

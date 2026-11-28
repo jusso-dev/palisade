@@ -17,10 +17,12 @@ use std::path::{Path, PathBuf};
 use palisade_core::Uuid7;
 use palisade_policy::bundle::format::hex;
 use palisade_policy::bundle::{
-    AgentVersion, Body, BundleLimits, Header, PolicyBundle, SourceRevisions, Target, TargetScope,
-    decode_header,
+    AgentVersion, Body, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent,
+    SourceRevisions, Target, TargetScope, decode_header,
 };
-use palisade_policy::model::{Mode, PolicyDocument};
+use palisade_policy::hashset::Digests;
+use palisade_policy::library::{LibraryId, LibraryRef, Pin};
+use palisade_policy::model::{Criterion, Field, Match, Mode, PolicyDocument};
 use palisade_policy::test_util::{
     PolicyBuilder, RuleBuilder, RuleSetBuilder, all, hash, publisher, under,
 };
@@ -85,7 +87,38 @@ fn cases() -> Vec<(&'static str, PolicyBundle)> {
     vec![
         ("minimal", bundle(minimal, group, 1)),
         ("baseline", bundle(baseline, device, 42)),
+        ("hash_set", hash_set_bundle(group)),
     ]
+}
+
+/// A hash set (#368): an allow on `member_of` a library set, and the set
+/// inlined as sorted raw digests.
+fn hash_set_bundle(scope: TargetScope) -> PolicyBundle {
+    let set = LibraryRef {
+        id: LibraryId(id("01890a5d-ac96-774b-bcce-b302099a8068")),
+        pin: Pin::Version(3),
+    };
+    let mut doc = PolicyBuilder::new()
+        .rule_set(RuleSetBuilder::allowlist(1).rule(RuleBuilder::allow(1, hash('a'))))
+        .build();
+    doc.rule_sets[0].rules[0].match_ =
+        Match::Criterion(Criterion::in_hash_set(Field::HashSha256, set, false));
+    let library = InlineLibrary {
+        id: set.id,
+        resolved_version: 3,
+        content: SetContent::HashSet {
+            field: Field::HashSha256,
+            digests: Digests::from_digests([[0xcc; 32], [0xaa; 32], [0xbb; 32]]),
+        },
+    };
+    let sources = SourceRevisions {
+        policies: vec![(doc.policy.id, doc.policy.revision)],
+        libraries: vec![(set.id, 3)],
+    };
+    PolicyBundle::new(
+        header(scope, 7),
+        Body::new(doc, vec![library], sources).unwrap(),
+    )
 }
 
 fn summary(b: &PolicyBundle, bytes: &[u8]) -> String {

@@ -11,6 +11,7 @@ pub mod dsl;
 pub mod engine;
 pub mod evaluate;
 pub mod facts;
+pub mod hashset;
 pub mod hierarchy;
 pub mod lenient;
 pub mod library;

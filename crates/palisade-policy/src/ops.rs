@@ -358,11 +358,14 @@ pub enum Note {
     /// standard NTFS table, such as any network share (#399): two names
     /// that fold apart here may be one name there, and the reverse.
     FoldUnknown = 10,
+    /// A criterion's library hash set (#368) is not in the policy at the
+    /// pinned version, or is not a set for its field.
+    SetUnresolved = 11,
 }
 
 impl Note {
     /// Every note, in code order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::FactMissing,
         Self::PathAclUnsafe,
         Self::ShortNameUnresolved,
@@ -374,6 +377,7 @@ impl Note {
         Self::FactMalformed,
         Self::ConditionTimeout,
         Self::FoldUnknown,
+        Self::SetUnresolved,
     ];
 
     /// The stable `snake_case` name.
@@ -391,6 +395,7 @@ impl Note {
             Self::FactMalformed => "fact_malformed",
             Self::ConditionTimeout => "condition_timeout",
             Self::FoldUnknown => "fold_unknown",
+            Self::SetUnresolved => "set_unresolved",
         }
     }
 }
@@ -597,6 +602,8 @@ pub struct CompiledCriterion {
     probe: Option<String>,
     /// `arg_index`, for `process.argv` (#329).
     arg_index: Option<i16>,
+    /// The library hash set it tests (#368).
+    set: Option<crate::library::LibraryRef>,
     values: Values,
 }
 
@@ -652,6 +659,10 @@ enum Values {
     TimeWindow(u16, u16),
     /// `exists` on a probed target (#329): no values.
     Exists,
+    /// A library hash set (#368): the set, once the evaluator has bound
+    /// it; `None` until then, or when the policy has no such set, so the
+    /// criterion is unknown.
+    Set(Option<crate::hashset::Digests>),
 }
 
 /// A value that can be ordered: a whole number, an integrity level or a
@@ -691,10 +702,10 @@ impl CompiledCriterion {
     pub fn compile(c: &Criterion) -> Result<Self, Vec<CompileError>> {
         let whole = |kind| vec![CompileError { value: None, kind }];
         let class = c.field.class();
-        if !c.operator.applies_to_field(c.field) {
+        if !c.operator_fits() {
             return Err(whole(CompileErrorKind::OperatorFieldMismatch));
         }
-        let (min, max) = c.operator.value_count();
+        let (min, max) = c.value_count();
         if c.values.len() < min || c.values.len() > max {
             return Err(whole(CompileErrorKind::ValueCount));
         }
@@ -731,7 +742,11 @@ impl CompiledCriterion {
         let operator = c.operator.positive();
         let case_sensitive = c.case_sensitive.unwrap_or(false);
         let anchored = c.anchored.unwrap_or(true);
-        let values = compile_values(c.field, operator, case_sensitive, anchored, &c.values)?;
+        let values = if c.set.is_some() {
+            Values::Set(None)
+        } else {
+            compile_values(c.field, operator, case_sensitive, anchored, &c.values)?
+        };
         let probe = match (c.field.is_probe(), c.target.as_deref()) {
             (false, _) => None,
             (true, None) => {
@@ -761,6 +776,7 @@ impl CompiledCriterion {
             signer: signer::compile_options(c),
             probe,
             arg_index: c.arg_index,
+            set: c.set,
             values,
         })
     }
@@ -786,6 +802,22 @@ impl CompiledCriterion {
         )
         .map(drop)
         .map_err(|mut errors| errors.remove(0).kind)
+    }
+
+    /// The library hash set this criterion tests (#368), if any.
+    #[must_use]
+    pub const fn set(&self) -> Option<crate::library::LibraryRef> {
+        self.set
+    }
+
+    /// Binds the criterion's library hash set (#368) from `sets`. A set
+    /// that is not there, at the pinned version, for this field, stays
+    /// unbound, so the criterion is unknown. Does nothing to a criterion
+    /// that tests no set.
+    pub fn bind_set(&mut self, sets: &dyn crate::scope::ScopeLibrary) {
+        if let (Some(r), Values::Set(slot)) = (self.set, &mut self.values) {
+            *slot = sets.hash_set(&r, self.field);
+        }
     }
 
     /// The field this criterion tests.
@@ -1156,6 +1188,19 @@ impl CompiledCriterion {
                 }
                 Tri::from_bool(values.chunks_exact(have.len()).any(|v| v == have))
             }
+            Values::Set(set) => {
+                let Some(set) = set else {
+                    notes.insert(Note::SetUnresolved);
+                    return Tri::Unknown;
+                };
+                match set.contains_hex(fact) {
+                    Some(found) => Tri::from_bool(found),
+                    None => {
+                        notes.insert(Note::FactMalformed);
+                        Tri::Unknown
+                    }
+                }
+            }
             Values::Version(values) => match version_fact(fact, notes) {
                 Some(have) => Tri::from_bool(values.iter().any(|want| match self.operator {
                     Operator::VersionGt => have > *want,
@@ -1497,6 +1542,12 @@ pub(crate) fn option_problems(c: &Criterion) -> Vec<CompileErrorKind> {
         out.push(CompileErrorKind::OptionNotApplicable(
             "arg_index",
             "`process.argv`",
+        ));
+    }
+    if c.set.is_some() && !crate::hashset::field_allowed(c.field) {
+        out.push(CompileErrorKind::OptionNotApplicable(
+            "set",
+            "`member_of` and `not_member_of` on `hash.sha256`, `hash.authenticode_sha256`, `hash.page_sha256` and `hash.msi_fuzzy_sha256`",
         ));
     }
     if c.value_name.is_some() && c.field != Field::RegValue {
