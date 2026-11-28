@@ -207,8 +207,8 @@ fn a_signed_test_package_is_listed_mapped_and_aliased() {
         );
         assert_eq!(p.applications.len(), 1, "{what}: {p:?}");
         assert_eq!(
-            p.install_location.as_ref(),
-            Some(&final_path(&location)),
+            p.install_location.as_ref().map(|l| l.match_key()),
+            Some(final_path(&location).match_key()),
             "{what}"
         );
     }
@@ -251,7 +251,9 @@ fn a_signed_test_package_is_listed_mapped_and_aliased() {
         .unwrap()
         .unwrap();
     assert_eq!(target.package.full_name, full_name);
-    assert_eq!(target.executable, exe);
+    // The same file, possibly spelled with a `\\?\` prefix and with its
+    // case-sensitive directories checked: compare what rules match.
+    assert_eq!(target.executable.match_key(), exe.match_key());
     let resolved = palisade_fileid::package::installed::resolve_alias(alias, &all).unwrap();
     assert_eq!(resolved.package.full_name, full_name);
     let mut forged = alias.clone();
