@@ -104,7 +104,11 @@ fn allow_a() -> ValidatedPolicy {
 fn facts(c: char) -> ObjectFacts {
     ObjectFacts::new()
         .with(Field::HashSha256, sha(c))
-        .with_path(PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new()).with_user_writable(false))
+        .with_path(
+            PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
+        )
 }
 
 const FILE: FileIdentity = FileIdentity::File {
@@ -1109,7 +1113,9 @@ mod review {
         let state = DeviceState::of(&p.document().policy);
         let c = EvaluationContext::new();
         let v = PathVariables::new();
-        let path = PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new()).with_user_writable(false);
+        let path = PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed);
         let bad_signer = vec![SignerFact {
             status: SignerStatus::Valid,
             source: SignatureSource::Embedded,
@@ -1303,7 +1309,9 @@ mod review {
         let blocked = ObjectFacts::new()
             .with(Field::HashSha256, sha('b'))
             .with_path(
-                PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new()).with_user_writable(false),
+                PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new())
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
             )
             .with_signers(vec![]);
         for mandatory_first in [false, true] {
@@ -1362,7 +1370,9 @@ mod review {
         let only_path = ObjectFacts::new()
             .with(Field::HashSha256, sha('a'))
             .with_path(
-                PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new()).with_user_writable(false),
+                PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new())
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
             )
             .with_signers(vec![]);
         // One reading at the start, one per tree: the path allow is the only
@@ -1392,7 +1402,9 @@ mod review {
         let c = EvaluationContext::new();
         let v = PathVariables::new();
         let cheap = ObjectFacts::new().with_path(
-            PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new()).with_user_writable(false),
+            PathFact::new(r"C:\Tools\a.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
         );
         for mode in [Mode::Audit, Mode::Monitor, Mode::Learning, Mode::Enforce] {
             for on_timeout in [None, Some(TimeoutAction::AllowAudit)] {

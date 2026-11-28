@@ -656,6 +656,7 @@ fn missing_location_facts_classify_from_the_path_or_fail_closed() {
         .with_path(
             PathFact::new("D:\\data\\a.exe", &VolumeMap::new())
                 .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed)
                 .with_volume(VolumeKind::Fixed),
         )
         .with_origin([]);
@@ -1514,7 +1515,9 @@ fn locations_are_classified_from_paths() {
 
 #[test]
 fn a_mapped_drive_is_a_network_location() {
-    let mut p = PathFact::new("Z:\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let mut p = PathFact::new("Z:\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     p.alias = Some(palisade_core::path::normalize("\\\\server\\share\\a.exe"));
     assert_eq!(
         known(classify(&p, &vars(), None, &[])),
@@ -1524,7 +1527,9 @@ fn a_mapped_drive_is_a_network_location() {
 
 #[test]
 fn scanner_flagged_directories_are_user_writable() {
-    let p = PathFact::new("C:\\Windows\\Tasks\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let p = PathFact::new("C:\\Windows\\Tasks\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     let flagged = [palisade_core::path::normalize("C:\\Windows\\Tasks")];
     let fixed = Some(VolumeKind::Fixed);
     assert_eq!(
@@ -1532,8 +1537,9 @@ fn scanner_flagged_directories_are_user_writable() {
         level_set(&[LocationClass::UserWritableOther, LocationClass::Windows])
     );
     // A sibling with a common prefix is not.
-    let p =
-        PathFact::new("C:\\Windows\\TasksX\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let p = PathFact::new("C:\\Windows\\TasksX\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     assert_eq!(
         known(classify(&p, &vars(), fixed, &flagged)),
         level_set(&[LocationClass::Windows])
@@ -1572,7 +1578,11 @@ fn os_signed(path: &str, writable: bool) -> ObjectFacts {
             leaf_thumbprint_sha256: None,
             details: Default::default(),
         }])
-        .with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(writable))
+        .with_path(
+            PathFact::new(path, &VolumeMap::new())
+                .with_user_writable(writable)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
+        )
         .with_location_class([LocationClass::Windows])
 }
 
@@ -1830,7 +1840,8 @@ fn agent_file_facts() -> ObjectFacts {
         }])
         .with_path(
             PathFact::new("C:\\Program Files\\Palisade\\agent.exe", &VolumeMap::new())
-                .with_user_writable(false),
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
         )
 }
 
@@ -1924,7 +1935,8 @@ fn palisade_images_are_allowed_by_hash_and_signer() {
     let mut facts = agent_facts("palisade agent", 'E');
     facts.path = Some(
         PathFact::new("C:\\Program Files\\Palisade\\agent.exe", &VolumeMap::new())
-            .with_user_writable(false),
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed),
     );
     let d = e.evaluate(
         &Subject {
@@ -2320,8 +2332,9 @@ fn external_volumes_are_never_protected_locations() {
         );
     }
     // A mapped drive whose alias is UNC.
-    let mut p =
-        PathFact::new("Z:\\Program Files\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let mut p = PathFact::new("Z:\\Program Files\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     p.alias = Some(palisade_core::path::normalize(
         "\\\\server\\share\\Program Files\\a.exe",
     ));
@@ -2339,7 +2352,9 @@ fn external_volumes_are_never_protected_locations() {
     );
     // Without them, the drive-root folder is not a fact: `windows` is
     // `Unknown`, even on a fixed disk.
-    let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let p = PathFact::new("D:\\Windows\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     let c = classify(&p, &no_vars, Some(VolumeKind::Fixed), &[]).classes;
     assert_eq!(c.get(L::Windows), Tri::Unknown);
     assert_eq!(c.get(L::OtherFixed), Tri::Unknown);
@@ -3682,7 +3697,9 @@ fn a_windows_temp_folder_without_windir_is_unknown_not_temp() {
     // so `temp` is now `Unknown` (and stage 6 applies its level too).
     use LocationClass as L;
     let with = |raw: &str, v: &PathVariables| {
-        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+        let p = PathFact::new(raw, &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed);
         classify(&p, v, Some(VolumeKind::Fixed), &[]).classes
     };
     // Full facts: every variable set, `%WINDIR%` among them.
@@ -3712,7 +3729,9 @@ fn a_windows_temp_folder_without_windir_is_unknown_not_temp() {
 fn a_unc_server_or_share_name_is_not_a_cache_folder() {
     use LocationClass as L;
     let with = |raw: &str| {
-        let p = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+        let p = PathFact::new(raw, &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed);
         known(classify(&p, &PathVariables::new(), None, &[]))
     };
     assert!(!with("\\\\INetCache\\apps\\a.exe").contains(&L::Temp));
@@ -3729,7 +3748,9 @@ fn without_volume_facts_a_drive_could_be_removable() {
     // as a fixed disk (`other_fixed`). It is now a missing fact: `removable`,
     // `optical`, `network` and `other_fixed` are all `Unknown`.
     use LocationClass as L;
-    let p = PathFact::new("E:\\setup.exe", &VolumeMap::new()).with_user_writable(false);
+    let p = PathFact::new("E:\\setup.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     let unknown_volume = classify(&p, &PathVariables::new(), None, &[]);
     for c in [L::Removable, L::Optical, L::Network, L::OtherFixed] {
         assert_eq!(unknown_volume.classes.get(c), Tri::Unknown, "{c:?}");
@@ -3842,7 +3863,9 @@ fn applied_level(
     origins: Option<Vec<OriginClass>>,
 ) -> Level {
     let v = valid(doc(with_profile(u)));
-    let mut path = PathFact::new(raw, &VolumeMap::new()).with_user_writable(false);
+    let mut path = PathFact::new(raw, &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     path.volume = volume;
     let mut facts = ObjectFacts::new()
         .with(Field::HashSha256, sha('a'))
@@ -4013,6 +4036,7 @@ fn a_missing_fact_is_named_in_the_decision_and_explained() {
         .with_path(
             PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new())
                 .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed)
                 .with_volume(VolumeKind::Fixed),
         );
     let d = decide_full(&v, ObjectType::Executable, &facts);

@@ -556,7 +556,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("warning-detail", "Detail: { $detail }."),
     (
         "warning-path-acl-unsafe-alone",
-        "Warning: a path rule did not count, because users may be able to write the path.",
+        "Warning: a path rule did not count, because users may be able to write the path, or it is not on a fixed local disk.",
     ),
     (
         "warning-short-name-alone",
@@ -715,7 +715,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "warning-path-acl-unsafe",
-        "Warning: a path rule did not count, because users may be able to write the path: { $rules }.",
+        "Warning: a path rule did not count, because users may be able to write the path, or it is not on a fixed local disk: { $rules }.",
     ),
     (
         "warning-short-name",
@@ -775,7 +775,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "why-not-user-writable",
-        "Rule { $rule } would { $verb } this file, but the path is user-writable.",
+        "Rule { $rule } would { $verb } this file, but the path may be user-writable or is not on a fixed local disk.",
     ),
     (
         "why-not-short-name",

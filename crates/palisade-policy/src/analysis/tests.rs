@@ -839,7 +839,8 @@ fn objects() -> Vec<ObjectFacts> {
                                 "C:\\Tools\\a.exe",
                                 &palisade_core::path::VolumeMap::new(),
                             )
-                            .with_user_writable(false),
+                            .with_user_writable(false)
+                            .with_volume(crate::unknown::VolumeKind::Fixed),
                         )
                         .with_signers(vec![SignerFact {
                             status: SignerStatus::Valid,

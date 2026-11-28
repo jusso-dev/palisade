@@ -52,7 +52,11 @@ fn eval(c: &CompiledCriterion, facts: &ObjectFacts) -> Tri {
 }
 
 fn at_path(raw: &str) -> ObjectFacts {
-    ObjectFacts::new().with_path(PathFact::new(raw, &VolumeMap::new()).with_user_writable(false))
+    ObjectFacts::new().with_path(
+        PathFact::new(raw, &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed),
+    )
 }
 
 fn text_facts(field: Field, value: &str) -> ObjectFacts {
@@ -515,8 +519,11 @@ fn path_spellings_are_one_object() {
         "C:\\Tools\\App\\run.exe::$DATA",
         "C:\\Tools\\App::$INDEX_ALLOCATION\\run.exe",
     ] {
-        let facts = ObjectFacts::new()
-            .with_path(PathFact::new(spelling, &volumes).with_user_writable(false));
+        let facts = ObjectFacts::new().with_path(
+            PathFact::new(spelling, &volumes)
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
+        );
         assert_eq!(eval(&c, &facts), Match, "{spelling}");
     }
     // Trailing dots and spaces are significant.
@@ -535,7 +542,9 @@ fn path_spellings_are_one_object() {
 fn unc_and_mapped_drives_match_both_forms() {
     let unc = compile(Field::PathFull, Operator::StartsWith, &["\\\\fs01\\apps"]);
     let drive = compile(Field::PathFull, Operator::StartsWith, &["Z:\\"]);
-    let mut fact = PathFact::new("Z:\\tool.exe", &VolumeMap::new()).with_user_writable(false);
+    let mut fact = PathFact::new("Z:\\tool.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     fact.alias = Some(palisade_core::path::normalize("\\\\fs01\\apps\\tool.exe"));
     let facts = ObjectFacts::new().with_path(fact);
     assert_eq!(eval(&unc, &facts), Match);
@@ -659,8 +668,9 @@ fn short_names_that_were_not_expanded_are_unknown() {
         Operator::StartsWith,
         &["C:\\Program Files"],
     );
-    let mut fact =
-        PathFact::new("C:\\PROGRA~1\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let mut fact = PathFact::new("C:\\PROGRA~1\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     fact.short_name_unresolved = true;
     let facts = ObjectFacts::new().with_path(fact);
     let e = c.eval(&facts, &deny_ctx(&PathVariables::new()));
@@ -807,6 +817,39 @@ fn every_action_that_runs_trusts_or_excludes_only_trusts_safe_paths() {
             "{action}"
         );
     }
+}
+
+#[test]
+fn allow_rules_only_trust_paths_on_a_fixed_volume() {
+    // #328: an ACL only protects a path on a local fixed disk.
+    use crate::unknown::VolumeKind;
+    let c = compile(Field::PathDirectory, Operator::Equals, &["C:\\Tools"]);
+    let vars = PathVariables::new();
+    let allow = EvalContext {
+        action: ActionKind::Allow,
+        variables: &vars,
+        context: &NO_CONTEXT,
+    };
+    for volume in [
+        None,
+        Some(VolumeKind::Removable),
+        Some(VolumeKind::Optical),
+        Some(VolumeKind::Network),
+    ] {
+        let mut fact =
+            PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new()).with_user_writable(false);
+        fact.volume = volume;
+        assert!(!fact.acl_proven(), "{volume:?}");
+        let facts = ObjectFacts::new().with_path(fact);
+        let e = c.eval(&facts, &allow);
+        assert_eq!(e.result, Unknown, "{volume:?}");
+        assert!(e.notes.contains(Note::PathAclUnsafe), "{volume:?}");
+        assert_eq!(c.eval(&facts, &deny_ctx(&vars)).result, Match, "{volume:?}");
+    }
+    let fixed = PathFact::new("C:\\Tools\\a.exe", &VolumeMap::new()).with_volume(VolumeKind::Fixed);
+    assert!(!fixed.acl_proven(), "no ACL fact");
+    assert!(fixed.clone().with_user_writable(false).acl_proven());
+    assert!(!fixed.with_user_writable(true).acl_proven());
 }
 
 #[test]

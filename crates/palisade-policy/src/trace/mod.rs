@@ -1636,9 +1636,10 @@ fn suggest(
             _ => (DraftIdentity::Publisher, p),
         }
     } else {
-        let p = facts.path.as_ref().filter(|p| {
-            p.user_writable == Some(false) && !p.short_name_unresolved && p.path.is_resolved()
-        })?;
+        let p = facts
+            .path
+            .as_ref()
+            .filter(|p| p.acl_proven() && !p.short_name_unresolved && p.path.is_resolved())?;
         (
             DraftIdentity::Path,
             criterion(Field::PathFull, Operator::Equals, p.path.as_str())?,

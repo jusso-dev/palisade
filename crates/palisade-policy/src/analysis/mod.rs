@@ -1442,8 +1442,11 @@ fn corpus_share(c: &Criterion, corpus: &[String]) -> Option<u64> {
     let hits = corpus
         .iter()
         .filter(|p| {
-            let facts = crate::facts::ObjectFacts::new()
-                .with_path(crate::facts::PathFact::new(p, &vm).with_user_writable(false));
+            let facts = crate::facts::ObjectFacts::new().with_path(
+                crate::facts::PathFact::new(p, &vm)
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
+            );
             compiled.eval(&facts, &ctx).result == crate::ops::Tri::Match
         })
         .count();
@@ -1484,7 +1487,8 @@ fn path_test_reaches(c: &Criterion, dir: &str) -> bool {
             let probe = format!("{}\\probe.exe", dir.trim_end_matches('\\'));
             let facts = crate::facts::ObjectFacts::new().with_path(
                 crate::facts::PathFact::new(&probe, &palisade_core::path::VolumeMap::new())
-                    .with_user_writable(false),
+                    .with_user_writable(false)
+                    .with_volume(crate::unknown::VolumeKind::Fixed),
             );
             if compiled.eval(&facts, &ctx).result == crate::ops::Tri::Match {
                 return true;

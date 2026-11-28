@@ -74,6 +74,7 @@ fn policy_values_in_a_trace_pass_the_redactor() {
         &VolumeMap::new(),
     );
     path.user_writable = Some(false);
+    path.volume = Some(palisade_policy::unknown::VolumeKind::Fixed);
     let facts = ObjectFacts::new()
         .with(Field::HashSha256, "a".repeat(64))
         .with_path(path);

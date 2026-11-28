@@ -67,7 +67,9 @@ fn decide(e: &EffectivePolicy, sha256: &str) -> String {
     let facts = ObjectFacts::new()
         .with(Field::HashSha256, sha256)
         .with_path(
-            PathFact::new("C:\\Tools\\tool.exe", &VolumeMap::new()).with_user_writable(false),
+            PathFact::new("C:\\Tools\\tool.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
         );
     let variables = PathVariables::new();
     let context = EvaluationContext::new();

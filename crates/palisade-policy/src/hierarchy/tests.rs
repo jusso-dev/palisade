@@ -172,7 +172,9 @@ fn facts(c: char) -> ObjectFacts {
     ObjectFacts::new()
         .with(Field::HashSha256, sha(c))
         .with_path(
-            PathFact::new("C:\\Tools\\tool.exe", &VolumeMap::new()).with_user_writable(false),
+            PathFact::new("C:\\Tools\\tool.exe", &VolumeMap::new())
+                .with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed),
         )
 }
 

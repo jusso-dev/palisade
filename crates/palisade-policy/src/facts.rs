@@ -179,6 +179,18 @@ impl PathFact {
         self.user_writable = Some(writable);
         self
     }
+
+    /// Whether the path can be trusted as an identity (#31, #328): the
+    /// file is on a fixed local volume, and no non-administrative principal
+    /// can write it or a directory above it. An ACL only protects a path on
+    /// a local fixed disk: a removable disk can be prepared elsewhere with
+    /// any ACL, and a network share's server decides what its folders hold.
+    /// An unknown volume kind or ACL fact is not proof.
+    #[must_use]
+    pub const fn acl_proven(&self) -> bool {
+        matches!(self.user_writable, Some(false))
+            && matches!(self.volume, Some(crate::unknown::VolumeKind::Fixed))
+    }
 }
 
 /// One signature on an object, with the facts about its signer.

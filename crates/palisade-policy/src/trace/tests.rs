@@ -564,6 +564,7 @@ fn unknown_facts_are_reported_with_their_effect() {
     );
     o.facts = ObjectFacts::new()
         .with(Field::HashSha256, sha('b'))
+        // No volume kind either: it is one of the unknown facts reported.
         .with_path(
             PathFact::new("C:\\Tools\\script.exe", &VolumeMap::new()).with_user_writable(false),
         );
@@ -628,7 +629,7 @@ fn a_user_writable_path_warns_and_is_why_not() {
         .map(|m| Catalog::english().format(m))
         .collect();
     assert!(
-        lines.iter().any(|l| l == "Rule 'Tools folder' (R-000003) would allow this file, but the path is user-writable."),
+        lines.iter().any(|l| l == "Rule 'Tools folder' (R-000003) would allow this file, but the path may be user-writable or is not on a fixed local disk."),
         "{lines:?}"
     );
     snapshot("path-acl-unsafe", &t);
@@ -1890,7 +1891,11 @@ fn the_draft_falls_back_when_a_criterion_would_not_validate() {
         };
         trace_of(&p, &o, &enforce(&p), TraceLevel::Standard).allow_suggestion
     };
-    let path = || PathFact::new("C:\\Apps\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let path = || {
+        PathFact::new("C:\\Apps\\a.exe", &VolumeMap::new())
+            .with_user_writable(false)
+            .with_volume(crate::unknown::VolumeKind::Fixed)
+    };
     // A digest of the wrong length is not a hash identity: fall back.
     let d = draft(
         ObjectFacts::new()
@@ -1911,8 +1916,9 @@ fn the_draft_falls_back_when_a_criterion_would_not_validate() {
     }
     // A path with a literal `%TEMP%` component does not compile as a
     // criterion value: no draft rather than an invalid one.
-    let weird =
-        PathFact::new("C:\\Tools\\%TEMP%\\a.exe", &VolumeMap::new()).with_user_writable(false);
+    let weird = PathFact::new("C:\\Tools\\%TEMP%\\a.exe", &VolumeMap::new())
+        .with_user_writable(false)
+        .with_volume(crate::unknown::VolumeKind::Fixed);
     assert!(draft(ObjectFacts::new().with_path(weird)).is_none());
     assert_eq!(
         draft(ObjectFacts::new().with_path(path()))
@@ -1970,7 +1976,8 @@ proptest! {
         path in proptest::sample::select(vec!["C:\\Apps\\a.exe", "C:\\%TEMP%\\a.exe", "relative.exe"]),
     ) {
         let p = validated(policy_doc("enforce", vec![(1, "mixed", false, vec![])]));
-        let mut f = ObjectFacts::new().with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(false));
+        let mut f = ObjectFacts::new().with_path(PathFact::new(path, &VolumeMap::new()).with_user_writable(false)
+                .with_volume(crate::unknown::VolumeKind::Fixed));
         if let Some(h) = &hash { f.set(Field::HashSha256, h.clone()); }
         if let Some(v) = &product { f.set(Field::MetaProductName, v.clone()); }
         if let Some(v) = &version { f.set(Field::MetaFileVersion, v.clone()); }

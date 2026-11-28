@@ -105,6 +105,14 @@ fn run_case(file: &str, case: &toml::Table) {
     if let Some(path) = case.get("path") {
         let mut p = PathFact::new(path.as_str().unwrap(), &VolumeMap::new());
         p.user_writable = case.get("user_writable").map(|w| w.as_bool().unwrap());
+        p.volume = match case.get("volume").map(|v| v.as_str().unwrap()) {
+            None => None,
+            Some("fixed") => Some(palisade_policy::unknown::VolumeKind::Fixed),
+            Some("removable") => Some(palisade_policy::unknown::VolumeKind::Removable),
+            Some("optical") => Some(palisade_policy::unknown::VolumeKind::Optical),
+            Some("network") => Some(palisade_policy::unknown::VolumeKind::Network),
+            Some(other) => panic!("{label}: unknown volume `{other}`"),
+        };
         facts = facts.with_path(p);
     }
     let action = match case.get("action").map(|a| a.as_str().unwrap()) {

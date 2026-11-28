@@ -143,7 +143,8 @@ fn facts(sha: char) -> ObjectFacts {
         .with(Field::MetaFileVersion, "2.0.1.0")
         .with_path(
             PathFact::new(r"C:\Program Files\App\tool.exe", &VolumeMap::new())
-                .with_user_writable(false),
+                .with_user_writable(false)
+                .with_volume(palisade_policy::unknown::VolumeKind::Fixed),
         )
         .with_signers(vec![SignerFact {
             status: SignerStatus::Valid,
