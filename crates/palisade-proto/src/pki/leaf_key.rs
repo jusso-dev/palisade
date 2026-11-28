@@ -86,9 +86,13 @@ impl LeafKey {
     /// [`SignerError::Failed`] if the secure random source fails.
     pub fn generate() -> Result<(Self, Pkcs8), SignerError> {
         let rng = Rng::new();
-        let der = crypto::generate_pkcs8(ALGORITHM, &rng).map_err(|e| SignerError::Failed(e.0))?;
-        let key = Self::from_pkcs8_with(rng, &der)?;
-        Ok((key, Pkcs8::new(der)))
+        // Wrapped before the fallible import, so the bytes are wiped on
+        // every path.
+        let pkcs8 = Pkcs8::new(
+            crypto::generate_pkcs8(ALGORITHM, &rng).map_err(|e| SignerError::Failed(e.0))?,
+        );
+        let key = Self::from_pkcs8_with(rng, pkcs8.expose())?;
+        Ok((key, pkcs8))
     }
 
     /// Reads a leaf key back from its PKCS#8 document.
