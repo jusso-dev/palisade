@@ -75,7 +75,24 @@ impl Snapshot {
     /// [`BuildError`] if a match tree does not compile, which validation
     /// rules out.
     pub fn new(policy: ValidatedPolicy, generation: u64) -> Result<Self, BuildError> {
-        let compiled = Compiled::try_new(policy, |p| Evaluator::new(p))?;
+        Self::with_library(policy, &crate::scope::NoLibrary, generation)
+    }
+
+    /// Compiles a validated policy, resolving the library sets its scopes
+    /// read through `library` (#37), such as a bundle's inlined sets
+    /// ([`crate::bundle::BundleSets`]). The sets are read only while the
+    /// evaluator is built.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError`] if a match tree does not compile, which validation
+    /// rules out.
+    pub fn with_library(
+        policy: ValidatedPolicy,
+        library: &dyn crate::scope::ScopeLibrary,
+        generation: u64,
+    ) -> Result<Self, BuildError> {
+        let compiled = Compiled::try_new(policy, |p| Evaluator::with_library(p, library))?;
         // Only the rules the evaluator uses: enabled rules of the rule sets
         // the policy references.
         let plan = {
@@ -387,6 +404,31 @@ impl Engine {
         self.current.store(Arc::new(snapshot));
         self.cache.retain_generation(generation);
         Ok(())
+    }
+
+    /// Makes a policy loaded from a bundle ([`crate::bundle::load`])
+    /// current, as [`load`](Self::load) does: its indexes are already
+    /// built, so this only swaps it in and purges the cache.
+    pub fn install(&self, loaded: crate::bundle::LoadedPolicy) {
+        let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
+        let mut snapshot = loaded.into_snapshot();
+        snapshot.generation = generation;
+        self.current.store(Arc::new(snapshot));
+        self.cache.retain_generation(generation);
+    }
+
+    /// An engine that decides with a policy loaded from a bundle.
+    #[must_use]
+    pub fn from_loaded(loaded: crate::bundle::LoadedPolicy, config: EngineConfig) -> Self {
+        let mut snapshot = loaded.into_snapshot();
+        snapshot.generation = 1;
+        Self {
+            current: ArcSwap::from_pointee(snapshot),
+            cache: DecisionCache::new(config.cache),
+            config,
+            next_generation: AtomicU64::new(2),
+            seed: cache::KeySeed::new(),
+        }
     }
 
     /// The current snapshot. Holding it keeps that policy alive.

@@ -19,12 +19,15 @@
 //!   inlined sets when a loaded bundle is evaluated.
 //! - [`delta`]: the difference between two bundles, applied only to the
 //!   exact base and checked against the result's hash.
+//! - [`load`](mod@load): bundle bytes to a [`LoadedPolicy`] in one step:
+//!   decoded, validated and with its evaluation indexes built.
 
 pub mod cbor;
 pub mod compile;
 pub mod delta;
 pub mod format;
 pub mod keys;
+pub mod load;
 pub mod serial;
 
 pub use compile::{BundleSets, CompileError, Compiled, Source, compile};
@@ -33,3 +36,4 @@ pub use format::{
     AgentVersion, Body, BundleError, BundleLimits, Header, InlineLibrary, PolicyBundle, SetContent,
     SourceRevisions, Target, TargetScope, bundle_hash, decode_header,
 };
+pub use load::{LoadError, LoadedPolicy, load};
