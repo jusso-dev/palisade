@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_STREAMS","MAX_STREAM_NAME_UNITS","MAX_STREAM_TYPE_UNITS"],"enum":["RecordError"],"fn":["parse_stream_info","parse_usn_record"],"struct":["StreamEntry","StreamList","UsnFacts"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_JOURNAL_NAME_UNITS","MAX_STREAMS","MAX_STREAM_NAME_UNITS","MAX_STREAM_TYPE_UNITS"],"enum":["RecordError"],"fn":["parse_enum_usn_data","parse_journal_data","parse_read_journal","parse_stream_info","parse_usn_record"],"mod":["reason"],"struct":["JournalData","JournalRecord","StreamEntry","StreamList","UsnFacts"]};

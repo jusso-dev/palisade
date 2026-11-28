@@ -36,10 +36,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-de2a680a.js"></script>
+        <script src="../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -251,6 +251,9 @@ as warnings and ignored, so variables meant for other Palisade components do not
 <tr><td><code>database.auto_migrate</code></td><td>on if <code>[database.migration]</code> is set</td><td>Apply pending migrations at start</td></tr>
 <tr><td><code>database.migration.user</code></td><td>none</td><td>The <strong>migration</strong> role, which owns the schema</td></tr>
 <tr><td><code>database.migration.password_file</code></td><td>none</td><td>A secret file holding its password</td></tr>
+<tr><td><code>clock.ntp_servers</code></td><td>none</td><td>NTP servers for the clock health check, as <code>host</code>, <code>host:port</code>, <code>IPv4[:port]</code> or <code>[IPv6][:port]</code>, at most 8. In an environment variable, comma-separated. Empty: the clock is not checked and <code>serve</code> warns</td></tr>
+<tr><td><code>clock.max_offset_ms</code></td><td><code>1000</code></td><td>Largest offset from NTP before health reports <code>clock_offset</code>, 1 to 3600000</td></tr>
+<tr><td><code>clock.check_interval_secs</code></td><td><code>64</code></td><td>16 to 86400</td></tr>
 </tbody>
 </table>
 </div>
@@ -362,10 +365,18 @@ admin and agent listeners the body carries only the overall status. On the metri
 <tr><td><code>database_down</code></td><td><code>[database]</code> is configured and the runtime role cannot reach it (also before the first check)</td><td>503</td></tr>
 <tr><td><code>database_schema:&lt;verdict&gt;</code></td><td>The schema is <code>behind</code> (pending migrations), <code>newer</code> than this binary, or <code>damaged</code></td><td>503</td></tr>
 <tr><td><code>database_role_unsafe</code></td><td>The runtime role, or any role it is a member of, is a superuser, has <code>BYPASSRLS</code>, or owns or can create objects in the schema; or it is not in <code>palisade_runtime</code></td><td>503</td></tr>
+<tr><td><code>clock_offset</code></td><td>The system clock is further from NTP than <code>clock.max_offset_ms</code> (1 s by default)</td><td>200, status <code>degraded</code></td></tr>
+<tr><td><code>clock_unknown</code></td><td><code>clock.ntp_servers</code> is set but no server gave a valid reply (also before the first check)</td><td>200, status <code>degraded</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>The database is checked every 5 seconds. Job-runner readiness joins this list with #126.</p>
+<p>The database is checked every 5 seconds. The clock is checked every <code>clock.check_interval_secs</code>
+over SNTP: the servers are tried in order and the first valid reply decides (#224, ISM-0988).
+Replies are checked strictly (<code>palisade_proto::sntp</code>; fuzzed as <code>sntp_reply</code>), and a change
+between synced, skewed and unknown is logged once. The check only reports; keeping the clock
+right is the operating system's time service's job. A bad clock degrades the status but leaves
+the server ready, because failing readiness would strand every agent for a problem a restart
+cannot fix. Job-runner readiness joins this list with #126.</p>
 <h2 id="database"><a class="header" href="#database">Database</a></h2>
 <p>Postgres 16 or later, through <code>sqlx</code> (<a href="../../docs/adr/0006-server-database.html">ADR 0006</a>).
 Without a <code>[database]</code> section the server runs without one, as before, and logs a warning.</p>
@@ -462,7 +473,14 @@ mandatory over it.</p>
 <code>fields</code> (including <code>message</code>), <code>span</code> (the current span) and <code>spans</code> (every enclosing span, so
 the request span's fields stay on the line when a handler opens a child span). The level comes
 from <code>log.level</code>. No secret value is passed to the logger: the configuration holds only secret
-paths, and the secret reader's errors never contain file contents. Tenant and principal fields
+paths, and the secret reader's errors never contain file contents. Secrets read from files are
+held in <code>secret::Secret</code>, which is wiped on drop and prints as <code>[REDACTED]</code> in <code>Debug</code> and
+<code>Display</code>. As a second line of defence, every log line is redacted on its way out
+(<code>redact</code>, #227): any field, in the event or in any span, whose name has a segment such as
+<code>password</code>, <code>secret</code>, <code>token</code>, <code>key</code>, <code>authorization</code>, <code>cookie</code> or <code>code</code> is replaced by
+<code>[REDACTED]</code> (names ending in <code>file</code> or <code>path</code>, such as <code>key_file</code>, are kept, since they hold
+paths), and admin API tokens (<code>pal_&lt;env&gt;_&lt;id&gt;_</code> keeps its prefix), <code>Bearer</code> and <code>Basic</code>
+credentials and PEM private key bodies are masked wherever they appear. Tenant and principal fields
 join the request span with the API work.</p>
 <h2 id="shutdown"><a class="header" href="#shutdown">Shutdown</a></h2>
 <p>On SIGTERM or SIGINT (Ctrl-C), or on Windows Ctrl-C, Ctrl-Break and the console close, logoff
@@ -476,7 +494,7 @@ either way. A second signal during the drain exits <code>1</code> immediately.</
 <code>create-admin</code>, <code>backup</code> and <code>restore</code> subcommands (also
 <a href="https://github.com/jusso-dev/palisade/issues/138">#138</a>); <code>/version</code> with git SHA and schema
 version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
-the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
+the metrics exposition and OTLP; runtime log-level changes; the job runner
 and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
 partitioning (<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> and the issues that own
 each table), the audit log (<a href="https://github.com/jusso-dev/palisade/issues/132">#132</a>), enrolment and device certificate

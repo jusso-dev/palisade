@@ -1418,288 +1418,294 @@
 <a href=#1418 id=1418 data-nosnippet>1418</a>            };
 <a href=#1419 id=1419 data-nosnippet>1419</a>            <span class="prelude-val">Some</span>(std::iter::once(<span class="kw-2">&amp;</span>p.path).chain(<span class="kw-2">&amp;</span>p.alias).map(pick).collect())
 <a href=#1420 id=1420 data-nosnippet>1420</a>        }
-<a href=#1421 id=1421 data-nosnippet>1421</a>        <span class="kw">_ </span>=&gt; facts.get(field).map(|v| <span class="macro">vec!</span>[v.to_owned()]),
-<a href=#1422 id=1422 data-nosnippet>1422</a>    }
-<a href=#1423 id=1423 data-nosnippet>1423</a>}
-<a href=#1424 id=1424 data-nosnippet>1424</a>
-<a href=#1425 id=1425 data-nosnippet>1425</a><span class="kw">const fn </span>signer_status(s: <span class="kw">crate</span>::facts::SignerStatus) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#1426 id=1426 data-nosnippet>1426</a>    <span class="kw">use </span><span class="kw">crate</span>::facts::SignerStatus <span class="kw">as </span>S;
-<a href=#1427 id=1427 data-nosnippet>1427</a>    <span class="kw">match </span>s {
-<a href=#1428 id=1428 data-nosnippet>1428</a>        S::Valid =&gt; <span class="string">"valid"</span>,
-<a href=#1429 id=1429 data-nosnippet>1429</a>        S::ValidExpiredTimestamped =&gt; <span class="string">"valid_expired_timestamped"</span>,
-<a href=#1430 id=1430 data-nosnippet>1430</a>        S::CatalogSigned =&gt; <span class="string">"catalog_signed"</span>,
-<a href=#1431 id=1431 data-nosnippet>1431</a>        S::Expired =&gt; <span class="string">"expired"</span>,
-<a href=#1432 id=1432 data-nosnippet>1432</a>        S::Revoked =&gt; <span class="string">"revoked"</span>,
-<a href=#1433 id=1433 data-nosnippet>1433</a>        S::UntrustedRoot =&gt; <span class="string">"untrusted_root"</span>,
-<a href=#1434 id=1434 data-nosnippet>1434</a>        S::DigestMismatch =&gt; <span class="string">"digest_mismatch"</span>,
-<a href=#1435 id=1435 data-nosnippet>1435</a>    }
-<a href=#1436 id=1436 data-nosnippet>1436</a>}
-<a href=#1437 id=1437 data-nosnippet>1437</a>
-<a href=#1438 id=1438 data-nosnippet>1438</a><span class="kw">const fn </span>relaxation_name(f: RelaxationFlag) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
-<a href=#1439 id=1439 data-nosnippet>1439</a>    <span class="kw">match </span>f {
-<a href=#1440 id=1440 data-nosnippet>1440</a>        RelaxationFlag::IgnoreExpiry =&gt; <span class="string">"ignore_expiry"</span>,
-<a href=#1441 id=1441 data-nosnippet>1441</a>        RelaxationFlag::IgnoreRevocationUnknown =&gt; <span class="string">"ignore_revocation_unknown"</span>,
-<a href=#1442 id=1442 data-nosnippet>1442</a>        RelaxationFlag::IgnoreInvalidUsage =&gt; <span class="string">"ignore_invalid_usage"</span>,
-<a href=#1443 id=1443 data-nosnippet>1443</a>        RelaxationFlag::AllowUntrustedRoot =&gt; <span class="string">"allow_untrusted_root"</span>,
-<a href=#1444 id=1444 data-nosnippet>1444</a>    }
-<a href=#1445 id=1445 data-nosnippet>1445</a>}
-<a href=#1446 id=1446 data-nosnippet>1446</a>
-<a href=#1447 id=1447 data-nosnippet>1447</a><span class="kw">fn </span>unknown_effect(r: <span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;) -&gt; UnknownEffect {
-<a href=#1448 id=1448 data-nosnippet>1448</a>    <span class="kw">match </span>r.action() {
-<a href=#1449 id=1449 data-nosnippet>1449</a>        ActionKind::Deny =&gt; {
-<a href=#1450 id=1450 data-nosnippet>1450</a>            <span class="kw">if </span><span class="macro">matches!</span>(<span class="kw-2">&amp;</span>r.rule.action, <span class="kw">crate</span>::model::Action::Deny(o) <span class="kw">if </span>o.unknown_as == UnknownAs::Match)
-<a href=#1451 id=1451 data-nosnippet>1451</a>            {
-<a href=#1452 id=1452 data-nosnippet>1452</a>                UnknownEffect::DenyAppliedFailClosed
-<a href=#1453 id=1453 data-nosnippet>1453</a>            } <span class="kw">else </span>{
-<a href=#1454 id=1454 data-nosnippet>1454</a>                UnknownEffect::DenyNotApplied
-<a href=#1455 id=1455 data-nosnippet>1455</a>            }
-<a href=#1456 id=1456 data-nosnippet>1456</a>        }
-<a href=#1457 id=1457 data-nosnippet>1457</a>        ActionKind::Audit =&gt; UnknownEffect::AnnotationNotApplied,
-<a href=#1458 id=1458 data-nosnippet>1458</a>        <span class="kw">_ </span>=&gt; UnknownEffect::AllowNotApplied,
-<a href=#1459 id=1459 data-nosnippet>1459</a>    }
-<a href=#1460 id=1460 data-nosnippet>1460</a>}
-<a href=#1461 id=1461 data-nosnippet>1461</a>
-<a href=#1462 id=1462 data-nosnippet>1462</a><span class="kw">fn </span>role_of(r: RuleRef, decision: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Decision&gt;) -&gt; MatchRole {
-<a href=#1463 id=1463 data-nosnippet>1463</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(d) = decision <span class="kw">else </span>{
-<a href=#1464 id=1464 data-nosnippet>1464</a>        <span class="kw">return </span>MatchRole::Overridden;
-<a href=#1465 id=1465 data-nosnippet>1465</a>    };
-<a href=#1466 id=1466 data-nosnippet>1466</a>    <span class="kw">if </span>d.matched_rule() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>r) {
-<a href=#1467 id=1467 data-nosnippet>1467</a>        MatchRole::Decided
-<a href=#1468 id=1468 data-nosnippet>1468</a>    } <span class="kw">else if </span>d.annotations().contains(<span class="kw-2">&amp;</span>r) {
-<a href=#1469 id=1469 data-nosnippet>1469</a>        MatchRole::Annotation
-<a href=#1470 id=1470 data-nosnippet>1470</a>    } <span class="kw">else if </span>d.directives().trust_sources.iter().any(|g| g.rule == r) {
-<a href=#1471 id=1471 data-nosnippet>1471</a>        MatchRole::Granted
-<a href=#1472 id=1472 data-nosnippet>1472</a>    } <span class="kw">else </span>{
-<a href=#1473 id=1473 data-nosnippet>1473</a>        MatchRole::Overridden
-<a href=#1474 id=1474 data-nosnippet>1474</a>    }
-<a href=#1475 id=1475 data-nosnippet>1475</a>}
-<a href=#1476 id=1476 data-nosnippet>1476</a>
-<a href=#1477 id=1477 data-nosnippet>1477</a><span class="kw">fn </span>stages(
-<a href=#1478 id=1478 data-nosnippet>1478</a>    decision: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Decision&gt;,
-<a href=#1479 id=1479 data-nosnippet>1479</a>    decider: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;&gt;,
-<a href=#1480 id=1480 data-nosnippet>1480</a>    matched: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;],
-<a href=#1481 id=1481 data-nosnippet>1481</a>    state: <span class="kw-2">&amp;</span>DeviceState,
-<a href=#1482 id=1482 data-nosnippet>1482</a>    durations: <span class="kw-2">&amp;</span>BTreeMap&lt;RuleStage, u64&gt;,
-<a href=#1483 id=1483 data-nosnippet>1483</a>) -&gt; Vec&lt;StageTrace&gt; {
-<a href=#1484 id=1484 data-nosnippet>1484</a>    <span class="kw">let </span>n = |s: RuleStage| count(matched.iter().filter(|r| r.stage == s).count());
-<a href=#1485 id=1485 data-nosnippet>1485</a>    <span class="kw">let </span>decided = <span class="kw">match </span>(decision, decider) {
-<a href=#1486 id=1486 data-nosnippet>1486</a>        (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-<a href=#1487 id=1487 data-nosnippet>1487</a>        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(r)) =&gt; <span class="prelude-val">Some</span>(<span class="kw">match </span>r.stage {
-<a href=#1488 id=1488 data-nosnippet>1488</a>            RuleStage::MandatoryDeny =&gt; StageName::MandatoryDeny,
-<a href=#1489 id=1489 data-nosnippet>1489</a>            RuleStage::Exclusion =&gt; StageName::Exclusion,
-<a href=#1490 id=1490 data-nosnippet>1490</a>            <span class="kw">_ </span>=&gt; StageName::Policy,
-<a href=#1491 id=1491 data-nosnippet>1491</a>        }),
-<a href=#1492 id=1492 data-nosnippet>1492</a>        <span class="comment">// A pinned Palisade image is allowed right after stage 1 (#39).
-<a href=#1493 id=1493 data-nosnippet>1493</a>        </span>(<span class="prelude-val">Some</span>(d), <span class="prelude-val">None</span>) <span class="kw">if </span>d.reason_code() == <span class="kw">crate</span>::decision::ReasonCode::SelfAllow =&gt; {
-<a href=#1494 id=1494 data-nosnippet>1494</a>            <span class="prelude-val">Some</span>(StageName::Exclusion)
-<a href=#1495 id=1495 data-nosnippet>1495</a>        }
-<a href=#1496 id=1496 data-nosnippet>1496</a>        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Some</span>(StageName::Unknown),
-<a href=#1497 id=1497 data-nosnippet>1497</a>    };
-<a href=#1498 id=1498 data-nosnippet>1498</a>    <span class="kw">let </span>order = [
-<a href=#1499 id=1499 data-nosnippet>1499</a>        StageName::MandatoryDeny,
-<a href=#1500 id=1500 data-nosnippet>1500</a>        StageName::Exclusion,
-<a href=#1501 id=1501 data-nosnippet>1501</a>        StageName::SessionOverride,
-<a href=#1502 id=1502 data-nosnippet>1502</a>        StageName::Policy,
-<a href=#1503 id=1503 data-nosnippet>1503</a>        StageName::Attribute,
-<a href=#1504 id=1504 data-nosnippet>1504</a>        StageName::Unknown,
-<a href=#1505 id=1505 data-nosnippet>1505</a>    ];
-<a href=#1506 id=1506 data-nosnippet>1506</a>    <span class="kw">let </span>position = decided.and_then(|d| order.iter().position(|s| <span class="kw-2">*</span>s == d));
-<a href=#1507 id=1507 data-nosnippet>1507</a>    order
-<a href=#1508 id=1508 data-nosnippet>1508</a>        .iter()
-<a href=#1509 id=1509 data-nosnippet>1509</a>        .enumerate()
-<a href=#1510 id=1510 data-nosnippet>1510</a>        .map(|(i, <span class="kw-2">&amp;</span>name)| {
-<a href=#1511 id=1511 data-nosnippet>1511</a>            <span class="kw">let </span>outcome = <span class="kw">match </span>position {
-<a href=#1512 id=1512 data-nosnippet>1512</a>                <span class="prelude-val">None </span>=&gt; StageOutcome::Skipped,
-<a href=#1513 id=1513 data-nosnippet>1513</a>                <span class="prelude-val">Some</span>(p) <span class="kw">if </span>i == p =&gt; StageOutcome::Decided,
-<a href=#1514 id=1514 data-nosnippet>1514</a>                <span class="comment">// Attribute rules do not exist yet (#33), and a session
-<a href=#1515 id=1515 data-nosnippet>1515</a>                // stage only runs with a session.
-<a href=#1516 id=1516 data-nosnippet>1516</a>                </span><span class="prelude-val">Some</span>(p) <span class="kw">if </span>i &lt; p =&gt; <span class="kw">match </span>name {
-<a href=#1517 id=1517 data-nosnippet>1517</a>                    StageName::Attribute =&gt; StageOutcome::Skipped,
-<a href=#1518 id=1518 data-nosnippet>1518</a>                    <span class="comment">// Lockdown suspends every session (#36).
-<a href=#1519 id=1519 data-nosnippet>1519</a>                    </span>StageName::SessionOverride <span class="kw">if </span>state.session.is_none() || state.lockdown =&gt; {
-<a href=#1520 id=1520 data-nosnippet>1520</a>                        StageOutcome::Skipped
-<a href=#1521 id=1521 data-nosnippet>1521</a>                    }
-<a href=#1522 id=1522 data-nosnippet>1522</a>                    <span class="kw">_ </span>=&gt; StageOutcome::Passed,
-<a href=#1523 id=1523 data-nosnippet>1523</a>                },
-<a href=#1524 id=1524 data-nosnippet>1524</a>                <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; StageOutcome::Skipped,
-<a href=#1525 id=1525 data-nosnippet>1525</a>            };
-<a href=#1526 id=1526 data-nosnippet>1526</a>            <span class="kw">let </span>(candidates, duration_ns) = <span class="kw">match </span>name {
-<a href=#1527 id=1527 data-nosnippet>1527</a>                StageName::MandatoryDeny =&gt; (
-<a href=#1528 id=1528 data-nosnippet>1528</a>                    n(RuleStage::MandatoryDeny),
-<a href=#1529 id=1529 data-nosnippet>1529</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::MandatoryDeny).copied(),
-<a href=#1530 id=1530 data-nosnippet>1530</a>                ),
-<a href=#1531 id=1531 data-nosnippet>1531</a>                StageName::Exclusion =&gt; (
-<a href=#1532 id=1532 data-nosnippet>1532</a>                    n(RuleStage::Exclusion),
-<a href=#1533 id=1533 data-nosnippet>1533</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::Exclusion).copied(),
-<a href=#1534 id=1534 data-nosnippet>1534</a>                ),
-<a href=#1535 id=1535 data-nosnippet>1535</a>                StageName::Policy =&gt; (
-<a href=#1536 id=1536 data-nosnippet>1536</a>                    n(RuleStage::Policy),
-<a href=#1537 id=1537 data-nosnippet>1537</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::Policy).copied(),
-<a href=#1538 id=1538 data-nosnippet>1538</a>                ),
-<a href=#1539 id=1539 data-nosnippet>1539</a>                <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="prelude-val">None</span>),
-<a href=#1540 id=1540 data-nosnippet>1540</a>            };
-<a href=#1541 id=1541 data-nosnippet>1541</a>            StageTrace {
-<a href=#1542 id=1542 data-nosnippet>1542</a>                name,
-<a href=#1543 id=1543 data-nosnippet>1543</a>                outcome,
-<a href=#1544 id=1544 data-nosnippet>1544</a>                candidates,
-<a href=#1545 id=1545 data-nosnippet>1545</a>                duration_ns,
-<a href=#1546 id=1546 data-nosnippet>1546</a>            }
-<a href=#1547 id=1547 data-nosnippet>1547</a>        })
-<a href=#1548 id=1548 data-nosnippet>1548</a>        .collect()
-<a href=#1549 id=1549 data-nosnippet>1549</a>}
-<a href=#1550 id=1550 data-nosnippet>1550</a>
-<a href=#1551 id=1551 data-nosnippet>1551</a><span class="doccomment">/// The smallest allow rule that identifies the subject, from the strongest
-<a href=#1552 id=1552 data-nosnippet>1552</a>/// identity the privacy settings let the trace reveal.
-<a href=#1553 id=1553 data-nosnippet>1553</a></span><span class="kw">fn </span>suggest(
-<a href=#1554 id=1554 data-nosnippet>1554</a>    subject: <span class="kw-2">&amp;</span>Subject&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#1555 id=1555 data-nosnippet>1555</a>    privacy: <span class="kw-2">&amp;</span>Privacy,
-<a href=#1556 id=1556 data-nosnippet>1556</a>    matched: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;],
-<a href=#1557 id=1557 data-nosnippet>1557</a>    extras: <span class="kw-2">&amp;</span>ObjectExtras,
-<a href=#1558 id=1558 data-nosnippet>1558</a>) -&gt; <span class="prelude-ty">Option</span>&lt;RuleDraft&gt; {
-<a href=#1559 id=1559 data-nosnippet>1559</a>    <span class="kw">use </span><span class="kw">crate</span>::model::{Criterion, Match};
-<a href=#1560 id=1560 data-nosnippet>1560</a>    <span class="kw">let </span>facts = subject.facts;
-<a href=#1561 id=1561 data-nosnippet>1561</a>    <span class="comment">// A criterion is offered only if validation would accept it: the value
-<a href=#1562 id=1562 data-nosnippet>1562</a>    // is revealed and unchanged by redaction, not empty, has no control
-<a href=#1563 id=1563 data-nosnippet>1563</a>    // character, is within the size limit, and the criterion compiles. If
-<a href=#1564 id=1564 data-nosnippet>1564</a>    // not, the next identity is tried.
-<a href=#1565 id=1565 data-nosnippet>1565</a>    </span><span class="kw">let </span>clean = |field: Field, v: <span class="kw-2">&amp;</span>str| {
-<a href=#1566 id=1566 data-nosnippet>1566</a>        privacy.reveals(field)
-<a href=#1567 id=1567 data-nosnippet>1567</a>            &amp;&amp; privacy.redactor.redact(v) == v
-<a href=#1568 id=1568 data-nosnippet>1568</a>            &amp;&amp; !v.is_empty()
-<a href=#1569 id=1569 data-nosnippet>1569</a>            &amp;&amp; !v.chars().any(char::is_control)
-<a href=#1570 id=1570 data-nosnippet>1570</a>            &amp;&amp; v.len() &lt;= <span class="kw">crate</span>::model::limits::MAX_VALUE_BYTES
-<a href=#1571 id=1571 data-nosnippet>1571</a>    };
-<a href=#1572 id=1572 data-nosnippet>1572</a>    <span class="kw">let </span>criterion = |field: Field, operator: Operator, v: <span class="kw-2">&amp;</span>str| -&gt; <span class="prelude-ty">Option</span>&lt;Match&gt; {
-<a href=#1573 id=1573 data-nosnippet>1573</a>        <span class="kw">let </span>c = Criterion::new(field, operator, [v]);
-<a href=#1574 id=1574 data-nosnippet>1574</a>        (clean(field, v) &amp;&amp; <span class="kw">crate</span>::ops::CompiledCriterion::compile(<span class="kw-2">&amp;</span>c).is_ok())
-<a href=#1575 id=1575 data-nosnippet>1575</a>            .then_some(Match::Criterion(c))
+<a href=#1421 id=1421 data-nosnippet>1421</a>        field <span class="kw">if </span>field.is_path_location() =&gt; <span class="kw">match </span>facts.path.as_ref()<span class="question-mark">?</span>.location(field) {
+<a href=#1422 id=1422 data-nosnippet>1422</a>            <span class="kw">crate</span>::facts::PathLocation::Text(t) =&gt; t.map(|t| <span class="macro">vec!</span>[t.to_owned()]),
+<a href=#1423 id=1423 data-nosnippet>1423</a>            <span class="kw">crate</span>::facts::PathLocation::Bool(b) =&gt; b.map(|b| <span class="macro">vec!</span>[b.to_string()]),
+<a href=#1424 id=1424 data-nosnippet>1424</a>            <span class="kw">crate</span>::facts::PathLocation::None =&gt; <span class="prelude-val">Some</span>(Vec::new()),
+<a href=#1425 id=1425 data-nosnippet>1425</a>        },
+<a href=#1426 id=1426 data-nosnippet>1426</a>        <span class="kw">_ </span>=&gt; facts.get(field).map(|v| <span class="macro">vec!</span>[v.to_owned()]),
+<a href=#1427 id=1427 data-nosnippet>1427</a>    }
+<a href=#1428 id=1428 data-nosnippet>1428</a>}
+<a href=#1429 id=1429 data-nosnippet>1429</a>
+<a href=#1430 id=1430 data-nosnippet>1430</a><span class="kw">const fn </span>signer_status(s: <span class="kw">crate</span>::facts::SignerStatus) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#1431 id=1431 data-nosnippet>1431</a>    <span class="kw">use </span><span class="kw">crate</span>::facts::SignerStatus <span class="kw">as </span>S;
+<a href=#1432 id=1432 data-nosnippet>1432</a>    <span class="kw">match </span>s {
+<a href=#1433 id=1433 data-nosnippet>1433</a>        S::Valid =&gt; <span class="string">"valid"</span>,
+<a href=#1434 id=1434 data-nosnippet>1434</a>        S::ValidExpiredTimestamped =&gt; <span class="string">"valid_expired_timestamped"</span>,
+<a href=#1435 id=1435 data-nosnippet>1435</a>        S::CatalogSigned =&gt; <span class="string">"catalog_signed"</span>,
+<a href=#1436 id=1436 data-nosnippet>1436</a>        S::Expired =&gt; <span class="string">"expired"</span>,
+<a href=#1437 id=1437 data-nosnippet>1437</a>        S::Revoked =&gt; <span class="string">"revoked"</span>,
+<a href=#1438 id=1438 data-nosnippet>1438</a>        S::UntrustedRoot =&gt; <span class="string">"untrusted_root"</span>,
+<a href=#1439 id=1439 data-nosnippet>1439</a>        S::DigestMismatch =&gt; <span class="string">"digest_mismatch"</span>,
+<a href=#1440 id=1440 data-nosnippet>1440</a>    }
+<a href=#1441 id=1441 data-nosnippet>1441</a>}
+<a href=#1442 id=1442 data-nosnippet>1442</a>
+<a href=#1443 id=1443 data-nosnippet>1443</a><span class="kw">const fn </span>relaxation_name(f: RelaxationFlag) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+<a href=#1444 id=1444 data-nosnippet>1444</a>    <span class="kw">match </span>f {
+<a href=#1445 id=1445 data-nosnippet>1445</a>        RelaxationFlag::IgnoreExpiry =&gt; <span class="string">"ignore_expiry"</span>,
+<a href=#1446 id=1446 data-nosnippet>1446</a>        RelaxationFlag::IgnoreRevocationUnknown =&gt; <span class="string">"ignore_revocation_unknown"</span>,
+<a href=#1447 id=1447 data-nosnippet>1447</a>        RelaxationFlag::IgnoreInvalidUsage =&gt; <span class="string">"ignore_invalid_usage"</span>,
+<a href=#1448 id=1448 data-nosnippet>1448</a>        RelaxationFlag::AllowUntrustedRoot =&gt; <span class="string">"allow_untrusted_root"</span>,
+<a href=#1449 id=1449 data-nosnippet>1449</a>    }
+<a href=#1450 id=1450 data-nosnippet>1450</a>}
+<a href=#1451 id=1451 data-nosnippet>1451</a>
+<a href=#1452 id=1452 data-nosnippet>1452</a><span class="kw">fn </span>unknown_effect(r: <span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;) -&gt; UnknownEffect {
+<a href=#1453 id=1453 data-nosnippet>1453</a>    <span class="kw">match </span>r.action() {
+<a href=#1454 id=1454 data-nosnippet>1454</a>        ActionKind::Deny =&gt; {
+<a href=#1455 id=1455 data-nosnippet>1455</a>            <span class="kw">if </span><span class="macro">matches!</span>(<span class="kw-2">&amp;</span>r.rule.action, <span class="kw">crate</span>::model::Action::Deny(o) <span class="kw">if </span>o.unknown_as == UnknownAs::Match)
+<a href=#1456 id=1456 data-nosnippet>1456</a>            {
+<a href=#1457 id=1457 data-nosnippet>1457</a>                UnknownEffect::DenyAppliedFailClosed
+<a href=#1458 id=1458 data-nosnippet>1458</a>            } <span class="kw">else </span>{
+<a href=#1459 id=1459 data-nosnippet>1459</a>                UnknownEffect::DenyNotApplied
+<a href=#1460 id=1460 data-nosnippet>1460</a>            }
+<a href=#1461 id=1461 data-nosnippet>1461</a>        }
+<a href=#1462 id=1462 data-nosnippet>1462</a>        ActionKind::Audit =&gt; UnknownEffect::AnnotationNotApplied,
+<a href=#1463 id=1463 data-nosnippet>1463</a>        <span class="kw">_ </span>=&gt; UnknownEffect::AllowNotApplied,
+<a href=#1464 id=1464 data-nosnippet>1464</a>    }
+<a href=#1465 id=1465 data-nosnippet>1465</a>}
+<a href=#1466 id=1466 data-nosnippet>1466</a>
+<a href=#1467 id=1467 data-nosnippet>1467</a><span class="kw">fn </span>role_of(r: RuleRef, decision: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Decision&gt;) -&gt; MatchRole {
+<a href=#1468 id=1468 data-nosnippet>1468</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(d) = decision <span class="kw">else </span>{
+<a href=#1469 id=1469 data-nosnippet>1469</a>        <span class="kw">return </span>MatchRole::Overridden;
+<a href=#1470 id=1470 data-nosnippet>1470</a>    };
+<a href=#1471 id=1471 data-nosnippet>1471</a>    <span class="kw">if </span>d.matched_rule() == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>r) {
+<a href=#1472 id=1472 data-nosnippet>1472</a>        MatchRole::Decided
+<a href=#1473 id=1473 data-nosnippet>1473</a>    } <span class="kw">else if </span>d.annotations().contains(<span class="kw-2">&amp;</span>r) {
+<a href=#1474 id=1474 data-nosnippet>1474</a>        MatchRole::Annotation
+<a href=#1475 id=1475 data-nosnippet>1475</a>    } <span class="kw">else if </span>d.directives().trust_sources.iter().any(|g| g.rule == r) {
+<a href=#1476 id=1476 data-nosnippet>1476</a>        MatchRole::Granted
+<a href=#1477 id=1477 data-nosnippet>1477</a>    } <span class="kw">else </span>{
+<a href=#1478 id=1478 data-nosnippet>1478</a>        MatchRole::Overridden
+<a href=#1479 id=1479 data-nosnippet>1479</a>    }
+<a href=#1480 id=1480 data-nosnippet>1480</a>}
+<a href=#1481 id=1481 data-nosnippet>1481</a>
+<a href=#1482 id=1482 data-nosnippet>1482</a><span class="kw">fn </span>stages(
+<a href=#1483 id=1483 data-nosnippet>1483</a>    decision: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Decision&gt;,
+<a href=#1484 id=1484 data-nosnippet>1484</a>    decider: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;&gt;,
+<a href=#1485 id=1485 data-nosnippet>1485</a>    matched: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;],
+<a href=#1486 id=1486 data-nosnippet>1486</a>    state: <span class="kw-2">&amp;</span>DeviceState,
+<a href=#1487 id=1487 data-nosnippet>1487</a>    durations: <span class="kw-2">&amp;</span>BTreeMap&lt;RuleStage, u64&gt;,
+<a href=#1488 id=1488 data-nosnippet>1488</a>) -&gt; Vec&lt;StageTrace&gt; {
+<a href=#1489 id=1489 data-nosnippet>1489</a>    <span class="kw">let </span>n = |s: RuleStage| count(matched.iter().filter(|r| r.stage == s).count());
+<a href=#1490 id=1490 data-nosnippet>1490</a>    <span class="kw">let </span>decided = <span class="kw">match </span>(decision, decider) {
+<a href=#1491 id=1491 data-nosnippet>1491</a>        (<span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+<a href=#1492 id=1492 data-nosnippet>1492</a>        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(r)) =&gt; <span class="prelude-val">Some</span>(<span class="kw">match </span>r.stage {
+<a href=#1493 id=1493 data-nosnippet>1493</a>            RuleStage::MandatoryDeny =&gt; StageName::MandatoryDeny,
+<a href=#1494 id=1494 data-nosnippet>1494</a>            RuleStage::Exclusion =&gt; StageName::Exclusion,
+<a href=#1495 id=1495 data-nosnippet>1495</a>            <span class="kw">_ </span>=&gt; StageName::Policy,
+<a href=#1496 id=1496 data-nosnippet>1496</a>        }),
+<a href=#1497 id=1497 data-nosnippet>1497</a>        <span class="comment">// A pinned Palisade image is allowed right after stage 1 (#39).
+<a href=#1498 id=1498 data-nosnippet>1498</a>        </span>(<span class="prelude-val">Some</span>(d), <span class="prelude-val">None</span>) <span class="kw">if </span>d.reason_code() == <span class="kw">crate</span>::decision::ReasonCode::SelfAllow =&gt; {
+<a href=#1499 id=1499 data-nosnippet>1499</a>            <span class="prelude-val">Some</span>(StageName::Exclusion)
+<a href=#1500 id=1500 data-nosnippet>1500</a>        }
+<a href=#1501 id=1501 data-nosnippet>1501</a>        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Some</span>(StageName::Unknown),
+<a href=#1502 id=1502 data-nosnippet>1502</a>    };
+<a href=#1503 id=1503 data-nosnippet>1503</a>    <span class="kw">let </span>order = [
+<a href=#1504 id=1504 data-nosnippet>1504</a>        StageName::MandatoryDeny,
+<a href=#1505 id=1505 data-nosnippet>1505</a>        StageName::Exclusion,
+<a href=#1506 id=1506 data-nosnippet>1506</a>        StageName::SessionOverride,
+<a href=#1507 id=1507 data-nosnippet>1507</a>        StageName::Policy,
+<a href=#1508 id=1508 data-nosnippet>1508</a>        StageName::Attribute,
+<a href=#1509 id=1509 data-nosnippet>1509</a>        StageName::Unknown,
+<a href=#1510 id=1510 data-nosnippet>1510</a>    ];
+<a href=#1511 id=1511 data-nosnippet>1511</a>    <span class="kw">let </span>position = decided.and_then(|d| order.iter().position(|s| <span class="kw-2">*</span>s == d));
+<a href=#1512 id=1512 data-nosnippet>1512</a>    order
+<a href=#1513 id=1513 data-nosnippet>1513</a>        .iter()
+<a href=#1514 id=1514 data-nosnippet>1514</a>        .enumerate()
+<a href=#1515 id=1515 data-nosnippet>1515</a>        .map(|(i, <span class="kw-2">&amp;</span>name)| {
+<a href=#1516 id=1516 data-nosnippet>1516</a>            <span class="kw">let </span>outcome = <span class="kw">match </span>position {
+<a href=#1517 id=1517 data-nosnippet>1517</a>                <span class="prelude-val">None </span>=&gt; StageOutcome::Skipped,
+<a href=#1518 id=1518 data-nosnippet>1518</a>                <span class="prelude-val">Some</span>(p) <span class="kw">if </span>i == p =&gt; StageOutcome::Decided,
+<a href=#1519 id=1519 data-nosnippet>1519</a>                <span class="comment">// Attribute rules do not exist yet (#33), and a session
+<a href=#1520 id=1520 data-nosnippet>1520</a>                // stage only runs with a session.
+<a href=#1521 id=1521 data-nosnippet>1521</a>                </span><span class="prelude-val">Some</span>(p) <span class="kw">if </span>i &lt; p =&gt; <span class="kw">match </span>name {
+<a href=#1522 id=1522 data-nosnippet>1522</a>                    StageName::Attribute =&gt; StageOutcome::Skipped,
+<a href=#1523 id=1523 data-nosnippet>1523</a>                    <span class="comment">// Lockdown suspends every session (#36).
+<a href=#1524 id=1524 data-nosnippet>1524</a>                    </span>StageName::SessionOverride <span class="kw">if </span>state.session.is_none() || state.lockdown =&gt; {
+<a href=#1525 id=1525 data-nosnippet>1525</a>                        StageOutcome::Skipped
+<a href=#1526 id=1526 data-nosnippet>1526</a>                    }
+<a href=#1527 id=1527 data-nosnippet>1527</a>                    <span class="kw">_ </span>=&gt; StageOutcome::Passed,
+<a href=#1528 id=1528 data-nosnippet>1528</a>                },
+<a href=#1529 id=1529 data-nosnippet>1529</a>                <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; StageOutcome::Skipped,
+<a href=#1530 id=1530 data-nosnippet>1530</a>            };
+<a href=#1531 id=1531 data-nosnippet>1531</a>            <span class="kw">let </span>(candidates, duration_ns) = <span class="kw">match </span>name {
+<a href=#1532 id=1532 data-nosnippet>1532</a>                StageName::MandatoryDeny =&gt; (
+<a href=#1533 id=1533 data-nosnippet>1533</a>                    n(RuleStage::MandatoryDeny),
+<a href=#1534 id=1534 data-nosnippet>1534</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::MandatoryDeny).copied(),
+<a href=#1535 id=1535 data-nosnippet>1535</a>                ),
+<a href=#1536 id=1536 data-nosnippet>1536</a>                StageName::Exclusion =&gt; (
+<a href=#1537 id=1537 data-nosnippet>1537</a>                    n(RuleStage::Exclusion),
+<a href=#1538 id=1538 data-nosnippet>1538</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::Exclusion).copied(),
+<a href=#1539 id=1539 data-nosnippet>1539</a>                ),
+<a href=#1540 id=1540 data-nosnippet>1540</a>                StageName::Policy =&gt; (
+<a href=#1541 id=1541 data-nosnippet>1541</a>                    n(RuleStage::Policy),
+<a href=#1542 id=1542 data-nosnippet>1542</a>                    durations.get(<span class="kw-2">&amp;</span>RuleStage::Policy).copied(),
+<a href=#1543 id=1543 data-nosnippet>1543</a>                ),
+<a href=#1544 id=1544 data-nosnippet>1544</a>                <span class="kw">_ </span>=&gt; (<span class="number">0</span>, <span class="prelude-val">None</span>),
+<a href=#1545 id=1545 data-nosnippet>1545</a>            };
+<a href=#1546 id=1546 data-nosnippet>1546</a>            StageTrace {
+<a href=#1547 id=1547 data-nosnippet>1547</a>                name,
+<a href=#1548 id=1548 data-nosnippet>1548</a>                outcome,
+<a href=#1549 id=1549 data-nosnippet>1549</a>                candidates,
+<a href=#1550 id=1550 data-nosnippet>1550</a>                duration_ns,
+<a href=#1551 id=1551 data-nosnippet>1551</a>            }
+<a href=#1552 id=1552 data-nosnippet>1552</a>        })
+<a href=#1553 id=1553 data-nosnippet>1553</a>        .collect()
+<a href=#1554 id=1554 data-nosnippet>1554</a>}
+<a href=#1555 id=1555 data-nosnippet>1555</a>
+<a href=#1556 id=1556 data-nosnippet>1556</a><span class="doccomment">/// The smallest allow rule that identifies the subject, from the strongest
+<a href=#1557 id=1557 data-nosnippet>1557</a>/// identity the privacy settings let the trace reveal.
+<a href=#1558 id=1558 data-nosnippet>1558</a></span><span class="kw">fn </span>suggest(
+<a href=#1559 id=1559 data-nosnippet>1559</a>    subject: <span class="kw-2">&amp;</span>Subject&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#1560 id=1560 data-nosnippet>1560</a>    privacy: <span class="kw-2">&amp;</span>Privacy,
+<a href=#1561 id=1561 data-nosnippet>1561</a>    matched: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>TracedRule&lt;<span class="lifetime">'_</span>&gt;],
+<a href=#1562 id=1562 data-nosnippet>1562</a>    extras: <span class="kw-2">&amp;</span>ObjectExtras,
+<a href=#1563 id=1563 data-nosnippet>1563</a>) -&gt; <span class="prelude-ty">Option</span>&lt;RuleDraft&gt; {
+<a href=#1564 id=1564 data-nosnippet>1564</a>    <span class="kw">use </span><span class="kw">crate</span>::model::{Criterion, Match};
+<a href=#1565 id=1565 data-nosnippet>1565</a>    <span class="kw">let </span>facts = subject.facts;
+<a href=#1566 id=1566 data-nosnippet>1566</a>    <span class="comment">// A criterion is offered only if validation would accept it: the value
+<a href=#1567 id=1567 data-nosnippet>1567</a>    // is revealed and unchanged by redaction, not empty, has no control
+<a href=#1568 id=1568 data-nosnippet>1568</a>    // character, is within the size limit, and the criterion compiles. If
+<a href=#1569 id=1569 data-nosnippet>1569</a>    // not, the next identity is tried.
+<a href=#1570 id=1570 data-nosnippet>1570</a>    </span><span class="kw">let </span>clean = |field: Field, v: <span class="kw-2">&amp;</span>str| {
+<a href=#1571 id=1571 data-nosnippet>1571</a>        privacy.reveals(field)
+<a href=#1572 id=1572 data-nosnippet>1572</a>            &amp;&amp; privacy.redactor.redact(v) == v
+<a href=#1573 id=1573 data-nosnippet>1573</a>            &amp;&amp; !v.is_empty()
+<a href=#1574 id=1574 data-nosnippet>1574</a>            &amp;&amp; !v.chars().any(char::is_control)
+<a href=#1575 id=1575 data-nosnippet>1575</a>            &amp;&amp; v.len() &lt;= <span class="kw">crate</span>::model::limits::MAX_VALUE_BYTES
 <a href=#1576 id=1576 data-nosnippet>1576</a>    };
-<a href=#1577 id=1577 data-nosnippet>1577</a>    <span class="kw">let </span>hash = [
-<a href=#1578 id=1578 data-nosnippet>1578</a>        Field::HashSha256,
-<a href=#1579 id=1579 data-nosnippet>1579</a>        Field::HashAuthenticodeSha256,
-<a href=#1580 id=1580 data-nosnippet>1580</a>        Field::HashSha384,
-<a href=#1581 id=1581 data-nosnippet>1581</a>        Field::HashSha512,
-<a href=#1582 id=1582 data-nosnippet>1582</a>    ]
-<a href=#1583 id=1583 data-nosnippet>1583</a>    .into_iter()
-<a href=#1584 id=1584 data-nosnippet>1584</a>    .find_map(|f| {
-<a href=#1585 id=1585 data-nosnippet>1585</a>        <span class="comment">// The fact must be what the matcher accepts: bare hex digits of the
-<a href=#1586 id=1586 data-nosnippet>1586</a>        // field's length (a `0x` prefix makes it malformed, so no criterion
-<a href=#1587 id=1587 data-nosnippet>1587</a>        // could match it). The criterion is written in lowercase.
-<a href=#1588 id=1588 data-nosnippet>1588</a>        </span><span class="kw">let </span>raw = facts.get(f)<span class="question-mark">?</span>;
-<a href=#1589 id=1589 data-nosnippet>1589</a>        <span class="kw">match </span>f.class() {
-<a href=#1590 id=1590 data-nosnippet>1590</a>            <span class="kw">crate</span>::model::FieldClass::Hash { hex_len }
-<a href=#1591 id=1591 data-nosnippet>1591</a>                <span class="kw">if </span>raw.len() == hex_len &amp;&amp; raw.bytes().all(|b| b.is_ascii_hexdigit()) =&gt; {}
-<a href=#1592 id=1592 data-nosnippet>1592</a>            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
-<a href=#1593 id=1593 data-nosnippet>1593</a>        }
-<a href=#1594 id=1594 data-nosnippet>1594</a>        <span class="kw">if </span>!clean(f, raw) {
-<a href=#1595 id=1595 data-nosnippet>1595</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
-<a href=#1596 id=1596 data-nosnippet>1596</a>        }
-<a href=#1597 id=1597 data-nosnippet>1597</a>        criterion(f, Operator::Equals, <span class="kw-2">&amp;</span>raw.to_ascii_lowercase())
-<a href=#1598 id=1598 data-nosnippet>1598</a>    });
-<a href=#1599 id=1599 data-nosnippet>1599</a>    <span class="comment">// A signer is only offered if no check of its signature was relaxed.
-<a href=#1600 id=1600 data-nosnippet>1600</a>    </span><span class="kw">let </span>relaxed: BTreeSet&lt;usize&gt; = extras
-<a href=#1601 id=1601 data-nosnippet>1601</a>        .signature_relaxations
-<a href=#1602 id=1602 data-nosnippet>1602</a>        .iter()
-<a href=#1603 id=1603 data-nosnippet>1603</a>        .map(|r| r.signature)
-<a href=#1604 id=1604 data-nosnippet>1604</a>        .collect();
-<a href=#1605 id=1605 data-nosnippet>1605</a>    <span class="kw">let </span>publisher = facts.signers.as_ref().and_then(|s| {
-<a href=#1606 id=1606 data-nosnippet>1606</a>        s.iter()
-<a href=#1607 id=1607 data-nosnippet>1607</a>            .enumerate()
-<a href=#1608 id=1608 data-nosnippet>1608</a>            .filter(|(i, s)| s.status.is_trusted() &amp;&amp; !relaxed.contains(i))
-<a href=#1609 id=1609 data-nosnippet>1609</a>            .find_map(|(<span class="kw">_</span>, s)| {
-<a href=#1610 id=1610 data-nosnippet>1610</a>                criterion(
-<a href=#1611 id=1611 data-nosnippet>1611</a>                    Field::SignerPublisher,
-<a href=#1612 id=1612 data-nosnippet>1612</a>                    Operator::Equals,
-<a href=#1613 id=1613 data-nosnippet>1613</a>                    s.publisher.as_deref()<span class="question-mark">?</span>,
-<a href=#1614 id=1614 data-nosnippet>1614</a>                )
-<a href=#1615 id=1615 data-nosnippet>1615</a>            })
-<a href=#1616 id=1616 data-nosnippet>1616</a>    });
-<a href=#1617 id=1617 data-nosnippet>1617</a>    <span class="kw">let </span>product = facts
-<a href=#1618 id=1618 data-nosnippet>1618</a>        .get(Field::MetaProductName)
-<a href=#1619 id=1619 data-nosnippet>1619</a>        .and_then(|v| criterion(Field::MetaProductName, Operator::Equals, v));
-<a href=#1620 id=1620 data-nosnippet>1620</a>    <span class="comment">// The recorded version must itself be revealed and unredacted; the
-<a href=#1621 id=1621 data-nosnippet>1621</a>    // draft uses its numeric part.
-<a href=#1622 id=1622 data-nosnippet>1622</a>    </span><span class="kw">let </span>version = facts
-<a href=#1623 id=1623 data-nosnippet>1623</a>        .get(Field::MetaFileVersion)
-<a href=#1624 id=1624 data-nosnippet>1624</a>        .filter(|v| clean(Field::MetaFileVersion, v))
-<a href=#1625 id=1625 data-nosnippet>1625</a>        .and_then(<span class="kw">crate</span>::ops::Version::parse_fact)
-<a href=#1626 id=1626 data-nosnippet>1626</a>        .and_then(|(v, <span class="kw">_</span>)| criterion(Field::MetaFileVersion, Operator::VersionGe, <span class="kw-2">&amp;</span>v.to_string()));
-<a href=#1627 id=1627 data-nosnippet>1627</a>    <span class="kw">let </span>(identity, tree) = <span class="kw">if let </span><span class="prelude-val">Some</span>(h) = hash {
-<a href=#1628 id=1628 data-nosnippet>1628</a>        (DraftIdentity::Hash, h)
-<a href=#1629 id=1629 data-nosnippet>1629</a>    } <span class="kw">else if let </span><span class="prelude-val">Some</span>(p) = publisher {
-<a href=#1630 id=1630 data-nosnippet>1630</a>        <span class="kw">match </span>(product, version) {
-<a href=#1631 id=1631 data-nosnippet>1631</a>            (<span class="prelude-val">Some</span>(pr), <span class="prelude-val">Some</span>(v)) =&gt; (
-<a href=#1632 id=1632 data-nosnippet>1632</a>                DraftIdentity::PublisherProductVersion,
-<a href=#1633 id=1633 data-nosnippet>1633</a>                Match::All(<span class="macro">vec!</span>[p, pr, v]),
-<a href=#1634 id=1634 data-nosnippet>1634</a>            ),
-<a href=#1635 id=1635 data-nosnippet>1635</a>            (<span class="prelude-val">Some</span>(pr), <span class="prelude-val">None</span>) =&gt; (DraftIdentity::PublisherProduct, Match::All(<span class="macro">vec!</span>[p, pr])),
-<a href=#1636 id=1636 data-nosnippet>1636</a>            <span class="kw">_ </span>=&gt; (DraftIdentity::Publisher, p),
-<a href=#1637 id=1637 data-nosnippet>1637</a>        }
-<a href=#1638 id=1638 data-nosnippet>1638</a>    } <span class="kw">else </span>{
-<a href=#1639 id=1639 data-nosnippet>1639</a>        <span class="kw">let </span>p = facts.path.as_ref().filter(|p| {
-<a href=#1640 id=1640 data-nosnippet>1640</a>            p.user_writable == <span class="prelude-val">Some</span>(<span class="bool-val">false</span>) &amp;&amp; !p.short_name_unresolved &amp;&amp; p.path.is_resolved()
-<a href=#1641 id=1641 data-nosnippet>1641</a>        })<span class="question-mark">?</span>;
-<a href=#1642 id=1642 data-nosnippet>1642</a>        (
-<a href=#1643 id=1643 data-nosnippet>1643</a>            DraftIdentity::Path,
-<a href=#1644 id=1644 data-nosnippet>1644</a>            criterion(Field::PathFull, Operator::Equals, p.path.as_str())<span class="question-mark">?</span>,
-<a href=#1645 id=1645 data-nosnippet>1645</a>        )
-<a href=#1646 id=1646 data-nosnippet>1646</a>    };
-<a href=#1647 id=1647 data-nosnippet>1647</a>    <span class="kw">let </span><span class="kw-2">mut </span>caveats = Vec::new();
-<a href=#1648 id=1648 data-nosnippet>1648</a>    <span class="kw">if </span>matched.iter().any(|r| r.stage == RuleStage::MandatoryDeny) {
-<a href=#1649 id=1649 data-nosnippet>1649</a>        caveats.push(<span class="string">"mandatory_deny_matched"</span>);
-<a href=#1650 id=1650 data-nosnippet>1650</a>    }
-<a href=#1651 id=1651 data-nosnippet>1651</a>    <span class="kw">if </span>matched
-<a href=#1652 id=1652 data-nosnippet>1652</a>        .iter()
-<a href=#1653 id=1653 data-nosnippet>1653</a>        .any(|r| r.stage == RuleStage::Policy &amp;&amp; r.action() == ActionKind::Deny)
-<a href=#1654 id=1654 data-nosnippet>1654</a>    {
-<a href=#1655 id=1655 data-nosnippet>1655</a>        caveats.push(<span class="string">"deny_rule_matched"</span>);
+<a href=#1577 id=1577 data-nosnippet>1577</a>    <span class="kw">let </span>criterion = |field: Field, operator: Operator, v: <span class="kw-2">&amp;</span>str| -&gt; <span class="prelude-ty">Option</span>&lt;Match&gt; {
+<a href=#1578 id=1578 data-nosnippet>1578</a>        <span class="kw">let </span>c = Criterion::new(field, operator, [v]);
+<a href=#1579 id=1579 data-nosnippet>1579</a>        (clean(field, v) &amp;&amp; <span class="kw">crate</span>::ops::CompiledCriterion::compile(<span class="kw-2">&amp;</span>c).is_ok())
+<a href=#1580 id=1580 data-nosnippet>1580</a>            .then_some(Match::Criterion(c))
+<a href=#1581 id=1581 data-nosnippet>1581</a>    };
+<a href=#1582 id=1582 data-nosnippet>1582</a>    <span class="kw">let </span>hash = [
+<a href=#1583 id=1583 data-nosnippet>1583</a>        Field::HashSha256,
+<a href=#1584 id=1584 data-nosnippet>1584</a>        Field::HashAuthenticodeSha256,
+<a href=#1585 id=1585 data-nosnippet>1585</a>        Field::HashSha384,
+<a href=#1586 id=1586 data-nosnippet>1586</a>        Field::HashSha512,
+<a href=#1587 id=1587 data-nosnippet>1587</a>    ]
+<a href=#1588 id=1588 data-nosnippet>1588</a>    .into_iter()
+<a href=#1589 id=1589 data-nosnippet>1589</a>    .find_map(|f| {
+<a href=#1590 id=1590 data-nosnippet>1590</a>        <span class="comment">// The fact must be what the matcher accepts: bare hex digits of the
+<a href=#1591 id=1591 data-nosnippet>1591</a>        // field's length (a `0x` prefix makes it malformed, so no criterion
+<a href=#1592 id=1592 data-nosnippet>1592</a>        // could match it). The criterion is written in lowercase.
+<a href=#1593 id=1593 data-nosnippet>1593</a>        </span><span class="kw">let </span>raw = facts.get(f)<span class="question-mark">?</span>;
+<a href=#1594 id=1594 data-nosnippet>1594</a>        <span class="kw">match </span>f.class() {
+<a href=#1595 id=1595 data-nosnippet>1595</a>            <span class="kw">crate</span>::model::FieldClass::Hash { hex_len }
+<a href=#1596 id=1596 data-nosnippet>1596</a>                <span class="kw">if </span>raw.len() == hex_len &amp;&amp; raw.bytes().all(|b| b.is_ascii_hexdigit()) =&gt; {}
+<a href=#1597 id=1597 data-nosnippet>1597</a>            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#1598 id=1598 data-nosnippet>1598</a>        }
+<a href=#1599 id=1599 data-nosnippet>1599</a>        <span class="kw">if </span>!clean(f, raw) {
+<a href=#1600 id=1600 data-nosnippet>1600</a>            <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#1601 id=1601 data-nosnippet>1601</a>        }
+<a href=#1602 id=1602 data-nosnippet>1602</a>        criterion(f, Operator::Equals, <span class="kw-2">&amp;</span>raw.to_ascii_lowercase())
+<a href=#1603 id=1603 data-nosnippet>1603</a>    });
+<a href=#1604 id=1604 data-nosnippet>1604</a>    <span class="comment">// A signer is only offered if no check of its signature was relaxed.
+<a href=#1605 id=1605 data-nosnippet>1605</a>    </span><span class="kw">let </span>relaxed: BTreeSet&lt;usize&gt; = extras
+<a href=#1606 id=1606 data-nosnippet>1606</a>        .signature_relaxations
+<a href=#1607 id=1607 data-nosnippet>1607</a>        .iter()
+<a href=#1608 id=1608 data-nosnippet>1608</a>        .map(|r| r.signature)
+<a href=#1609 id=1609 data-nosnippet>1609</a>        .collect();
+<a href=#1610 id=1610 data-nosnippet>1610</a>    <span class="kw">let </span>publisher = facts.signers.as_ref().and_then(|s| {
+<a href=#1611 id=1611 data-nosnippet>1611</a>        s.iter()
+<a href=#1612 id=1612 data-nosnippet>1612</a>            .enumerate()
+<a href=#1613 id=1613 data-nosnippet>1613</a>            .filter(|(i, s)| s.status.is_trusted() &amp;&amp; !relaxed.contains(i))
+<a href=#1614 id=1614 data-nosnippet>1614</a>            .find_map(|(<span class="kw">_</span>, s)| {
+<a href=#1615 id=1615 data-nosnippet>1615</a>                criterion(
+<a href=#1616 id=1616 data-nosnippet>1616</a>                    Field::SignerPublisher,
+<a href=#1617 id=1617 data-nosnippet>1617</a>                    Operator::Equals,
+<a href=#1618 id=1618 data-nosnippet>1618</a>                    s.publisher.as_deref()<span class="question-mark">?</span>,
+<a href=#1619 id=1619 data-nosnippet>1619</a>                )
+<a href=#1620 id=1620 data-nosnippet>1620</a>            })
+<a href=#1621 id=1621 data-nosnippet>1621</a>    });
+<a href=#1622 id=1622 data-nosnippet>1622</a>    <span class="kw">let </span>product = facts
+<a href=#1623 id=1623 data-nosnippet>1623</a>        .get(Field::MetaProductName)
+<a href=#1624 id=1624 data-nosnippet>1624</a>        .and_then(|v| criterion(Field::MetaProductName, Operator::Equals, v));
+<a href=#1625 id=1625 data-nosnippet>1625</a>    <span class="comment">// The recorded version must itself be revealed and unredacted; the
+<a href=#1626 id=1626 data-nosnippet>1626</a>    // draft uses its numeric part.
+<a href=#1627 id=1627 data-nosnippet>1627</a>    </span><span class="kw">let </span>version = facts
+<a href=#1628 id=1628 data-nosnippet>1628</a>        .get(Field::MetaFileVersion)
+<a href=#1629 id=1629 data-nosnippet>1629</a>        .filter(|v| clean(Field::MetaFileVersion, v))
+<a href=#1630 id=1630 data-nosnippet>1630</a>        .and_then(<span class="kw">crate</span>::ops::Version::parse_fact)
+<a href=#1631 id=1631 data-nosnippet>1631</a>        .and_then(|(v, <span class="kw">_</span>)| criterion(Field::MetaFileVersion, Operator::VersionGe, <span class="kw-2">&amp;</span>v.to_string()));
+<a href=#1632 id=1632 data-nosnippet>1632</a>    <span class="kw">let </span>(identity, tree) = <span class="kw">if let </span><span class="prelude-val">Some</span>(h) = hash {
+<a href=#1633 id=1633 data-nosnippet>1633</a>        (DraftIdentity::Hash, h)
+<a href=#1634 id=1634 data-nosnippet>1634</a>    } <span class="kw">else if let </span><span class="prelude-val">Some</span>(p) = publisher {
+<a href=#1635 id=1635 data-nosnippet>1635</a>        <span class="kw">match </span>(product, version) {
+<a href=#1636 id=1636 data-nosnippet>1636</a>            (<span class="prelude-val">Some</span>(pr), <span class="prelude-val">Some</span>(v)) =&gt; (
+<a href=#1637 id=1637 data-nosnippet>1637</a>                DraftIdentity::PublisherProductVersion,
+<a href=#1638 id=1638 data-nosnippet>1638</a>                Match::All(<span class="macro">vec!</span>[p, pr, v]),
+<a href=#1639 id=1639 data-nosnippet>1639</a>            ),
+<a href=#1640 id=1640 data-nosnippet>1640</a>            (<span class="prelude-val">Some</span>(pr), <span class="prelude-val">None</span>) =&gt; (DraftIdentity::PublisherProduct, Match::All(<span class="macro">vec!</span>[p, pr])),
+<a href=#1641 id=1641 data-nosnippet>1641</a>            <span class="kw">_ </span>=&gt; (DraftIdentity::Publisher, p),
+<a href=#1642 id=1642 data-nosnippet>1642</a>        }
+<a href=#1643 id=1643 data-nosnippet>1643</a>    } <span class="kw">else </span>{
+<a href=#1644 id=1644 data-nosnippet>1644</a>        <span class="kw">let </span>p = facts
+<a href=#1645 id=1645 data-nosnippet>1645</a>            .path
+<a href=#1646 id=1646 data-nosnippet>1646</a>            .as_ref()
+<a href=#1647 id=1647 data-nosnippet>1647</a>            .filter(|p| p.acl_proven() &amp;&amp; !p.short_name_unresolved &amp;&amp; p.path.is_resolved())<span class="question-mark">?</span>;
+<a href=#1648 id=1648 data-nosnippet>1648</a>        (
+<a href=#1649 id=1649 data-nosnippet>1649</a>            DraftIdentity::Path,
+<a href=#1650 id=1650 data-nosnippet>1650</a>            criterion(Field::PathFull, Operator::Equals, p.path.as_str())<span class="question-mark">?</span>,
+<a href=#1651 id=1651 data-nosnippet>1651</a>        )
+<a href=#1652 id=1652 data-nosnippet>1652</a>    };
+<a href=#1653 id=1653 data-nosnippet>1653</a>    <span class="kw">let </span><span class="kw-2">mut </span>caveats = Vec::new();
+<a href=#1654 id=1654 data-nosnippet>1654</a>    <span class="kw">if </span>matched.iter().any(|r| r.stage == RuleStage::MandatoryDeny) {
+<a href=#1655 id=1655 data-nosnippet>1655</a>        caveats.push(<span class="string">"mandatory_deny_matched"</span>);
 <a href=#1656 id=1656 data-nosnippet>1656</a>    }
-<a href=#1657 id=1657 data-nosnippet>1657</a>    <span class="prelude-val">Some</span>(RuleDraft {
-<a href=#1658 id=1658 data-nosnippet>1658</a>        action: ActionKind::Allow,
-<a href=#1659 id=1659 data-nosnippet>1659</a>        object_types: <span class="macro">vec!</span>[subject.object_type],
-<a href=#1660 id=1660 data-nosnippet>1660</a>        identity,
-<a href=#1661 id=1661 data-nosnippet>1661</a>        r#match: tree,
-<a href=#1662 id=1662 data-nosnippet>1662</a>        caveats,
-<a href=#1663 id=1663 data-nosnippet>1663</a>    })
-<a href=#1664 id=1664 data-nosnippet>1664</a>}
-<a href=#1665 id=1665 data-nosnippet>1665</a>
-<a href=#1666 id=1666 data-nosnippet>1666</a><span class="doccomment">/// The decision's JSON with its lists cut ([`Trace::decision`]): the
-<a href=#1667 id=1667 data-nosnippet>1667</a>/// decision's own fields in their stable order, then the counts.
-<a href=#1668 id=1668 data-nosnippet>1668</a></span><span class="kw">fn </span>bounded_decision&lt;S: serde::Serializer&gt;(d: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;Decision&gt;, s: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt; {
-<a href=#1669 id=1669 data-nosnippet>1669</a>    <span class="attr">#[derive(Serialize)]
-<a href=#1670 id=1670 data-nosnippet>1670</a>    </span><span class="kw">struct </span>Bounded {
-<a href=#1671 id=1671 data-nosnippet>1671</a>        <span class="attr">#[serde(flatten)]
-<a href=#1672 id=1672 data-nosnippet>1672</a>        </span>decision: Decision,
-<a href=#1673 id=1673 data-nosnippet>1673</a>        overridden_omitted: usize,
-<a href=#1674 id=1674 data-nosnippet>1674</a>        annotations_omitted: usize,
-<a href=#1675 id=1675 data-nosnippet>1675</a>        trust_sources_omitted: usize,
-<a href=#1676 id=1676 data-nosnippet>1676</a>    }
-<a href=#1677 id=1677 data-nosnippet>1677</a>    <span class="kw">match </span>d {
-<a href=#1678 id=1678 data-nosnippet>1678</a>        <span class="prelude-val">None </span>=&gt; s.serialize_none(),
-<a href=#1679 id=1679 data-nosnippet>1679</a>        <span class="prelude-val">Some</span>(d) =&gt; {
-<a href=#1680 id=1680 data-nosnippet>1680</a>            <span class="kw">let </span>(decision, [o, a, t]) = d.with_lists_cut(limits::MAX_DECISION_LIST);
-<a href=#1681 id=1681 data-nosnippet>1681</a>            Bounded {
-<a href=#1682 id=1682 data-nosnippet>1682</a>                decision,
-<a href=#1683 id=1683 data-nosnippet>1683</a>                overridden_omitted: o,
-<a href=#1684 id=1684 data-nosnippet>1684</a>                annotations_omitted: a,
-<a href=#1685 id=1685 data-nosnippet>1685</a>                trust_sources_omitted: t,
-<a href=#1686 id=1686 data-nosnippet>1686</a>            }
-<a href=#1687 id=1687 data-nosnippet>1687</a>            .serialize(s)
-<a href=#1688 id=1688 data-nosnippet>1688</a>        }
-<a href=#1689 id=1689 data-nosnippet>1689</a>    }
-<a href=#1690 id=1690 data-nosnippet>1690</a>}
-<a href=#1691 id=1691 data-nosnippet>1691</a>
-<a href=#1692 id=1692 data-nosnippet>1692</a><span class="kw">fn </span>capped_rules(rules: BTreeMap&lt;RuleId, RuleRef&gt;) -&gt; (Vec&lt;RuleRef&gt;, u32) {
-<a href=#1693 id=1693 data-nosnippet>1693</a>    <span class="kw">let </span><span class="kw-2">mut </span>v: Vec&lt;RuleRef&gt; = rules.into_values().collect();
-<a href=#1694 id=1694 data-nosnippet>1694</a>    <span class="kw">let </span>omitted = count(v.len().saturating_sub(MAX_RULES_PER_ENTRY));
-<a href=#1695 id=1695 data-nosnippet>1695</a>    v.truncate(MAX_RULES_PER_ENTRY);
-<a href=#1696 id=1696 data-nosnippet>1696</a>    (v, omitted)
-<a href=#1697 id=1697 data-nosnippet>1697</a>}
-<a href=#1698 id=1698 data-nosnippet>1698</a>
-<a href=#1699 id=1699 data-nosnippet>1699</a><span class="kw">fn </span>count(n: usize) -&gt; u32 {
-<a href=#1700 id=1700 data-nosnippet>1700</a>    u32::try_from(n).unwrap_or(u32::MAX)
-<a href=#1701 id=1701 data-nosnippet>1701</a>}
-<a href=#1702 id=1702 data-nosnippet>1702</a>
-<a href=#1703 id=1703 data-nosnippet>1703</a><span class="attr">#[cfg(test)]
-<a href=#1704 id=1704 data-nosnippet>1704</a></span><span class="kw">mod </span>tests;
+<a href=#1657 id=1657 data-nosnippet>1657</a>    <span class="kw">if </span>matched
+<a href=#1658 id=1658 data-nosnippet>1658</a>        .iter()
+<a href=#1659 id=1659 data-nosnippet>1659</a>        .any(|r| r.stage == RuleStage::Policy &amp;&amp; r.action() == ActionKind::Deny)
+<a href=#1660 id=1660 data-nosnippet>1660</a>    {
+<a href=#1661 id=1661 data-nosnippet>1661</a>        caveats.push(<span class="string">"deny_rule_matched"</span>);
+<a href=#1662 id=1662 data-nosnippet>1662</a>    }
+<a href=#1663 id=1663 data-nosnippet>1663</a>    <span class="prelude-val">Some</span>(RuleDraft {
+<a href=#1664 id=1664 data-nosnippet>1664</a>        action: ActionKind::Allow,
+<a href=#1665 id=1665 data-nosnippet>1665</a>        object_types: <span class="macro">vec!</span>[subject.object_type],
+<a href=#1666 id=1666 data-nosnippet>1666</a>        identity,
+<a href=#1667 id=1667 data-nosnippet>1667</a>        r#match: tree,
+<a href=#1668 id=1668 data-nosnippet>1668</a>        caveats,
+<a href=#1669 id=1669 data-nosnippet>1669</a>    })
+<a href=#1670 id=1670 data-nosnippet>1670</a>}
+<a href=#1671 id=1671 data-nosnippet>1671</a>
+<a href=#1672 id=1672 data-nosnippet>1672</a><span class="doccomment">/// The decision's JSON with its lists cut ([`Trace::decision`]): the
+<a href=#1673 id=1673 data-nosnippet>1673</a>/// decision's own fields in their stable order, then the counts.
+<a href=#1674 id=1674 data-nosnippet>1674</a></span><span class="kw">fn </span>bounded_decision&lt;S: serde::Serializer&gt;(d: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;Decision&gt;, s: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt; {
+<a href=#1675 id=1675 data-nosnippet>1675</a>    <span class="attr">#[derive(Serialize)]
+<a href=#1676 id=1676 data-nosnippet>1676</a>    </span><span class="kw">struct </span>Bounded {
+<a href=#1677 id=1677 data-nosnippet>1677</a>        <span class="attr">#[serde(flatten)]
+<a href=#1678 id=1678 data-nosnippet>1678</a>        </span>decision: Decision,
+<a href=#1679 id=1679 data-nosnippet>1679</a>        overridden_omitted: usize,
+<a href=#1680 id=1680 data-nosnippet>1680</a>        annotations_omitted: usize,
+<a href=#1681 id=1681 data-nosnippet>1681</a>        trust_sources_omitted: usize,
+<a href=#1682 id=1682 data-nosnippet>1682</a>    }
+<a href=#1683 id=1683 data-nosnippet>1683</a>    <span class="kw">match </span>d {
+<a href=#1684 id=1684 data-nosnippet>1684</a>        <span class="prelude-val">None </span>=&gt; s.serialize_none(),
+<a href=#1685 id=1685 data-nosnippet>1685</a>        <span class="prelude-val">Some</span>(d) =&gt; {
+<a href=#1686 id=1686 data-nosnippet>1686</a>            <span class="kw">let </span>(decision, [o, a, t]) = d.with_lists_cut(limits::MAX_DECISION_LIST);
+<a href=#1687 id=1687 data-nosnippet>1687</a>            Bounded {
+<a href=#1688 id=1688 data-nosnippet>1688</a>                decision,
+<a href=#1689 id=1689 data-nosnippet>1689</a>                overridden_omitted: o,
+<a href=#1690 id=1690 data-nosnippet>1690</a>                annotations_omitted: a,
+<a href=#1691 id=1691 data-nosnippet>1691</a>                trust_sources_omitted: t,
+<a href=#1692 id=1692 data-nosnippet>1692</a>            }
+<a href=#1693 id=1693 data-nosnippet>1693</a>            .serialize(s)
+<a href=#1694 id=1694 data-nosnippet>1694</a>        }
+<a href=#1695 id=1695 data-nosnippet>1695</a>    }
+<a href=#1696 id=1696 data-nosnippet>1696</a>}
+<a href=#1697 id=1697 data-nosnippet>1697</a>
+<a href=#1698 id=1698 data-nosnippet>1698</a><span class="kw">fn </span>capped_rules(rules: BTreeMap&lt;RuleId, RuleRef&gt;) -&gt; (Vec&lt;RuleRef&gt;, u32) {
+<a href=#1699 id=1699 data-nosnippet>1699</a>    <span class="kw">let </span><span class="kw-2">mut </span>v: Vec&lt;RuleRef&gt; = rules.into_values().collect();
+<a href=#1700 id=1700 data-nosnippet>1700</a>    <span class="kw">let </span>omitted = count(v.len().saturating_sub(MAX_RULES_PER_ENTRY));
+<a href=#1701 id=1701 data-nosnippet>1701</a>    v.truncate(MAX_RULES_PER_ENTRY);
+<a href=#1702 id=1702 data-nosnippet>1702</a>    (v, omitted)
+<a href=#1703 id=1703 data-nosnippet>1703</a>}
+<a href=#1704 id=1704 data-nosnippet>1704</a>
+<a href=#1705 id=1705 data-nosnippet>1705</a><span class="kw">fn </span>count(n: usize) -&gt; u32 {
+<a href=#1706 id=1706 data-nosnippet>1706</a>    u32::try_from(n).unwrap_or(u32::MAX)
+<a href=#1707 id=1707 data-nosnippet>1707</a>}
+<a href=#1708 id=1708 data-nosnippet>1708</a>
+<a href=#1709 id=1709 data-nosnippet>1709</a><span class="attr">#[cfg(test)]
+<a href=#1710 id=1710 data-nosnippet>1710</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

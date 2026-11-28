@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ADVANCED_SCHEMA"],"enum":["AdvancedDefault","AdvancedIssue","AdvancedType","AdvancedValue","OverrideStatus","PolicyStatus","Source"],"fn":["resolve"],"struct":["AdvancedSettings","AdvancedSpec","Effective","OverrideSource","PolicySettings"]};

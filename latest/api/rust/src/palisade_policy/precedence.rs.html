@@ -379,7 +379,7 @@
 <a href=#379 id=379 data-nosnippet>379</a><span class="doccomment">/// The depth of a path variable's default location below the root.
 <a href=#380 id=380 data-nosnippet>380</a></span><span class="kw">const fn </span>variable_depth(variable: PathVariable) -&gt; u16 {
 <a href=#381 id=381 data-nosnippet>381</a>    <span class="kw">match </span>variable {
-<a href=#382 id=382 data-nosnippet>382</a>        PathVariable::OsDrive =&gt; <span class="number">0</span>,
+<a href=#382 id=382 data-nosnippet>382</a>        PathVariable::OsDrive | PathVariable::Removable | PathVariable::Hot =&gt; <span class="number">0</span>,
 <a href=#383 id=383 data-nosnippet>383</a>        PathVariable::Windir | PathVariable::ProgramFiles | PathVariable::ProgramData =&gt; <span class="number">1</span>,
 <a href=#384 id=384 data-nosnippet>384</a>        PathVariable::System32 | PathVariable::UserProfile | PathVariable::Public =&gt; <span class="number">2</span>,
 <a href=#385 id=385 data-nosnippet>385</a>        PathVariable::AppData | PathVariable::LocalAppData =&gt; <span class="number">4</span>,

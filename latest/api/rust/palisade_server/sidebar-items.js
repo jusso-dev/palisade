@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["cli","config","db","health","http","net","problem","secret","server","telemetry","tls"]};
+window.SIDEBAR_ITEMS = {"mod":["cli","clock","config","db","health","http","net","problem","redact","secret","server","telemetry","tls"]};

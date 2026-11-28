@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -190,7 +190,7 @@
 <p>One canonical event.</p>
 <p>Field order here is the serialisation order, so <code>Event::to_canonical_json</code>
 is deterministic.</p>
-<p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.2.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
+<p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.3.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
 <h2 id="fields"><a class="header" href="#fields">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -226,7 +226,7 @@ is deterministic.</p>
 <tr><td><code>process</code></td><td><a href="process.html"><code>Process</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The process that acted.</td></tr>
 <tr><td><code>registry</code></td><td><a href="registry.html"><code>Registry</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>The registry key or value. Since 1.1.</td></tr>
 <tr><td><code>restriction</code></td><td><a href="restriction.html"><code>Restriction</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>The script language restriction. Since 1.1.</td></tr>
-<tr><td><code>schema_version</code></td><td><a href="types.html#schemaversion"><code>SchemaVersion</code></a></td><td>yes</td><td></td><td>matches <code>^1\.(0|1|2)\.(0|[1-9][0-9]*)$</code></td><td>1.0.0</td><td>The schema version of this event.</td></tr>
+<tr><td><code>schema_version</code></td><td><a href="types.html#schemaversion"><code>SchemaVersion</code></a></td><td>yes</td><td></td><td>matches <code>^1\.(0|1|2|3)\.(0|[1-9][0-9]*)$</code></td><td>1.0.0</td><td>The schema version of this event.</td></tr>
 <tr><td><code>script</code></td><td><a href="script.html"><code>Script</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The script, for script events.</td></tr>
 <tr><td><code>seq</code></td><td>integer</td><td>yes</td><td></td><td>at least 0; format <code>uint64</code></td><td>1.0.0</td><td>The producer's sequence number, starting at 0.</td></tr>
 <tr><td><code>severity</code></td><td><a href="types.html#severity"><code>Severity</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>0 to 10. See <code>Severity::syslog</code> for the syslog mapping.</td></tr>
@@ -238,7 +238,7 @@ is deterministic.</p>
 </tbody>
 </table>
 </div>
-<p>The schema also has 78 cross-field rules (<code>allOf</code>), for example which field sets each event type requires and which fields an older <code>schema_version</code> may not use.</p>
+<p>The schema also has 79 cross-field rules (<code>allOf</code>), for example which field sets each event type requires and which fields an older <code>schema_version</code> may not use.</p>
 <h2 id="object-types"><a class="header" href="#object-types">Object types</a></h2>
 <ul>
 <li><a href="account.html"><code>Account</code></a>: An account or group in a directory or on the device.</li>

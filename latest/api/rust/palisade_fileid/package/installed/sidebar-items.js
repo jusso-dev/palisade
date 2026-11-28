@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AliasError","InstalledSignatureKind","OwnerLookup"],"fn":["resolve_alias"],"struct":["InstalledPackage","InstalledPackages","ResolvedAlias"]};

@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -190,10 +190,12 @@
 <p>A condition tree (#33).</p>
 <p>Each node is an object with exactly one key: <code>all</code>, <code>any</code>, <code>not</code>,
 <code>criterion</code> or <code>ref</code>.</p>
-<p>Appears at: <code>/rule_sets/rules/match</code>, <code>/rule_sets/rules/match/all</code>, <code>/rule_sets/rules/match/all/all</code>, <code>/rule_sets/rules/match/all/all/all</code>, <code>/rule_sets/rules/match/all/all/all/not</code>, <code>/rule_sets/rules/match/all/all/any</code>, and more.</p>
+<p>Appears at: <code>/rule_sets/rules/match</code>, <code>/rule_sets/rules/match/all</code>, <code>/rule_sets/rules/match/all/all</code>, <code>/rule_sets/rules/match/all/all/all</code>, <code>/rule_sets/rules/match/all/all/any</code>, <code>/rule_sets/rules/match/all/all/not</code>, and more.</p>
 <h2 id="variants"><a class="header" href="#variants">Variants</a></h2>
 <h3 id="all"><a class="header" href="#all"><code>all</code></a></h3>
-<p>Matches when every child matches. Needs at least one child.</p>
+<p>Matches when every child matches. Needs at least one child, except
+as the whole match of a <code>catch_all</code> rule, where an empty <code>all</code>
+matches every object (#329).</p>
 <div class="table-wrapper">
 <table>
 <thead>

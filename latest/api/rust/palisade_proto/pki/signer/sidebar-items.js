@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["SignerError"],"struct":["Signature","SoftwareSigner"],"trait":["Signer"]};
+window.SIDEBAR_ITEMS = {"enum":["SignerError"],"fn":["signs_x509"],"struct":["Signature","SoftwareSigner"],"trait":["Signer"]};

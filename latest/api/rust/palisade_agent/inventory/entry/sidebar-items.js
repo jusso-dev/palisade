@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PATH_HISTORY"],"enum":["Discovery","EntryState"],"struct":["EntryKey","IdentitySummary","InvEntry"]};

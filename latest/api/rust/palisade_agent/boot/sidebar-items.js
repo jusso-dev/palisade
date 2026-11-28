@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SAFE_BOOT_OPTION_KEY","SAFE_BOOT_OPTION_VALUE"],"enum":["BootMode"],"fn":["boot_mode","current"]};

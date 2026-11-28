@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["REDACTED","SENSITIVE_SEGMENTS"],"fn":["is_sensitive_name","redact_line","redact_text"],"struct":["RedactingMakeWriter","RedactingWriter"]};

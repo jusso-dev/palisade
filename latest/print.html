@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-de2a680a.js"></script>
+        <script src="toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -275,14 +275,21 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tr><td>Key</td><td><code>signer.spki_sha256</code></td><td>strong at <code>position: leaf</code>: names the signing key, in every certificate issued for it (a key above the leaf is a CA's, so it is weak in an allow)</td></tr>
 <tr><td>Certificate authority</td><td><code>signer.issuer</code>, <code>signer.pca</code>, <code>signer.root_thumbprint</code>, <code>signer.eku</code>, SHA-1 thumbprints</td><td>weak alone: a CA vouches for every file it signs</td></tr>
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
-<tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, ...</td><td>weak: easy to copy into another file</td></tr>
+<tr><td>Path location</td><td><code>path.drive_type</code>, <code>path.bus</code>, <code>path.is_unc</code>, <code>path.is_ads</code>, <code>path.share</code>, <code>path.user_can_change_acl</code>; the <code>%REMOVABLE%</code> and <code>%HOT%</code> variables (the roots of mounted removable and hot-pluggable volumes)</td><td>weak: say where a file is, never which file; for denies and scoping, such as "block anything on a USB disk"</td></tr>
+<tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, <code>meta.legal_copyright</code>, <code>meta.language</code>, <code>meta.file_name_fallback</code>, ...</td><td>weak: easy to copy into another file</td></tr>
+<tr><td>File and image</td><td><code>meta.file_size</code> (a number), <code>meta.pe_machine</code>, <code>meta.pe_subsystem</code>, <code>meta.is_dotnet</code> (yes or no)</td><td>weak: describe a file, never name one</td></tr>
+<tr><td>Windows Installer</td><td><code>msi.product_code</code>, <code>msi.upgrade_code</code>, <code>msi.package_code</code> (GUIDs, compared with or without braces, in either case), <code>msi.product_name</code>, <code>msi.manufacturer</code>, <code>msi.product_version</code></td><td>weak: the package's author writes them all</td></tr>
 </tbody>
 </table>
 </div>
 <p>The strength matters. Validation warns about an allow rule whose only identity is weak, and an
 allow rule must have a positive identity on every branch of its match tree, so a rule cannot
 allow "anything not named X". A path rule only allows a file in a location that ordinary users
-cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time.</p>
+cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time. The ACL
+counts only on a fixed local disk: on a removable, optical or network volume, or one whose kind
+the agent could not tell, a path allow does not match, because whoever holds the disk, or the
+server, decides what its folders hold whatever their permissions say. A path deny matches
+everywhere.</p>
 <p><strong>Hash rules</strong> are the most precise and the most work: every update needs a new rule.
 <strong>Publisher rules</strong> trust what a signer signs, optionally narrowed by product name and minimum
 version (ISM-1471: use publisher <em>and</em> product names). The <code>publisher_product</code> preset
@@ -303,6 +310,12 @@ authority, which vouches for everything it signs, so validation warns about it a
 with every signer criterion, a revoked or otherwise untrusted signature does not take part by
 default, and an unknown key hash never makes a rule match. <strong>Path rules</strong> are the easiest to write and
 the easiest to get wrong.</p>
+<p>Path criteria match the <strong>final</strong> path, after symbolic links and junctions are resolved. A
+<strong>hard link</strong> is another name for the same file, with no final path to resolve to: a file
+hard-linked into an allowed folder from somewhere else is the same content under both names, and
+a path rule sees only the name it was started by. Only a hash or signer criterion follows the
+content across its names. Write those rules for files that must never run, and do not rely on a
+path deny alone to stop a file that users can hard-link elsewhere.</p>
 <p>A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
 #
@@ -1083,6 +1096,17 @@ rule_sets:
         action:
           type: allow
         order: 100300
+      # The default for everything no other rule matched (#329). A
+      # catch-all needs no identity, uses the catch-all order range and
+      # only decides when no other rule matched, whatever its order.
+      - id: 01936b2e-8c4a-7b3d-9f21-0a1b2c3d4e74
+        name: Default deny
+        catch_all: true
+        match:
+          all: []
+        action:
+          type: deny
+        order: 999990
 </code></pre>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/book/src/concepts/precedence.md"><code>docs/book/src/concepts/precedence.md</code></a> on GitHub.</small></p>
@@ -1708,7 +1732,7 @@ scoping on multi-session hosts. Each list that is set must match.</p>
 <p>A test of one fact about the object or its context: <code>field operator values</code>.</p>
 <p>Values are combined with OR for positive operators and with AND for
 negative ones (#32): <code>not_contains [a, b]</code> means neither <code>a</code> nor <code>b</code>.</p>
-<p>Appears at: <code>/rule_sets/rules/match/all/all/all/criterion</code>, <code>/rule_sets/rules/match/all/all/any/criterion</code>, <code>/rule_sets/rules/match/all/all/not/criterion</code>, <code>/rule_sets/rules/match/all/all/criterion</code>, <code>/rule_sets/rules/match/all/any/all/criterion</code>, <code>/rule_sets/rules/match/all/any/any/criterion</code>, and more.</p>
+<p>Appears at: <code>/rule_sets/rules/match/all/all/not/criterion</code>, <code>/rule_sets/rules/match/all/all/criterion</code>, <code>/rule_sets/rules/match/all/any/not/criterion</code>, <code>/rule_sets/rules/match/all/any/criterion</code>, <code>/rule_sets/rules/match/all/not/all/criterion</code>, <code>/rule_sets/rules/match/all/not/any/criterion</code>, and more.</p>
 <h2 id="fields-3"><a class="header" href="#fields-3">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -1907,7 +1931,7 @@ works out which sets a device is in.</p>
 <tr><td><code>expiring_soon_days</code></td><td>integer</td><td>no</td><td><code>14</code></td><td>1 to 365; format <code>uint16</code></td><td>1.0.0</td><td>A rule that expires within this many days is expiring soon: 1 to 365, default 14.</td></tr>
 <tr><td><code>expiry_notice_days</code></td><td>array of integer</td><td>no</td><td><code>[14,3,0]</code></td><td>at most 8 items</td><td>1.0.0</td><td>When the server tells a rule's owner that it expires, in days before the expiry: at most 8 values, each at most 365, default <code>[14, 3, 0]</code>.</td></tr>
 <tr><td><code>require_justification</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance mode: allow, trust, exclusion and exception rules need a justification, allow and trust rules a review date, and exception rules an expiry, an approver and a risk rating. Unset means on for a policy with a compliance preset (<code>unknown.preset</code>) and off otherwise.</td></tr>
-<tr><td><code>severity</code></td><td>map of <a href="#findingseverity"><code>FindingSeverity</code></a></td><td>no</td><td></td><td>keys: one of <code>weak_identity</code>, <code>user_writable_path_allow</code>, <code>restricted_publisher_broad</code>, <code>broad_wildcard</code>, <code>shadowed</code>, <code>contradiction</code>, <code>ineffective_vs_mandatory</code>, <code>duplicate_rule</code>, <code>duplicate_principal</code>, <code>expired_rule_present</code>, <code>expiring_soon</code>, <code>review_overdue</code>, <code>stale_rule</code>, <code>revoked_or_expired_signer</code>, <code>vulnerable_version_allowed</code>, <code>missing_justification</code>, <code>exception_without_expiry</code>, <code>too_many_hash_rules</code>, <code>regex_cost</code>, <code>future_dated_metadata</code></td><td>1.0.0</td><td>The severity of policy-assistant findings, per finding code, replacing the default.</td></tr>
+<tr><td><code>severity</code></td><td>map of <a href="#findingseverity"><code>FindingSeverity</code></a></td><td>no</td><td></td><td>keys: one of <code>weak_identity</code>, <code>user_writable_path_allow</code>, <code>restricted_publisher_broad</code>, <code>broad_wildcard</code>, <code>shadowed</code>, <code>contradiction</code>, <code>ineffective_vs_mandatory</code>, <code>duplicate_rule</code>, <code>duplicate_principal</code>, <code>expired_rule_present</code>, <code>expiring_soon</code>, <code>review_overdue</code>, <code>stale_rule</code>, <code>revoked_or_expired_signer</code>, <code>vulnerable_version_allowed</code>, <code>missing_justification</code>, <code>exception_without_expiry</code>, <code>too_many_hash_rules</code>, <code>regex_cost</code>, <code>future_dated_metadata</code>, <code>hash_with_other_criteria</code></td><td>1.0.0</td><td>The severity of policy-assistant findings, per finding code, replacing the default.</td></tr>
 <tr><td><code>stale_after_days</code></td><td>integer</td><td>no</td><td><code>90</code></td><td>1 to 3650; format <code>uint16</code></td><td>1.0.0</td><td>A rule with no hits for this many days, while usage was observed, is stale: 1 to 3650, default 90.</td></tr>
 </tbody>
 </table>
@@ -1963,10 +1987,12 @@ every heartbeat, and scopes test the result with <code>location_profile</code>.<
 <p>A condition tree (#33).</p>
 <p>Each node is an object with exactly one key: <code>all</code>, <code>any</code>, <code>not</code>,
 <code>criterion</code> or <code>ref</code>.</p>
-<p>Appears at: <code>/rule_sets/rules/match</code>, <code>/rule_sets/rules/match/all</code>, <code>/rule_sets/rules/match/all/all</code>, <code>/rule_sets/rules/match/all/all/all</code>, <code>/rule_sets/rules/match/all/all/all/not</code>, <code>/rule_sets/rules/match/all/all/any</code>, and more.</p>
+<p>Appears at: <code>/rule_sets/rules/match</code>, <code>/rule_sets/rules/match/all</code>, <code>/rule_sets/rules/match/all/all</code>, <code>/rule_sets/rules/match/all/all/all</code>, <code>/rule_sets/rules/match/all/all/any</code>, <code>/rule_sets/rules/match/all/all/not</code>, and more.</p>
 <h2 id="variants-2"><a class="header" href="#variants-2">Variants</a></h2>
 <h3 id="all"><a class="header" href="#all"><code>all</code></a></h3>
-<p>Matches when every child matches. Needs at least one child.</p>
+<p>Matches when every child matches. Needs at least one child, except
+as the whole match of a <code>catch_all</code> rule, where an empty <code>all</code>
+matches every object (#329).</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -2241,7 +2267,7 @@ document and has the default shown in the schema.</p>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>advanced</code></td><td>map of <a href="#advancedvalue"><code>AdvancedValue</code></a></td><td>no</td><td></td><td>at most 256 entries; keys: matches <code>^[a-z][a-z0-9_.-]{0,127}$</code></td><td>1.0.0</td><td>Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless <code>allow_unknown_advanced</code> is set.</td></tr>
+<tr><td><code>advanced</code></td><td>map of <a href="#advancedvalue"><code>AdvancedValue</code></a></td><td>no</td><td></td><td>at most 256 entries; keys: matches <code>^[a-z][a-z0-9_.-]{0,127}$</code></td><td>1.0.0</td><td>Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless <code>allow_unknown_advanced</code> is set. Keys are added only with the feature that reads them (#330), and never relax a decision.</td></tr>
 <tr><td><code>allow_unknown_advanced</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Accept keys in <code>advanced</code> that the registry does not know.</td></tr>
 <tr><td><code>capture_command_line</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Whether the agent records process command lines. Off by default for privacy (#18).</td></tr>
 <tr><td><code>decision_cache_ttl_secs</code></td><td>integer</td><td>no</td><td><code>300</code></td><td>0 to 86400; format <code>uint32</code></td><td>1.0.0</td><td>How long a decision may be cached, in seconds. <code>0</code> disables the cache.</td></tr>
@@ -2249,6 +2275,9 @@ document and has the default shown in the schema.</p>
 <tr><td><code>driver_control</code></td><td><a href="#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for drivers.</td></tr>
 <tr><td><code>group_cache_max_age_secs</code></td><td>integer</td><td>no</td><td><code>86400</code></td><td>3600 to 86400; format <code>uint32</code></td><td>1.0.0</td><td>How old cached group memberships that are not in the token (cloud-directory groups) may be before scopes treat them as unknown, in seconds (#38). From 3600 to 86400.</td></tr>
 <tr><td><code>max_ancestor_depth</code></td><td>integer</td><td>no</td><td><code>8</code></td><td>1 to 16; format <code>uint8</code></td><td>1.0.0</td><td>How many ancestors process criteria may inspect (#31).</td></tr>
+<tr><td><code>max_criteria_per_rule</code></td><td>integer</td><td>no</td><td></td><td>1 to 32; format <code>uint8</code></td><td>1.0.0</td><td>Most criteria in one rule's match tree (#33): 1 to 32, the fixed maximum and the default. A policy can tighten the limit, never raise it.</td></tr>
+<tr><td><code>max_tree_depth</code></td><td>integer</td><td>no</td><td></td><td>1 to 8; format <code>uint8</code></td><td>1.0.0</td><td>Deepest match tree (#33), where a single criterion has depth 1: 1 to 8, the fixed maximum and the default.</td></tr>
+<tr><td><code>max_values_per_criterion</code></td><td>integer</td><td>no</td><td></td><td>1 to 25; format <code>uint8</code></td><td>1.0.0</td><td>Most values in one criterion (#33): 1 to 25, the fixed maximum and the default.</td></tr>
 <tr><td><code>override_durations</code></td><td>array of integer</td><td>no</td><td></td><td>at most 5 items</td><td>1.0.0</td><td>Durations, in minutes, offered for override sessions (#9). At most 5 slots, each at most 10080. <code>0</code> marks a disabled slot.</td></tr>
 <tr><td><code>poll_interval_secs</code></td><td>integer</td><td>no</td><td><code>900</code></td><td>60 to 604800; format <code>uint32</code></td><td>1.0.0</td><td>Agent check-in interval, in seconds.</td></tr>
 <tr><td><code>script_control</code></td><td><a href="#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for scripts of a kind not listed in <code>script_control_by_kind</code>.</td></tr>
@@ -2272,6 +2301,7 @@ document and has the default shown in the schema.</p>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
 </thead>
 <tbody>
+<tr><td><code>confirm_permit_all</code></td><td>string</td><td>no</td><td></td><td>1 to 128 characters</td><td>1.0.0</td><td>The confirmation a catch-all rule that lets objects run needs (#35, #329): exactly <code>CONFIRM_PERMIT_ALL</code>. Without it, such a rule is rejected (<code>permit_all_unconfirmed</code>).</td></tr>
 <tr><td><code>description</code></td><td>string</td><td>no</td><td></td><td>at most 4096 characters</td><td>1.0.0</td><td>Free-text description, at most 4096 characters.</td></tr>
 <tr><td><code>governance</code></td><td><a href="#governancesettings"><code>GovernanceSettings</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance settings: justification, review and expiry rules, the policy assistant's severities and counter reporting (#40).</td></tr>
 <tr><td><code>id</code></td><td><a href="#policyid"><code>PolicyId</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>Stable ID. Renaming the policy never changes it.</td></tr>
@@ -2567,6 +2597,7 @@ set's rules to apply.</p>
 <tbody>
 <tr><td><code>action</code></td><td><a href="#action"><code>Action</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>What happens when it matches (#34).</td></tr>
 <tr><td><code>activates_at</code></td><td><a href="#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent before this instant (#40).</td></tr>
+<tr><td><code>catch_all</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>A catch-all rule (#33, #35, #329): the default of its rule set, which decides only when no other rule of stage 4 matched, under every precedence model. It is the only rule that may have no identity anchor, and the only one whose <code>match</code> may be an empty <code>all</code>, which matches every object. At most one per rule set; its name starts with <code>Default</code> or contains <code>Catch-all</code>; it allows, denies or audits; and it is never in a mandatory rule set. Unset means <code>false</code>.</td></tr>
 <tr><td><code>description</code></td><td>string</td><td>no</td><td></td><td>at most 4096 characters</td><td>1.0.0</td><td>Free-text description, at most 4096 characters.</td></tr>
 <tr><td><code>display_id</code></td><td>string</td><td>no</td><td></td><td>matches <code>^R-[0-9]{6,12}$</code></td><td>1.0.0</td><td>Human short ID from the tenant's sequence, <code>R-</code> and 6 to 12 digits.</td></tr>
 <tr><td><code>effects</code></td><td><a href="#effects"><code>Effects</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Logging, upload, notification, severity and tags (#34). Unset fields take the action's defaults.</td></tr>
@@ -2574,7 +2605,7 @@ set's rules to apply.</p>
 <tr><td><code>enforcement_override</code></td><td><a href="#enforcementoverride"><code>EnforcementOverride</code></a></td><td>no</td><td><code>"inherit"</code></td><td></td><td>1.0.0</td><td>Per-rule enforcement override (#36). Only for <code>deny</code> rules.</td></tr>
 <tr><td><code>expires_at</code></td><td><a href="#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent from this instant on (#40). An expired allow never revives, even if the clock is set back (<code>crate::lifecycle</code>).</td></tr>
 <tr><td><code>id</code></td><td><a href="#ruleid"><code>RuleId</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>Stable ID, never reused.</td></tr>
-<tr><td><code>match</code></td><td><a href="#match"><code>Match</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>When the rule matches (#33).</td></tr>
+<tr><td><code>match</code></td><td><a href="#match"><code>Match</code></a> or object</td><td>yes</td><td></td><td></td><td>1.0.0</td><td></td></tr>
 <tr><td><code>metadata</code></td><td><a href="#metadata"><code>Metadata</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance metadata (#40).</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>yes</td><td></td><td>1 to 128 characters</td><td>1.0.0</td><td>Display name, with the same rules as a policy name.</td></tr>
 <tr><td><code>object_types</code></td><td>array of <a href="#objecttype"><code>ObjectType</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The object classes the rule applies to. Empty means every class.</td></tr>
@@ -2702,7 +2733,7 @@ the chosen source and has the chosen index, and it meets every
 constraint here (<code>signed_after</code>, <code>countersigned</code>, <code>min_key_bits</code> and
 <code>disallowed_algorithms</code>). A constraint whose fact is unknown makes that
 signature's result unknown, never a match.</p>
-<p>Appears at: <code>/rule_sets/rules/match/all/all/criterion/signer</code>, <code>/rule_sets/rules/match/all/any/criterion/signer</code>, <code>/rule_sets/rules/match/all/not/not/criterion/signer</code>, <code>/rule_sets/rules/match/all/not/criterion/signer</code>, <code>/rule_sets/rules/match/all/criterion/signer</code>, <code>/rule_sets/rules/match/any/all/criterion/signer</code>, and more.</p>
+<p>Appears at: <code>/rule_sets/rules/match/all/all/criterion/signer</code>, <code>/rule_sets/rules/match/all/any/criterion/signer</code>, <code>/rule_sets/rules/match/all/not/criterion/signer</code>, <code>/rule_sets/rules/match/all/criterion/signer</code>, <code>/rule_sets/rules/match/any/all/criterion/signer</code>, <code>/rule_sets/rules/match/any/any/criterion/signer</code>, and more.</p>
 <h2 id="fields-27"><a class="header" href="#fields-27">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -2980,6 +3011,25 @@ matcher.</p>
 <tr><td><code>signer.tbs_hash</code></td><td>The hash of a chain certificate's <code>tbsCertificate</code>, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the <code>tbsCertificate</code> includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule; <code>signer.spki_sha256</code> names the key across every certificate that carries it. <code>signer.position</code> says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008).</td></tr>
 <tr><td><code>signer.eku</code></td><td>The extended key usages of the leaf certificate, as dotted OIDs, such as <code>1.3.6.1.5.5.7.3.3</code> (code signing). A leaf without the extension has none.</td></tr>
 <tr><td><code>signer.spki_sha256</code></td><td>The SHA-256 of a chain certificate's DER <code>SubjectPublicKeyInfo</code>: its public key (#318). Unlike the TBS hash it stays the same when a certificate is reissued for the same key, so a deny on a stolen key's hash also blocks every reissue. <code>signer.position</code> says which certificate. A key above the leaf belongs to a certificate authority, which vouches for everything it signs.</td></tr>
+<tr><td><code>meta.legal_copyright</code></td><td>The <code>LegalCopyright</code> string from the version resource (#328).</td></tr>
+<tr><td><code>meta.language</code></td><td>The language and code page of the version-resource block the other <code>meta.*</code> strings were read from, as its key is written: eight hex digits, such as <code>040904b0</code> (#328).</td></tr>
+<tr><td><code>meta.file_name_fallback</code></td><td>The file's effective name (#328): the first of the original file name, internal name, file description and product name that the version resource has, or the name on disk when it has none.</td></tr>
+<tr><td><code>meta.file_size</code></td><td>The file's size in bytes, as a whole number (#328).</td></tr>
+<tr><td><code>meta.pe_machine</code></td><td>The PE image's COFF machine, by name: <code>i386</code>, <code>amd64</code>, <code>arm64</code>, <code>arm64_ec</code>, <code>arm64_x</code>, <code>arm_nt</code> and so on (#328).</td></tr>
+<tr><td><code>meta.pe_subsystem</code></td><td>The PE image's subsystem, by name: <code>windows_gui</code>, <code>windows_cui</code>, <code>native</code>, <code>efi_application</code> and so on (#328).</td></tr>
+<tr><td><code>meta.is_dotnet</code></td><td>Whether the PE image is a .NET assembly: it has a CLR runtime header (#328).</td></tr>
+<tr><td><code>msi.product_code</code></td><td>A Windows Installer package's <code>ProductCode</code> (#328), a GUID. Compared as a GUID: braces and case do not matter.</td></tr>
+<tr><td><code>msi.upgrade_code</code></td><td>A Windows Installer package's <code>UpgradeCode</code> (#328), a GUID shared by every version of a product.</td></tr>
+<tr><td><code>msi.product_name</code></td><td>A Windows Installer package's <code>ProductName</code> (#328). Free text the author chooses.</td></tr>
+<tr><td><code>msi.manufacturer</code></td><td>A Windows Installer package's <code>Manufacturer</code> (#328). Free text the author chooses: never a publisher.</td></tr>
+<tr><td><code>msi.product_version</code></td><td>A Windows Installer package's <code>ProductVersion</code> (#328).</td></tr>
+<tr><td><code>msi.package_code</code></td><td>A Windows Installer package's <code>PackageCode</code> (#328): the GUID of one build of the package.</td></tr>
+<tr><td><code>path.drive_type</code></td><td>The drive type of the file's volume, as the OS reports it (#328): <code>fixed</code>, <code>removable</code>, <code>network</code>, <code>cd_rom</code> or <code>ram_disk</code>. An <code>unknown</code> drive type is a missing fact.</td></tr>
+<tr><td><code>path.bus</code></td><td>The bus of the disk the file's volume is on (#328): <code>usb</code>, <code>sata</code>, <code>nvme</code>, <code>scsi</code>, <code>sd</code>, <code>virtual</code>, <code>file_backed_virtual</code>, <code>iscsi</code> and so on. An <code>unknown</code> bus is a missing fact.</td></tr>
+<tr><td><code>path.is_unc</code></td><td>Whether the file is on a network share: its path, or the other form of it (a mapped drive's UNC path), is a UNC path (#328).</td></tr>
+<tr><td><code>path.is_ads</code></td><td>Whether the object is an alternate data stream of a file (#328).</td></tr>
+<tr><td><code>path.share</code></td><td>The <code>\\server\share</code> a file on a network share is under (#328), from its UNC path. A file on no share has none, so <code>equals</code> does not match it.</td></tr>
+<tr><td><code>path.user_can_change_acl</code></td><td>Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328).</td></tr>
 </tbody>
 </table>
 </div>
@@ -3569,7 +3619,7 @@ document; the defaults block every unknown object.</p>
 <p>One canonical event.</p>
 <p>Field order here is the serialisation order, so <code>Event::to_canonical_json</code>
 is deterministic.</p>
-<p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.2.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
+<p>Schema: <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/events/v1.json"><code>schemas/events/v1.json</code></a> (<code>$id</code> <code>https://github.com/jusso-dev/palisade/schemas/events/v1.json</code>), version 1.3.0. Regenerate the schema with <code>PALISADE_BLESS=1 cargo test -p palisade-proto --test events_schema</code>, then these pages with <code>cargo xtask docs generate</code>.</p>
 <h2 id="fields-30"><a class="header" href="#fields-30">Fields</a></h2>
 <div class="table-wrapper">
 <table>
@@ -3605,7 +3655,7 @@ is deterministic.</p>
 <tr><td><code>process</code></td><td><a href="#process"><code>Process</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The process that acted.</td></tr>
 <tr><td><code>registry</code></td><td><a href="#registry"><code>Registry</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>The registry key or value. Since 1.1.</td></tr>
 <tr><td><code>restriction</code></td><td><a href="#restriction"><code>Restriction</code></a></td><td>no</td><td></td><td></td><td>1.1.0</td><td>The script language restriction. Since 1.1.</td></tr>
-<tr><td><code>schema_version</code></td><td><a href="#schemaversion-1"><code>SchemaVersion</code></a></td><td>yes</td><td></td><td>matches <code>^1\.(0|1|2)\.(0|[1-9][0-9]*)$</code></td><td>1.0.0</td><td>The schema version of this event.</td></tr>
+<tr><td><code>schema_version</code></td><td><a href="#schemaversion-1"><code>SchemaVersion</code></a></td><td>yes</td><td></td><td>matches <code>^1\.(0|1|2|3)\.(0|[1-9][0-9]*)$</code></td><td>1.0.0</td><td>The schema version of this event.</td></tr>
 <tr><td><code>script</code></td><td><a href="#script"><code>Script</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The script, for script events.</td></tr>
 <tr><td><code>seq</code></td><td>integer</td><td>yes</td><td></td><td>at least 0; format <code>uint64</code></td><td>1.0.0</td><td>The producer's sequence number, starting at 0.</td></tr>
 <tr><td><code>severity</code></td><td><a href="#severity"><code>Severity</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>0 to 10. See <code>Severity::syslog</code> for the syslog mapping.</td></tr>
@@ -3617,7 +3667,7 @@ is deterministic.</p>
 </tbody>
 </table>
 </div>
-<p>The schema also has 78 cross-field rules (<code>allOf</code>), for example which field sets each event type requires and which fields an older <code>schema_version</code> may not use.</p>
+<p>The schema also has 79 cross-field rules (<code>allOf</code>), for example which field sets each event type requires and which fields an older <code>schema_version</code> may not use.</p>
 <h2 id="object-types-1"><a class="header" href="#object-types-1">Object types</a></h2>
 <ul>
 <li><a href="#account"><code>Account</code></a>: An account or group in a directory or on the device.</li>
@@ -4148,6 +4198,7 @@ summarised on the child.</p>
 <tbody>
 <tr><td><code>hash</code></td><td>string</td><td>no</td><td></td><td>matches <code>^[0-9a-f]{64}$</code></td><td>1.0.0</td><td>The SHA-256 of the policy bundle.</td></tr>
 <tr><td><code>id</code></td><td><a href="#policyid-1"><code>PolicyId</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The policy ID.</td></tr>
+<tr><td><code>kid</code></td><td>string</td><td>no</td><td></td><td>matches <code>^[0-9a-f]{32}$</code></td><td>1.3.0</td><td>The key that signed the policy bundle: its key ID, the first 16 bytes of the SHA-256 of its <code>SubjectPublicKeyInfo</code>, in 32 lowercase hex digits (#325). Since 1.3.</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>no</td><td></td><td>1 to 256 characters</td><td>1.0.0</td><td>The policy name.</td></tr>
 <tr><td><code>profile_id</code></td><td><a href="#uuid7-1"><code>Uuid7</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The profile the policy was assigned through.</td></tr>
 <tr><td><code>rule_id</code></td><td><a href="#ruleid-1"><code>RuleId</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule that decided.</td></tr>
@@ -5759,6 +5810,9 @@ point on a chain fails closed), and the OS access check
 (<code>AuthzAccessCheck</code> with a synthetic token of the standard user's SIDs).
 <code>cross_check_writability</code> compares that check with the portable
 evaluator: the evaluator must never miss a right the OS grants.
+<code>assess_file</code> merges the OS verdict into every result, as the union
+of the two (<code>acl::OsCheck</code>): the OS check can only add rights, and a
+check that fails leaves the evaluator's over-reporting result.
 <code>OsDirectories</code> lets <code>enumerate_user_writable_dirs</code> walk real folders
 without following junctions or mount points. Windows tests build a
 weak-ACL fixture tree (a user-writable folder under a locked one, an
@@ -5797,6 +5851,16 @@ file ID, USN, timestamps and attributes.
 <code>win::links::read_details</code> fills them into an <code>FsContext</code>. Windows tests
 make a symbolic link, a relative link, a junction, a mount point and an
 app execution alias, 21 hard links and tagged and executable streams.</li>
+<li><code>win::journal</code> (Windows, <code>os-trust</code> feature), for the file inventory
+(<a href="https://github.com/jusso-dev/palisade/issues/60">#60</a>): a volume's
+change journal state, reading records from a saved cursor
+(<code>FSCTL_READ_USN_JOURNAL</code>), listing every file of the master file table
+for an initial scan (<code>FSCTL_ENUM_USN_DATA</code>), and opening a file by its
+128-bit ID without following a reparse point. <code>fsctx::ntfs</code> parses the
+journal state and the record lists, failing a whole batch on any
+malformed record, so a change is never skipped silently.
+<code>JournalData::can_resume</code> says whether a saved <code>(journal ID, next USN)</code>
+cursor is still readable or the volume needs a reconciliation scan.</li>
 </ul>
 </li>
 <li>
@@ -6385,14 +6449,34 @@ with any of those leaves no signature valid, and so does a signature on
 an archive without ZIP64 end records, which the OS rejects whatever its
 digest (Windows CI: the OS signing tool always writes them). A bundle's block map lists
 only its bundle manifest; each payload package must be a stored member at
-the offset and of the size the bundle manifest gives. On Windows,
+the offset and of the size the bundle manifest gives.
+<code>PackageSignature::status()</code> gives the package-level verdict
+(<code>PackageSignatureStatus</code>: <code>Valid</code>, <code>Rejected(issue)</code> by a package check,
+or <code>Invalid</code> by the signatures themselves); the shared report keeps
+<code>DigestMismatch</code> for both kinds of rejection. A digest input that is
+present but unreadable (an over-limit <code>[Content_Types].xml</code>, a broken
+code integrity catalog) is named as <code>DigestInput</code>.
+<code>tests/package_signed.rs</code> signs packages at test time with a per-run key,
+so a package changed <strong>before</strong> signing (a block map that leaves a file
+out, a bundle manifest with a wrong payload offset) has a matching digest
+and only the package check rejects it. On Windows,
 <code>tests/package_os.rs</code> checks the family names against the OS package
 identity API and the signature verdicts against the OS trust-verification
 API, on the committed fixtures and on a package and bundle that the OS
 SDK's own packaging and signing tools build and sign during the test. It
 also has the SDK's signing tool sign the test builder's packages in every
 archive layout, and requires the digest that tool signs to equal this
-crate's, tag by tag.</p>
+crate's, tag by tag.
+<code>package::installed</code> models installed packages (identity checked for
+consistency, install folder as a final path, signature kind, framework,
+bundle, resource and stub flags, users, applications), maps an
+executable's final path to the one package whose folder holds it
+(<code>owner_of</code>: owned, not owned, or ambiguous), and resolves an app
+execution alias only when its family, app user model ID, application
+and target executable all check out against an installed package
+(<code>resolve_alias</code>). <code>win::packages</code> fills it for one family and the
+current user from the OS app-model API and the installed manifest,
+kept only when the manifest gives the full name the OS reported.</p>
 </li>
 </ul>
 <h2 id="handling-untrusted-input"><a class="header" href="#handling-untrusted-input">Handling untrusted input</a></h2>
@@ -6653,6 +6737,8 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <ul>
 <li><code>model</code>: the canonical policy object model. A <code>PolicyDocument</code> holds one <code>Policy</code> and the <code>RuleSet</code>s it references by ID. Each rule has a match tree (<code>all</code> / <code>any</code> / <code>not</code> / <code>criterion</code>) and an action. Strict serde: unknown fields are rejected, and enums are <code>snake_case</code> strings.</li>
 <li><code>schema</code>: generates the JSON Schema (draft 2020-12) from the model. The generated schema is committed at <a href="https://github.com/jusso-dev/palisade/blob/main/schemas/policy/v1.json"><code>schemas/policy/v1.json</code></a>.</li>
+<li><code>migrate</code>: migrations between major versions of the schema (#330). Each <code>Step</code> is a pure function that rewrites a document of major <code>N</code> as major <code>N + 1</code>; <code>migrate</code> applies them in order and leaves a current document unchanged, so it is idempotent. <code>read_json</code> reads a document of any supported major (rejecting repeated keys), migrates it and reads the result in strict mode, so a migration can never make an unknown field or criterion acceptable. v0, the pre-release draft model, kept <code>schema_version</code> in <code>policy</code> and called a rule's effects <code>flags</code>. Fixtures for each old version are in <code>tests/fixtures/migrate/</code>.</li>
+<li><code>lenient</code>: the lenient reader for agents that receive a newer minor version (#330). <code>read_json</code> migrates an older major first, then sets aside only what can never relax a decision: unknown or unreadable fields of <code>metadata</code> and <code>governance</code>, and unreadable rules whose action is <code>audit</code>, <code>defer</code>, <code>trust_source</code> or <code>ignore</code>. Each is returned in <code>ignored</code> with its JSON Pointer and value. Any other unknown field, and an unreadable <code>allow</code>, <code>deny</code>, <code>allow_contained</code> or <code>allow_elevated</code> rule, or a rule with an unknown action, refuses the whole document, so the device keeps the policy it has (ADR 0018). Strict reading (<code>PolicyDocument::from_json</code>) stays the default and the mode for authoring.</li>
 <li><code>dsl</code>: reads and writes policy documents as YAML. The YAML form has the same fields as the JSON form, and the same JSON Schema validates both. Reading is strict and safe on untrusted input: YAML 1.2 only, no anchors, aliases, tags or merge keys, no duplicate keys or unknown fields, no scalar that YAML 1.1 and 1.2 type differently (such as <code>no</code> or <code>010</code>), and limits on size, depth, node count and parser lookahead. JSON input is read by a streaming JSON reader that builds the same tree under the same rules. Errors and warnings carry a line and column. Examples are in <a href="https://github.com/jusso-dev/palisade/tree/main/docs/examples/policies"><code>docs/examples/policies/</code></a>.</li>
 <li><code>validate</code>: <code>PolicyDocument::validate</code> reports every finding in one pass. Each finding has a stable code, a severity and the JSON Pointer of the field. It normalises hash values to lowercase hex, compiles every criterion, checks each rule's <code>order</code> and <code>priority</code> against the precedence model, and flags rules that can match without a positive identity criterion (naming the criteria on one such path through the tree), rules that match on negations or context alone, allow rules whose only identity is weak, and unsupported regular expressions. A document that passes becomes a <code>ValidatedPolicy</code>.</li>
 <li><code>decision</code>: the typed <code>Decision</code> every consumer gets: outcome, the enforce-mode outcome (<code>would_have_been</code>), the deciding action and rule (<code>RuleRef</code>), <code>audit</code> annotations, the mode, directives, effects with defaults applied, a reason code and a trace ID. Its JSON form is stable and snapshot-tested. <code>Decision::from_rule</code> builds the enforce-mode decision of one deciding rule, and <code>Decision::implicit_deny</code> the decision when none decides. The pipeline adds the rules the deciding rule overrode, the <code>audit</code> annotations and the trust-source grants (#35), then applies the effective mode (#36): <code>would_have_been</code> keeps the enforce-mode outcome, and <code>learning_candidate</code> marks an object to learn.</li>
@@ -6671,7 +6757,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <li><code>context</code>: the user, device, session, network and time of one evaluation (<code>EvaluationContext</code>), which context criteria test: SIDs, group and tag sets, account names, host and domain names, directory units, the OS version and build, the token's integrity level, yes-or-no facts such as <code>user.is_admin</code>, the session type, ID and client address, local addresses, DNS suffixes and network locations, and the weekday, time and date in the policy's clock. As with object facts, the agent collects them (#4); a fact that was not collected is unknown.</li>
 <li><code>condition</code>: compiles a rule's match tree (<code>CompiledMatch</code>) into an arena of compiled criteria and evaluates it with Kleene three-valued logic. <code>all</code> stops at the first <code>NoMatch</code> and <code>any</code> at the first <code>Match</code>, and the order of children never changes the result. Only <code>Match</code> makes a rule match, and <code>Unknown</code> counts as no match for every action. An allow rule therefore cannot allow on an unknown fact (it fails closed), but a deny rule does not block on one either. That is the default (<code>no_match</code>) that #32 sets for deny rules; a deny's <code>unknown_as</code> and <code>on_unparseable</code> options change it (see <a href="#unknown-facts">Unknown facts</a>).</li>
 <li><code>scope</code>: rule scoping (#38): who, where and when a rule applies. See <a href="#scopes">Scopes</a>.</li>
-<li><code>bundle</code>: the canonical compiled policy bundle (#43). <code>bundle::cbor</code> is its encoding: a strict subset of CBOR in the core deterministic encoding of RFC 8949 §4.2 (shortest integers, definite lengths, map keys sorted by their encoded bytes and never repeated, no floating point, tags or simple values other than <code>false</code>, <code>true</code> and <code>null</code>, and NFC text). The encoder can only write canonical bytes, and the decoder accepts only canonical bytes, within limits on size, depth and item count, so it is safe on untrusted input. <code>bundle::keys</code> is the stable registry of integer keys that replace field and variant names in a bundle; an ID is never reused, <code>tests/golden/bundle-keys.txt</code> holds every published one, and a key's sign says whether a reader that does not know it refuses the bundle (critical, 0 and up) or skips it (ignorable, below 0: only descriptions and display fields). <code>bundle::serial</code> writes any model type through serde as CBOR with those keys and NFC text, and reads it back with the model's own strict readers. A test fails if a field or variant of the model has no key, and governance metadata (justifications, tickets, comments) has none, so it cannot reach a bundle. <code>bundle::format</code> is the bundle itself: <code>[header, body]</code>. The header (format and schema version, tenant, <code>group</code> or <code>device</code> target, <code>policy_version</code>, <code>min_agent_version</code>, <code>generated_at</code>, optional <code>expires_at</code>) decodes on its own with <code>decode_header</code>, which <code>palisade-proto</code> calls for the envelope checks (#225). The body holds the policy in canonical order (rule sets, rules, assignments and profiles sorted by ID or name), the inlined library sets its scopes read, the source revisions and a digest of the governance metadata kept on the server. <code>PolicyBundle::decode</code> refuses anything that is not exactly what <code>to_bytes</code> writes, apart from unknown ignorable fields, and <code>PolicyBundle::validate</code> then validates the body as a policy. <code>bundle_hash</code> is SHA-256 over the bytes; <code>decision_hash</code> covers only what decisions depend on (not the header, sources, metadata digest, revision, names or descriptions), for the decision cache (#42). <code>bundle::compile</code> builds a bundle from a validated or effective policy and its library catalogue: it inlines each library set a scope reads at its pinned version, records the sources, and fails with a retriable <code>CompileError</code> when a set is missing or the bundle is over the size limit. It first runs the policy assistant (#40) as of the header's <code>generated_at</code>: an <code>error</code> finding stops it (<code>CompileError::Blocked</code>) unless <code>Source::admin</code> overrides it with a reason, and <code>Compiled::gate</code> returns the override and the findings it covers for the audit record. <code>BundleSets</code> resolves those inlined sets when a loaded bundle is evaluated, so the agent and the simulator decide alike. <code>bundle::delta</code> gives <code>diff</code> and <code>apply</code>: puts and removals of rules and rule sets by ID, plus replacements of the policy, libraries and sources. <code>apply</code> works only on the exact base and checks the result against <code>result_bundle_hash</code>. <code>worth_sending</code> sends a delta only to that base, and only when it is under half the full size. Tests: unit and property tests for each layer, golden bundles with their hashes in <code>tests/golden/bundles/</code> (<code>tests/bundle_golden.rs</code>, regenerated with <code>PALISADE_BLESS=1</code>), and the <code>fuzz_bundle_decode</code> fuzz target.</li>
+<li><code>bundle</code>: the canonical compiled policy bundle (#43). <code>bundle::cbor</code> is its encoding: a strict subset of CBOR in the core deterministic encoding of RFC 8949 §4.2 (shortest integers, definite lengths, map keys sorted by their encoded bytes and never repeated, no floating point, tags or simple values other than <code>false</code>, <code>true</code> and <code>null</code>, and NFC text). The encoder can only write canonical bytes, and the decoder accepts only canonical bytes, within limits on size, depth and item count, so it is safe on untrusted input. <code>bundle::keys</code> is the stable registry of integer keys that replace field and variant names in a bundle; an ID is never reused, <code>tests/golden/bundle-keys.txt</code> holds every published one, and a key's sign says whether a reader that does not know it refuses the bundle (critical, 0 and up) or skips it (ignorable, below 0: only descriptions and display fields). <code>bundle::serial</code> writes any model type through serde as CBOR with those keys and NFC text, and reads it back with the model's own strict readers. A test fails if a field or variant of the model has no key, and governance metadata (justifications, tickets, comments) has none, so it cannot reach a bundle. <code>bundle::format</code> is the bundle itself: <code>[header, body]</code>. The header (format and schema version, tenant, <code>group</code> or <code>device</code> target, <code>policy_version</code>, <code>min_agent_version</code>, <code>generated_at</code>, optional <code>expires_at</code>) decodes on its own with <code>decode_header</code>, which <code>palisade-proto</code> calls for the envelope checks (#225). The body holds the policy in canonical order (rule sets, rules, assignments and profiles sorted by ID or name), the inlined library sets its scopes read, the source revisions and a digest of the governance metadata kept on the server. <code>PolicyBundle::decode</code> refuses anything that is not exactly what <code>to_bytes</code> writes, apart from unknown ignorable fields, and <code>PolicyBundle::validate</code> then validates the body as a policy. <code>bundle_hash</code> is SHA-256 over the bytes; <code>decision_hash</code> covers only what decisions depend on (not the header, sources, metadata digest, revision, names or descriptions), for the decision cache (#42). <code>bundle::compile</code> builds a bundle from a validated or effective policy and its library catalogue: it inlines each library set a scope reads at its pinned version, records the sources, and fails with a retriable <code>CompileError</code> when a set is missing or the bundle is over the size limit. It first runs the policy assistant (#40) as of the header's <code>generated_at</code>: an <code>error</code> finding stops it (<code>CompileError::Blocked</code>) unless <code>Source::admin</code> overrides it with a reason, and <code>Compiled::gate</code> returns the override and the findings it covers for the audit record. <code>BundleSets</code> resolves those inlined sets when a loaded bundle is evaluated, so the agent and the simulator decide alike. <code>bundle::load(bytes, limits, baseline)</code> is the agent's one step from verified bytes to a <code>LoadedPolicy</code>: it decodes, validates, adds the agent's own <code>system_baseline</code> if given, and builds the evaluation indexes and location profiles with the bundle's inlined sets. <code>Engine::from_loaded</code> and <code>Engine::install</code> take the result, and any failure leaves the current policy in place. <code>tests/budget.rs</code> loads the reference policy (100,000 hash rules) as a bundle within the #42 load budget. <code>bundle::delta</code> gives <code>diff</code> and <code>apply</code>: puts and removals of rules and rule sets by ID, plus replacements of the policy, libraries and sources. <code>apply</code> works only on the exact base and checks the result against <code>result_bundle_hash</code>. <code>worth_sending</code> sends a delta only to that base, and only when it is under half the full size. Tests: unit and property tests for each layer, golden bundles with their hashes in <code>tests/golden/bundles/</code> (<code>tests/bundle_golden.rs</code>, regenerated with <code>PALISADE_BLESS=1</code>), and the <code>fuzz_bundle_decode</code> fuzz target.</li>
 <li><code>ops</code>: compiles one criterion (<code>CompiledCriterion</code>) and evaluates it against facts, giving <code>Match</code>, <code>NoMatch</code> or <code>Unknown</code> with notes for the decision trace. The module docs define the semantics: several values, negation of unknown facts, case folding and Unicode NFC, path normalisation and wildcards, alternate data streams, path variables, the path-ACL rule for allow rules, version comparison, and which signer statuses can match. Regular expressions use a linear-time engine; look-around and backreferences are rejected with a guided error. The numeric, integrity-level, date, network (<code>ip_in_cidr</code>, <code>ip_between</code>, <code>ip_wildcard</code>), set (<code>member_of</code>, <code>any_of</code>, <code>all_of</code>) and time (<code>weekday_in</code>, <code>time_between</code>, <code>date_between</code>) operators and the criterion options <code>anchored</code>, <code>match_ads</code>, <code>include_sub_ous</code> and <code>safety_critical</code> are described there too. <code>ops::net</code> parses the addresses, CIDR blocks, ranges and MAC addresses that criteria test.</li>
 </ul>
 <p>Each identity field has a strength (<code>Field::strength</code>, #31): strong for SHA-256-family and Authenticode SHA-256 hashes, the leaf thumbprint and the TBS hash, medium for the publisher and full or directory paths, and weak for everything else, including the SHA-1 thumbprints and what names a certificate authority (the issuer, the PCA, the root thumbprint and the EKUs). A TBS hash at a position other than <code>leaf</code> can name a CA, so validation counts it as weak in an allow rule. For precedence, the leaf thumbprints and the leaf TBS hash (<code>position: leaf</code>) rank with the publisher (tier 4); the issuer, the PCA, the root thumbprints, the EKUs and a TBS hash at any other position name a certificate authority (tier 7). Path normalisation (<code>palisade_core::path</code>) is shared with the agent, so facts and rule values are normalised the same way.</p>
@@ -6747,6 +6833,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 </ul>
 <p><strong>Specificity tiers</strong>, from a rule's strongest identity that every match must satisfy (<code>all</code> takes its strongest child, <code>any</code> its weakest, <code>not</code> and context criteria identify nothing): 1 hash, 2 signer with file name and version, 3 signer with product name, 4 signer (the publisher, a leaf thumbprint or the leaf TBS hash), 5 full path (<code>path.full</code> equals), 6 directory (deeper first), 7 metadata, a certificate authority (the issuer, the PCA, a root thumbprint, the EKUs or a TBS hash at a position other than <code>leaf</code>), or nothing.</p>
 <p><strong>Order and priority.</strong> Under <code>first_match</code>, every rule that allows or denies needs an <code>order</code> (<code>order_required</code>). Rules of custom rule sets use 100001 to 999989 (<code>order_reserved</code>). 0 to 99 is for system rules, 100 to 100000 for curated rule sets, and 999990 to 1000000 for defaults and catch-alls. Under <code>priority</code>, every such rule needs a <code>priority</code> (<code>priority_required</code>). Two rules with different actions at one priority are a warning (<code>duplicate_priority</code>). A newer rule is one with a higher rule ID, because rule IDs are UUIDv7s, which start with their creation time.</p>
+<p><strong>Catch-all rules</strong> (#33, #329). <code>catch_all: true</code> marks a rule set's default: the only rule that may have no identity anchor, and the only one whose <code>match</code> may be an empty <code>all</code>, which matches every object. It is a floor at stage 4, below the managed <code>system_baseline</code>: it decides only when no other allow or deny matched, under every model, whatever its <code>order</code> or <code>priority</code>. A catch-all is named <code>Default…</code> or contains <code>Catch-all</code>, allows or denies, is never in a mandatory rule set, and a rule set has at most one (<code>invalid_catch_all</code>). One that lets objects run needs the policy's <code>confirm_permit_all: "I UNDERSTAND"</code> (<code>permit_all_unconfirmed</code>) and is rejected under a compliance preset (<code>unknown_allow_not_permitted</code>). Under <code>first_match</code> it may use the catch-all <code>order</code> range, and a policy without an enabled one gets the warning <code>catch_all_missing</code>; objects nothing matched then fall to the unknown policy, which blocks by default.</p>
 <p><strong>Determinism.</strong> Every choice ends with the unique rule ID, and the lists in a decision are sorted by rule ID. So a decision never depends on the order of rule sets or rules in a document, under any model. Only <code>first_match</code> and <code>priority</code> depend on <code>order</code> and <code>priority</code>, by design.</p>
 <h3 id="unknown-facts"><a class="header" href="#unknown-facts">Unknown facts</a></h3>
 <p>A rule applies only when its tree is <code>Match</code>, so an unknown fact never allows, trusts or excludes. A deny chooses how it treats what it cannot decide:</p>
@@ -6976,6 +7063,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <tr><td><code>too_many_hash_rules</code></td><td>info</td><td>more than 50,000 inline hashes in a rule set</td></tr>
 <tr><td><code>regex_cost</code></td><td>warning</td><td>a regular expression over half the engine's size limit</td></tr>
 <tr><td><code>future_dated_metadata</code></td><td>warning</td><td><code>approved_at</code>, <code>created_at</code> or <code>last_reviewed_at</code> in the future</td></tr>
+<tr><td><code>hash_with_other_criteria</code></td><td>info</td><td>a rule that requires a SHA-256, SHA-384, SHA-512 or Authenticode SHA-256 hash and another identity criterion: the hash already names the file, so the rest only narrows it (#31)</td></tr>
 </tbody>
 </table>
 </div>
@@ -7033,7 +7121,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="palisade-proto"><a class="header" href="#palisade-proto">palisade-proto</a></h1>
 <p>Wire types between agent and server: messages, the event schema and schema versioning.</p>
-<p><strong>Status:</strong> the canonical event schema (version 1.2.0) and the OS event-ID mappings are in place (<a href="https://github.com/jusso-dev/palisade/issues/196">#196</a>). The decision trace waits for the policy engine's trace (#41). The PKI key inventory and signed trust sets are in place (part of <a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>). The agent-server service definitions are still to come (<a href="https://github.com/jusso-dev/palisade/issues/62">#62</a>). Overall work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/4">#4</a> and <a href="https://github.com/jusso-dev/palisade/issues/10">#10</a>.</p>
+<p><strong>Status:</strong> the canonical event schema (version 1.3.0) and the OS event-ID mappings are in place (<a href="https://github.com/jusso-dev/palisade/issues/196">#196</a>). The decision trace waits for the policy engine's trace (#41). The PKI key inventory and signed trust sets are in place (part of <a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>). The agent-server service definitions are still to come (<a href="https://github.com/jusso-dev/palisade/issues/62">#62</a>). Overall work is tracked in <a href="https://github.com/jusso-dev/palisade/issues/4">#4</a> and <a href="https://github.com/jusso-dev/palisade/issues/10">#10</a>.</p>
 <h2 id="modules-1"><a class="header" href="#modules-1">Modules</a></h2>
 <ul>
 <li>
@@ -7046,10 +7134,10 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <p><code>mapping</code>: translates decoded OS log records into canonical events. The mapping tables are data, in <a href="https://github.com/jusso-dev/palisade/tree/main/crates/palisade-proto/mappings"><code>mappings/</code></a>: the OS code integrity log, the OS legacy rule-collection logs, the OS Security log (process creation, logon, failed logon, group membership changes, audit policy changes, log cleared) and the PowerShell logs (script block logging and the constrained-language audit event). <code>third_party_generic.yaml</code> documents a neutral column layout for importing historic events from another product, loaded with <code>MappingSet::third_party("generic")</code>. Loading a file checks that every target is a real, writable canonical field that exists in the file's schema version, that value tables only produce values the target can hold, and that each entry can fill its type's required field sets and the ISM-0585 fields. Envelope fields owned by the agent (<code>seq</code>, <code>prev_hash</code>, <code>event_id</code>, <code>tenant_id</code>, <code>host</code>, the clock fields) cannot be mapped, so a log record can never set them.</p>
 </li>
 <li>
-<p><code>pki</code>: the PKI types that both the agent and the server need (#224). <code>key</code> has key IDs (<code>kid</code>: the first 16 bytes of the SHA-256 of the DER <code>SubjectPublicKeyInfo</code>), the nine key purposes, algorithms, back ends, the lifecycle (<code>pending</code>, <code>active</code>, <code>retiring</code>, <code>retired</code>, <code>compromised</code>, with only the legal transitions allowed) and the device-certificate binding to serial <strong>and</strong> key fingerprint. <code>trust_set</code> has the signed trust-set manifest, its canonical binary encoding and the agent acceptance rule (<code>TrustAnchor::accept</code>). <code>signer</code> has the <code>Signer</code> interface and <code>SoftwareSigner</code>, an in-memory back end. <code>time</code> has validity windows with a clock-skew tolerance (5 minutes by default) and an injectable clock. Every signature covers a domain-separation prefix (<code>palisade-trustset-v1</code>, <code>palisade-policy-v1</code>, <code>palisade-unlock-v1</code>). Only the private <code>pki::crypto</code> module calls <code>ring</code> (ADR 0008). The module docs specify the wire format and the acceptance rule in full.</p>
+<p><code>pki</code>: the PKI types that both the agent and the server need (#224). <code>key</code> has key IDs (<code>kid</code>: the first 16 bytes of the SHA-256 of the DER <code>SubjectPublicKeyInfo</code>), the nine key purposes, algorithms, back ends, the lifecycle (<code>pending</code>, <code>active</code>, <code>retiring</code>, <code>retired</code>, <code>compromised</code>, with only the legal transitions allowed) and the device-certificate binding to serial <strong>and</strong> key fingerprint. <code>trust_set</code> has the signed trust-set manifest, its canonical binary encoding and the agent acceptance rule (<code>TrustAnchor::accept</code>). <code>signer</code> has the <code>Signer</code> interface and <code>SoftwareSigner</code>, an in-memory back end. <code>time</code> has validity windows with a clock-skew tolerance (5 minutes by default) and an injectable clock. <code>issue</code> (feature <code>issuance</code>) issues the X.509 hierarchy: a self-signed root, cross-signed roots for root rotation, issuing CAs, device certificates (<code>clientAuth</code> only, with device and tenant URNs, at most 90 days), relay and server certificates, and revocation lists, all ECDSA P-384 with SHA-384 and signed through <code>Signer::sign_x509</code>, which only <code>root-ca</code> and <code>issuing-ca</code> keys may use. <code>lifecycle</code> has the renewal schedule (2/3 of the lifetime, up to 10% earlier at random, exponential back-off to 6 hours, an alert when renewal fails with under 7 days left), the expiry alert thresholds (30, 14, 5 and 1 days by default), rotation plans with enforced overlap (server TLS staged 14 days ahead, issuing CA overlap of the longest certificate plus grace, unlock-token keys kept for the longest token) and trust-version adoption counting. Every signature covers a domain-separation prefix (<code>palisade-trustset-v1</code>, <code>palisade-policy-v1</code>, <code>palisade-unlock-v1</code>). Only the private <code>pki::crypto</code> module calls <code>ring</code> (ADR 0008). The module docs specify the wire format and the acceptance rule in full.</p>
 </li>
 <li>
-<p><code>policy_bundle</code>: the pure decision logic for policy bundle integrity (part of <a href="https://github.com/jusso-dev/palisade/issues/225">#225</a>). It treats the bundle as opaque (tenant, target, <code>policy_version</code>, SHA-256) until #43 defines it. <code>record</code> has the anti-rollback record (floor and one-step fallback, per ADR 0007 as proposed in #234). Each copy is sealed with HMAC-SHA-256 and bound to its target, and the copies are compared under the copy-mismatch rule. <code>SignatureMode</code> and <code>EffectiveMode</code> have the <code>audit</code>/<code>warn</code>/<code>enforce</code> gate. <code>select::startup</code> picks <code>active</code>, then <code>previous</code>, then the emergency policy, then first-install audit, as ADR 0018's failure table (revising ADR 0012) lays out. <code>select::pending</code> decides activation and the record writes around the rename. <code>stale</code> reports staleness without changing what runs. Each rejection maps to exactly one event type. No storage, no OS calls, and <code>now</code> is a parameter.</p>
+<p><code>policy_bundle</code>: the pure decision logic for policy bundle integrity (part of <a href="https://github.com/jusso-dev/palisade/issues/225">#225</a>). The decisions see only the bundle's tenant, target, <code>policy_version</code> and SHA-256. <code>envelope</code> has the signed bundle envelope (<a href="https://github.com/jusso-dev/palisade/issues/325">#325</a>): its canonical binary encoding, <code>Envelope::sign_bundle</code> and <code>sign_delta</code> for the server, <code>verify</code>, which runs the #225 check order against the agent's trust set and produces the <code>Examined</code> the decisions take, and <code>rebuild</code>, which turns a delta envelope into the full bundle's envelope so only full bundles are ever verified. <code>record</code> has the anti-rollback record (floor and one-step fallback, per ADR 0007 as proposed in #234). Each copy is sealed with HMAC-SHA-256 and bound to its target, and the copies are compared under the copy-mismatch rule. <code>SignatureMode</code> and <code>EffectiveMode</code> have the <code>audit</code>/<code>warn</code>/<code>enforce</code> gate. <code>select::startup</code> picks <code>active</code>, then <code>previous</code>, then the emergency policy, then first-install audit, as ADR 0018's failure table (revising ADR 0012) lays out. <code>select::pending</code> decides activation and the record writes around the rename. <code>stale</code> reports staleness without changing what runs. Each rejection maps to exactly one event type. No storage, no OS calls, and <code>now</code> is a parameter.</p>
 </li>
 </ul>
 <h2 id="event-types"><a class="header" href="#event-types">Event types</a></h2>
@@ -7064,7 +7152,7 @@ names for its identity backend, #29); the CLI may, for local diagnostics.</li>
 <li>mapping entries</li>
 </ul>
 <p><strong>Major version</strong> changes break compatibility. They include renames, removals and type changes, as well as changes to an existing type's category or required field sets. A major version gets a new schema file.</p>
-<p>Every addition records the version that added it: <code>since</code> in the registry, <code>FieldSet::since</code>, and the <code>ADDED</code> table of field pointers. An event labelled with an older version than something it uses is invalid, both to <code>Event::validate</code> and to the JSON Schema, so the label tells a reader which fields it may meet. A test compares the schema with the list of 1.0 fields, so a new field cannot be added without a version. Version 1.1.0 adds the field sets listed above, the remaining event types of #196, <code>script.text</code>, and <code>source.kind: third_party</code> with <code>source.format</code> and <code>source.rule_name</code>. It comes after every 1.0 field, so a 1.0 event's canonical form is unchanged. Version 1.2.0 adds the policy integrity event types of <a href="https://github.com/jusso-dev/palisade/issues/225">#225</a> (<code>policy.signature.invalid</code>, <code>policy.rollback_rejected</code>, <code>policy.target_mismatch</code>, <code>policy.stale</code>, <code>policy.lkg_loaded</code>, <code>policy.emergency_loaded</code>, <code>policy.schema_unsupported</code> and <code>tamper.policy.rollback_suspected</code>) and no fields. Producers write 1.2.0.</p>
+<p>Every addition records the version that added it: <code>since</code> in the registry, <code>FieldSet::since</code>, and the <code>ADDED</code> table of field pointers. An event labelled with an older version than something it uses is invalid, both to <code>Event::validate</code> and to the JSON Schema, so the label tells a reader which fields it may meet. A test compares the schema with the list of 1.0 fields, so a new field cannot be added without a version. Version 1.1.0 adds the field sets listed above, the remaining event types of #196, <code>script.text</code>, and <code>source.kind: third_party</code> with <code>source.format</code> and <code>source.rule_name</code>. It comes after every 1.0 field, so a 1.0 event's canonical form is unchanged. Version 1.2.0 adds the policy integrity event types of <a href="https://github.com/jusso-dev/palisade/issues/225">#225</a> (<code>policy.signature.invalid</code>, <code>policy.rollback_rejected</code>, <code>policy.target_mismatch</code>, <code>policy.stale</code>, <code>policy.lkg_loaded</code>, <code>policy.emergency_loaded</code>, <code>policy.schema_unsupported</code> and <code>tamper.policy.rollback_suspected</code>) and no fields. Version 1.3.0 adds <code>policy.kid</code>, the key ID that signed a policy bundle (<a href="https://github.com/jusso-dev/palisade/issues/325">#325</a>), so <code>policy.applied</code> names its signing key; it comes after every older <code>policy</code> field. Producers write 1.3.0.</p>
 <p>Readers are strict, because events are hash-chained and silently dropping a field would hide data. A reader accepts events with its own major version and the same or an older minor version. It refuses events from a newer minor version (<code>LoadError::NewerMinorVersion</code>). Upgrade the server before the agents. The full rules are in the <code>events</code> module docs.</p>
 <h2 id="regenerating-committed-files"><a class="header" href="#regenerating-committed-files">Regenerating committed files</a></h2>
 <p>After changing the event types or the registry:</p>
@@ -7080,18 +7168,22 @@ PALISADE_BLESS=1 cargo test -p palisade-proto --test mappings       # golden map
 <li><code>tests/event_snapshots.rs</code>: the canonical JSON of representative events, byte for byte, plus a readable copy, compared with reviewed <code>insta</code> snapshots in <code>tests/snapshots/events/</code>. A change to field names, order or spellings shows up as a snapshot diff (docs/testing.md#snapshot-tests).</li>
 <li><code>tests/events_schema.rs</code>: the committed schema is current, and the schema and <code>Event::validate</code> reject the same broken events.</li>
 <li><code>tests/events_schema.rs</code> also checks that the schema and <code>Event::validate</code> agree on the 1.1 rules (version labels, the third-party format, and the rules inside the new field sets), and that every field missing from the 1.0 schema has a <code>since</code> version.</li>
-<li><code>pki</code> unit tests: known-answer signatures and key IDs produced by an independent implementation, every lifecycle transition, skew edges to the microsecond, canonical encoding (every truncation, reordering and duplicate is refused), and the acceptance rule: first set root-signed, chained endorsement and key rotation, dual signing, rollback, replay, version fast-forward, wrong or tampered signatures, cross-domain signatures, expired signing keys and future issue times. Property tests check that random valid sets round-trip and that mutated envelopes are refused or still canonical.</li>
+<li><code>pki::issue</code> unit tests (with <code>--features issuance</code>): every chain, cross-signed root and revocation list is checked by the WebPKI verifier the server's TLS stack uses, and every field by <code>palisade-fileid</code>'s X.509 parser: the profile of each certificate kind, extended key usage separation, validity bounds to the second, a revoked issuing CA and a revoked leaf, forged and expired revocation lists (both fail closed), and every refusal.</li>
+<li><code>pki</code> unit tests: known-answer signatures and key IDs produced by an independent implementation, every lifecycle transition, skew edges to the microsecond, canonical encoding (every truncation, reordering and duplicate is refused), and the acceptance rule: first set root-signed, chained endorsement and key rotation, dual signing, rollback, replay, version fast-forward, wrong or tampered signatures, cross-domain signatures, expired signing keys and future issue times. Lifecycle tests time-travel renewal (a 10-minute certificate renewed for 3 hours with failing attempts never leaves a gap), every alert threshold and rotation phase boundary. Property tests check that random valid sets round-trip and that mutated envelopes are refused or still canonical.</li>
 <li><code>policy_bundle</code> unit tests: the RFC 4231 HMAC vector, the record layout, every truncation and bit flip of a sealed copy, one test per row of ADR 0018's failure table, the copy-mismatch and interrupted-activation rules, and property tests: a lower version is never accepted, a tampered copy is never trusted, and random sequences of activations, crashes at every write and tampering never lower the floor, never reach first-install after a policy was accepted, and never lose the active policy without tampering.</li>
+<li><code>policy_bundle::envelope</code> unit tests: known-answer envelopes signed with OpenSSL (an Ed25519 signature by the RFC 8032 test key, which signing reproduces byte for byte, and an ECDSA P-384 signature) over the golden minimal bundle, in <code>tests/fixtures/policy_envelope/</code>; one test per rejection (unknown key, algorithm not accepted, another domain, tampered bundle, other tenant or target, older version, oversized envelope, unsupported schema, newer agent, expired key), each run through <code>select::pending</code> to its event type; strict decoding (every truncation, reordering, repeat and trailing byte is refused); deltas rebuilt and verified as full bundles; and property tests that flipping any single bit makes verification fail.</li>
 <li><code>tests/mappings.rs</code>: golden tests over synthetic, anonymised source records in <code>tests/fixtures/mappings/</code> and, for the third-party formats, <code>tests/fixtures/third_party/</code>. Every mapped source event ID, and every canonical type it can map to, has a fixture. Every result passes the JSON Schema. Every decision passes the ISM-0585 checklist. A separate test covers the #196 acceptance cases: an enforced code-integrity block maps to <code>exec.decision</code>, and a rule-collection script block maps to <code>script.decision</code>. Both carry the file name, hashes, signer, user, host and time.</li>
 </ul>
 <h2 id="fuzzing"><a class="header" href="#fuzzing">Fuzzing</a></h2>
-<p><code>fuzz/</code> is a separate cargo-fuzz workspace. <code>trust_set_decode</code> feeds arbitrary bytes to the trust-set decoders and the acceptance rule. Run it from this directory with <code>cargo +nightly fuzz run trust_set_decode</code>, or from the repository root with <code>cargo xtask fuzz --target trust_set_decode</code>, which also seeds the corpus from <code>tests/trust_set.rs</code> (<code>write_trust_set_fuzz_seeds</code>). CI runs it with every other fuzz target (<a href="#fuzzing-1">docs/testing.md</a>).</p>
+<p><code>fuzz/</code> is a separate cargo-fuzz workspace. <code>trust_set_decode</code> feeds arbitrary bytes to the trust-set decoders and the acceptance rule. <code>policy_envelope_decode</code> feeds them to the policy envelope decoder, <code>envelope::verify</code> and <code>envelope::rebuild</code>; its seeds come from <code>tests/policy_envelope.rs</code> (<code>write_policy_envelope_fuzz_seeds</code>). Run it from this directory with <code>cargo +nightly fuzz run trust_set_decode</code>, or from the repository root with <code>cargo xtask fuzz --target trust_set_decode</code>, which also seeds the corpus from <code>tests/trust_set.rs</code> (<code>write_trust_set_fuzz_seeds</code>). CI runs it with every other fuzz target (<a href="#fuzzing-1">docs/testing.md</a>).</p>
 <h2 id="allowed-dependencies-3"><a class="header" href="#allowed-dependencies-3">Allowed dependencies</a></h2>
-<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>. Third-party: <code>ring</code> for the <code>pki</code> module's signatures and SHA-256, and the <code>policy_bundle</code> record's HMAC-SHA-256. The rules are enforced by <code>cargo xtask check-deps</code>. The crate uses <code>palisade-policy</code>'s strict YAML reader for the registry and the mapping files.</p>
+<p><code>palisade-core</code>, <code>palisade-fileid</code>, <code>palisade-policy</code>. Third-party: <code>ring</code> for the <code>pki</code> module's signatures and SHA-256, and the <code>policy_bundle</code> record's HMAC-SHA-256. With the <code>issuance</code> feature, <code>rcgen</code> and <code>time</code> for X.509 encoding. The rules are enforced by <code>cargo xtask check-deps</code>. The crate uses <code>palisade-policy</code>'s strict YAML reader for the registry and the mapping files, and its bundle header, bundle and delta decoders for the policy envelope.</p>
 <h2 id="platform-support-3"><a class="header" href="#platform-support-3">Platform support</a></h2>
 <p>All platforms.</p>
 <h2 id="feature-flags-3"><a class="header" href="#feature-flags-3">Feature flags</a></h2>
-<p>None yet.</p>
+<ul>
+<li><code>issuance</code> (off by default): X.509 issuance for the internal CA (<code>pki::issue</code>, #224): self-signed and cross-signed roots, issuing CAs, device, relay and server certificates, and revocation lists. It adds <code>rcgen</code> (encoding only, without its cryptography back end, so every signature comes from a <code>Signer</code>) and <code>time</code>. The server and the offline ceremony tool enable it. The agent does not, so it never links the issuance code.</li>
+</ul>
 <h2 id="stability-3"><a class="header" href="#stability-3">Stability</a></h2>
 <p>Unstable and not published. Anything may change until the first event schema version is published.</p>
 <hr>
@@ -7099,7 +7191,7 @@ PALISADE_BLESS=1 cargo test -p palisade-proto --test mappings       # golden map
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="palisade-agent-1"><a class="header" href="#palisade-agent-1">palisade-agent</a></h1>
 <p>The Windows endpoint agent: a Windows service that collects execution events, caches policy locally and drives enforcement.</p>
-<p><strong>Status:</strong> service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place (<a href="https://github.com/jusso-dev/palisade/issues/56">#56</a>). The only subsystem so far is <code>config</code>. Policy cache (#61), server comms (#62), ETW (#59), the installer (#57) and tamper protection (#220) come later. Parent epic: <a href="https://github.com/jusso-dev/palisade/issues/4">#4</a>.</p>
+<p><strong>Status:</strong> service host only. The process, component model, supervisor, lifecycle states and configuration loading are in place (<a href="https://github.com/jusso-dev/palisade/issues/56">#56</a>). The subsystems so far are <code>config</code>, <code>clock</code> and, on Windows, <code>process-monitor</code> (#59, see below). Policy cache (#61), server comms (#62), the installer (#57) and tamper protection (#220) come later. Parent epic: <a href="https://github.com/jusso-dev/palisade/issues/4">#4</a>.</p>
 <h2 id="running"><a class="header" href="#running">Running</a></h2>
 <pre><code class="language-sh">palisade-agent --console [--config &lt;path&gt;]   # foreground, any OS, stop with Ctrl-C
 palisade-agent --service [--config &lt;path&gt;]   # Windows only, started by the service control manager
@@ -7117,20 +7209,48 @@ max_blocking_threads = 8              # 1..=256; file I/O and hashing pool
 
 [log]
 level = "info"                        # "error" | "warn" | "info" | "debug" | "trace"
+files = 10                            # 1..=100; log files kept, the current one included
+file_size_mib = 10                    # 1..=1024; size limit of one log file
 </code></pre>
+<p>On Windows the agent logs to standard error and to <code>%ProgramData%\Palisade\logs\agent.log</code>, which rotates by size to <code>agent.log.1</code> and onwards; with the defaults the log takes at most 100 MiB. The installer creates the directory with its ACL. If it is missing, the agent logs to standard error only. The level can change while the agent runs (on <code>PARAMCHANGE</code>); a change of rotation applies at the next start.</p>
 <p><code>fail_mode</code> defaults to <code>fail_open</code> for M1. That is a security trade-off: while the agent's decision engine is unavailable, agent-side decisions allow, and the kernel-enforced OS-native policy stays the baseline (<a href="#0002-enforcement-strategy-os-native-policy-first-optional-own-driver">ADR 0002</a>). Enforcement components (#113) consume the setting.</p>
-<p>The policy-delivered and local-override layers come with the policy cache (#61).</p>
+<p>The effective configuration has four layers, lowest priority first: built-in defaults, this file, the agent settings delivered with policy (#61), and local overrides in <code>%ProgramData%\Palisade\overrides.toml</code>. <code>settings::resolve</code> merges them and records where each value came from; <code>Effective::render</code> is the text <code>palctl config show</code> prints, with secret settings redacted. Overrides apply only while the policy sets <code>allow_local_overrides = true</code> and only if the file and every folder above it can be written by SYSTEM, Administrators and <code>TrustedInstaller</code> alone; otherwise they are ignored and reported. A policy layer or overrides file that would make the configuration invalid is dropped and reported, never fatal.</p>
+<p>Advanced settings (<code>agent.advanced.*</code>, delivered with policy) are checked against <code>settings::ADVANCED_SCHEMA</code> (name, type, range, default, whether secret). Unknown keys are logged and ignored; a wrong type or out-of-range value is logged and replaced by the default. The policy cache (#61) supplies the policy layer when it lands; until then the agent runs on the first two layers.</p>
 <h2 id="design"><a class="header" href="#design">Design</a></h2>
 <ul>
 <li><code>subsystem</code>: the <code>Subsystem</code> trait (<code>name</code>, <code>criticality</code>, <code>dependencies</code>, <code>run</code>, <code>health</code>, <code>start_timeout</code>, <code>stop_timeout</code>). A run calls <code>set_ready</code> once initialised, works until <code>stopped()</code> resolves, and returns by the given deadline.</li>
 <li><code>supervisor</code>: starts subsystems in dependency order, which must be acyclic. A subsystem's dependents wait until it is ready. A run that fails is restarted with exponential backoff from 1 s to 5 min. Failure means an error, an early exit, a panic or a start timeout. A panic is contained in that subsystem's task. Three panics within 10 minutes mark the subsystem <code>Failed</code>. Shutdown runs in reverse order within a budget, and subsystems that miss their deadline are aborted.</li>
 <li><code>lifecycle</code>: the agent states (<code>Starting</code>, <code>Running</code>, <code>Degraded</code>, <code>SafeMode</code>, <code>Updating</code>, <code>Stopping</code>, <code>Stopped</code>, <code>FailSafe</code>) and the legal transitions between them. A permanently failed critical subsystem forces <code>FailSafe</code>, and only stopping leaves it.</li>
 <li><code>host</code>: the tokio runtime (ADR 0009), logging to standard error with a level that can change at run time, the panic hook, the <code>config</code> subsystem and the console run loop.</li>
+<li><code>clock</code>: the <code>clock</code> subsystem. It compares the wall clock with the monotonic clock every 30 s and on <code>TIMECHANGE</code>, and reports a disagreement of more than 5 minutes as a clock jump (ISM-0988). A suspend and resume starts a new baseline instead.</li>
+<li><code>boot</code>: safe-mode detection, from <code>HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Option</code>. In a safe-mode boot the agent reports <code>SafeMode</code> instead of <code>Running</code> or <code>Degraded</code>, and enforcement applies <code>safe_mode_behaviour</code>. A registry read that fails counts as a normal boot, since safe mode can only relax enforcement.</li>
+<li><code>inventory</code>: the file inventory model (#60). <code>InvEntry</code> records a file by volume serial and file ID, with its path and last 10 paths, an identity summary, first-seen, last-modified and last-executed times, how it was found, and its state. <code>InventoryStore</code> is the storage trait ADR 0007 asks for until its store spike, with <code>MemoryStore</code> behind it. <code>track</code> gathers changes per file for 2 s and until the file is closed (at most 60 s), applies them (new files, content changes, renames with history, deletes kept for the retention period, security changes) and says what each needs next. A change marks the entry stale, or its location unassessed, as soon as it is seen, so an old identity is never used while a file is rewritten. A location not assessed counts as user-writable. <code>changes_from_journal</code> maps change-journal records to changes. <code>engine</code> runs one volume: the initial scan in batches, keeping candidates (phase 1 drops content that cannot run code), saving a checkpoint every 10,000 files or 30 s so a restart resumes, and asking a <code>Throttle</code> before each batch (the #65 budgets plug in there); then journal polling from the saved cursor. A replaced or wrapped journal, or a lost cursor, reconciles the volume: a full rescan that marks files no longer listed as deleted and identifies known files again. The <code>inventory</code> subsystem (non-critical, after <code>config</code>) runs it on a blocking thread over every fixed NTFS or ReFS volume on Windows, reading each file by its ID and keeping an identity only if it describes that ID (T-agent-13). Its health is <code>Degraded("Baseline: scanning …")</code> until every volume's first scan is complete. Volumes without a journal are rescanned daily. Off Windows it has no volumes.</li>
 <li><code>control</code>: OS notifications as <code>HostEvent</code>s (session, power, parameter and time changes), which every subsystem can follow through <code>SubsystemContext::host_events</code>, and the <code>TamperGuard</code> trait that decides whether <code>STOP</code> is offered (#220 implements it; until then <code>STOP</code> is always allowed).</li>
 <li><code>service</code> (Windows): the service control manager integration. It handles <code>STOP</code> (20 s budget, offered only while the tamper guard allows it), <code>PRESHUTDOWN</code>/<code>SHUTDOWN</code> (10 s budget), and turns <code>POWEREVENT</code>, <code>SESSIONCHANGE</code>, <code>PARAMCHANGE</code> and <code>TIMECHANGE</code> into host events. <code>PARAMCHANGE</code> makes the <code>config</code> subsystem read the configuration again; a reload that fails keeps the current configuration.</li>
 </ul>
 <h3 id="adding-a-subsystem"><a class="header" href="#adding-a-subsystem">Adding a subsystem</a></h3>
 <p>Implement <code>Subsystem</code>, give it a stable <code>name</code>, choose its <code>criticality</code> and list the names it depends on in <code>dependencies</code> (usually at least <code>config</code>). Construct it in <code>host::builtin_subsystems</code> with what it needs, such as a <code>ConfigSubsystem::subscribe</code> receiver, after the subsystems it depends on. In <code>run</code>, subscribe to <code>ctx.host_events()</code> if it needs OS notifications, call <code>ctx.set_ready()</code> once initialised, and return by the deadline <code>ctx.stopped()</code> gives.</p>
+<h2 id="process-monitor-59"><a class="header" href="#process-monitor-59">Process monitor (#59)</a></h2>
+<p><code>telemetry</code> watches process starts and stops and image loads (executables, libraries and drivers) through a real-time ETW session, <code>Palisade-Agent-Trace</code>, with the kernel process provider bound by GUID. Console and service runs register it (<code>host::agent_supervisor</code>); <code>host::supervisor</code>, which tests use, does not, so tests never touch the machine-wide session.</p>
+<ul>
+<li><code>telemetry::kernel</code> decodes the provider's records: process start versions 0 to 4, stop 0 to 2, image load and unload 0. It is portable and fuzzed (<code>crates/palisade-agent/fuzz</code>, target <code>kernel_records</code>). An unknown version, a short record, trailing bytes, a string without its terminator or text that is not valid UTF-16 is an error, never a guess.</li>
+<li><code>telemetry::tree</code> is the process tree, keyed by process ID <strong>and</strong> creation time. A parent is linked only if its sequence number matches, or if it has the recorded parent ID, was created no later than the child and was still running then. A reused process ID is never read as the parent. Exited processes are kept for 10 minutes so late events can be correlated, and the tree holds at most 200,000 processes. When it is full, the process that exited first is evicted; a new process that still finds no room is counted, not recorded.</li>
+<li><code>telemetry::cmdline</code> captures command lines (<code>capture_cmdline</code>, on by default). It redacts them with the decision-trace redactor, with default patterns for <code>password=</code>, <code>-p &lt;x&gt;</code> and similar that policy can add to but not remove, and then cuts them to 32,767 characters with a <code>truncated</code> flag.</li>
+<li><code>telemetry::monitor</code> is the state machine. It runs a startup snapshot (<code>observed_start = false</code>), finds parents, reads command lines and tokens, and emits <code>ProcessStart</code>, <code>ProcessStop</code>, <code>ImageLoad</code> (drivers always; libraries per <code>dll_events</code>, where <code>untrusted_only</code> emits every library until identity results arrive) and an advisory <code>ParentSpoof</code> when the creator is not the recorded parent. A <code>PostStartAction</code> hook is off by default.</li>
+<li><code>telemetry::output</code> is the seam to the event pipeline (#63): a non-blocking <code>TelemetrySink</code>, a bounded <code>ChannelSink</code>, and <code>process_fields</code>, which builds the canonical <code>process</code> field set with its parent and grandparent. Until #63 lands, the host wires a <code>DiscardSink</code>.</li>
+<li>On Windows, the ETW callback (<code>ffi::etw</code>) only copies records into a bounded queue (50,000). A worker thread decodes them. The subsystem's health reports events the OS lost, records dropped from the queue or not decoded, and events the sink refused, so no loss is silent. A stale session left by a crash is stopped and started again.</li>
+</ul>
+<p>Still to come, tracked on #59: identity resolution and audit evaluation of each image (they need the hash cache and policy cache, #61), image-hijack detection, masquerade signals (#55), directory group resolution, the file provider, the NT kernel logger fallback, and the Windows integration and stress tests.</p>
+<h2 id="event-log-ingestion-58"><a class="header" href="#event-log-ingestion-58">Event-log ingestion (#58)</a></h2>
+<p><code>eventlog</code> turns the OS code integrity, legacy rule-collection and PowerShell logs into canonical events. Every step that reads record text is portable and fuzzed (target <code>eventlog_records</code>):</p>
+<ul>
+<li><code>eventlog::decode</code> reads rendered event XML (<code>EvtRenderEventXml</code>) with the bounded XML reader from <code>palisade_fileid::package::xml</code>, which refuses DTDs, undefined entities and oversized input. It produces a <code>palisade_proto::mapping::Record</code>, with field names normalised to the mapping files' form (<code>SHA256 Flat Hash</code> becomes <code>SHA256FlatHash</code>). A record without a parseable event ID or time, or with a repeated field, is an error.</li>
+<li><code>eventlog::correlate</code> holds each 3076/3077 (and each script host's 8028/8029) until its <code>TotalSignatureCount</code> signature records (3089, 8038) with the same activity ID arrive, or for 2 s. It then releases the group, marked incomplete if signatures are missing. Before correlation, a token bucket (2,000 records/s) bounds audit storms. Every drop is counted: rate-limited records, orphan and excess signatures, and groups evicted early.</li>
+<li><code>eventlog::ingest</code> maps groups through the shipped mapping files and adds the process key, parent, grandparent and command line from the #59 process tree when the tree knew that process at the record's time. It keeps every value the OS log supplied, and emits into an <code>EventSink</code>, with an <code>EnvelopeSource</code> standing in for the event pipeline (#63).</li>
+<li><code>eventlog::inventory</code> keeps the latest 3099 activation of each OS-native policy (ID, name, GUID, hash, option bits with names) for health (#67).</li>
+<li><code>eventlog::CHANNEL_SUFFIXES</code> lists the channels by name suffix, marking which ones are optional (MSI and Script is absent on Server Core).</li>
+</ul>
+<p>Still to come, tracked on #58: the <code>EvtSubscribe</code> subscription with bookmarks persisted in the agent local store (ADR 0007), the first-start backfill, channel name resolution, the verbose channel and channel-size management, and the periodic policy store query.</p>
 <h2 id="platform-layer"><a class="header" href="#platform-layer">Platform layer</a></h2>
 <p>The agent reads the OS only through the <code>palisade_core::platform</code> traits (#29), so its logic can be
 tested on any OS against the mocks in <code>palisade_core::test_util</code>. <code>palisade_agent::platform</code> holds
@@ -7320,6 +7440,9 @@ as warnings and ignored, so variables meant for other Palisade components do not
 <tr><td><code>database.auto_migrate</code></td><td>on if <code>[database.migration]</code> is set</td><td>Apply pending migrations at start</td></tr>
 <tr><td><code>database.migration.user</code></td><td>none</td><td>The <strong>migration</strong> role, which owns the schema</td></tr>
 <tr><td><code>database.migration.password_file</code></td><td>none</td><td>A secret file holding its password</td></tr>
+<tr><td><code>clock.ntp_servers</code></td><td>none</td><td>NTP servers for the clock health check, as <code>host</code>, <code>host:port</code>, <code>IPv4[:port]</code> or <code>[IPv6][:port]</code>, at most 8. In an environment variable, comma-separated. Empty: the clock is not checked and <code>serve</code> warns</td></tr>
+<tr><td><code>clock.max_offset_ms</code></td><td><code>1000</code></td><td>Largest offset from NTP before health reports <code>clock_offset</code>, 1 to 3600000</td></tr>
+<tr><td><code>clock.check_interval_secs</code></td><td><code>64</code></td><td>16 to 86400</td></tr>
 </tbody>
 </table>
 </div>
@@ -7431,10 +7554,18 @@ admin and agent listeners the body carries only the overall status. On the metri
 <tr><td><code>database_down</code></td><td><code>[database]</code> is configured and the runtime role cannot reach it (also before the first check)</td><td>503</td></tr>
 <tr><td><code>database_schema:&lt;verdict&gt;</code></td><td>The schema is <code>behind</code> (pending migrations), <code>newer</code> than this binary, or <code>damaged</code></td><td>503</td></tr>
 <tr><td><code>database_role_unsafe</code></td><td>The runtime role, or any role it is a member of, is a superuser, has <code>BYPASSRLS</code>, or owns or can create objects in the schema; or it is not in <code>palisade_runtime</code></td><td>503</td></tr>
+<tr><td><code>clock_offset</code></td><td>The system clock is further from NTP than <code>clock.max_offset_ms</code> (1 s by default)</td><td>200, status <code>degraded</code></td></tr>
+<tr><td><code>clock_unknown</code></td><td><code>clock.ntp_servers</code> is set but no server gave a valid reply (also before the first check)</td><td>200, status <code>degraded</code></td></tr>
 </tbody>
 </table>
 </div>
-<p>The database is checked every 5 seconds. Job-runner readiness joins this list with #126.</p>
+<p>The database is checked every 5 seconds. The clock is checked every <code>clock.check_interval_secs</code>
+over SNTP: the servers are tried in order and the first valid reply decides (#224, ISM-0988).
+Replies are checked strictly (<code>palisade_proto::sntp</code>; fuzzed as <code>sntp_reply</code>), and a change
+between synced, skewed and unknown is logged once. The check only reports; keeping the clock
+right is the operating system's time service's job. A bad clock degrades the status but leaves
+the server ready, because failing readiness would strand every agent for a problem a restart
+cannot fix. Job-runner readiness joins this list with #126.</p>
 <h2 id="database"><a class="header" href="#database">Database</a></h2>
 <p>Postgres 16 or later, through <code>sqlx</code> (<a href="#0006-server-database-and-tenant-isolation">ADR 0006</a>).
 Without a <code>[database]</code> section the server runs without one, as before, and logs a warning.</p>
@@ -7531,7 +7662,14 @@ mandatory over it.</p>
 <code>fields</code> (including <code>message</code>), <code>span</code> (the current span) and <code>spans</code> (every enclosing span, so
 the request span's fields stay on the line when a handler opens a child span). The level comes
 from <code>log.level</code>. No secret value is passed to the logger: the configuration holds only secret
-paths, and the secret reader's errors never contain file contents. Tenant and principal fields
+paths, and the secret reader's errors never contain file contents. Secrets read from files are
+held in <code>secret::Secret</code>, which is wiped on drop and prints as <code>[REDACTED]</code> in <code>Debug</code> and
+<code>Display</code>. As a second line of defence, every log line is redacted on its way out
+(<code>redact</code>, #227): any field, in the event or in any span, whose name has a segment such as
+<code>password</code>, <code>secret</code>, <code>token</code>, <code>key</code>, <code>authorization</code>, <code>cookie</code> or <code>code</code> is replaced by
+<code>[REDACTED]</code> (names ending in <code>file</code> or <code>path</code>, such as <code>key_file</code>, are kept, since they hold
+paths), and admin API tokens (<code>pal_&lt;env&gt;_&lt;id&gt;_</code> keeps its prefix), <code>Bearer</code> and <code>Basic</code>
+credentials and PEM private key bodies are masked wherever they appear. Tenant and principal fields
 join the request span with the API work.</p>
 <h2 id="shutdown"><a class="header" href="#shutdown">Shutdown</a></h2>
 <p>On SIGTERM or SIGINT (Ctrl-C), or on Windows Ctrl-C, Ctrl-Break and the console close, logoff
@@ -7545,7 +7683,7 @@ either way. A second signal during the drain exits <code>1</code> immediately.</
 <code>create-admin</code>, <code>backup</code> and <code>restore</code> subcommands (also
 <a href="https://github.com/jusso-dev/palisade/issues/138">#138</a>); <code>/version</code> with git SHA and schema
 version; single-port mode; compression, CORS, rate-limit, auth and tenant layers;
-the metrics exposition and OTLP; runtime log-level changes; clock-skew health; the job runner
+the metrics exposition and OTLP; runtime log-level changes; the job runner
 and scheduler; relay role. Elsewhere: the rest of the schema, secrets at rest, soft delete, retention and
 partitioning (<a href="https://github.com/jusso-dev/palisade/issues/127">#127</a> and the issues that own
 each table), the audit log (<a href="https://github.com/jusso-dev/palisade/issues/132">#132</a>), enrolment and device certificate
@@ -10672,6 +10810,8 @@ steps in <a href="#repository-settings">docs/repo-settings.md</a> for making the
 <ul>
 <li><a href="#palisade-threat-model-and-security-architecture">Threat model</a>: the STRIDE threat model, data-flow diagrams,
 bypass attack trees, mitigations mapped to issues, and the residual-risk register.</li>
+<li><a href="#key-compromise-and-emergency-re-key-runbook">Key compromise runbook</a>: what to do when one of
+Palisade's keys is, or may be, compromised, key by key.</li>
 <li><a href="#hardening-guide">Hardening guide</a>: how to run a Palisade lab safely today.</li>
 <li><a href="#security-policy">Reporting a vulnerability</a>: the private reporting process and what to
 expect.</li>
@@ -12560,9 +12700,9 @@ enforcing (<a href="#0012-fail-open-versus-fail-closed-defaults">ADR 0012</a>); 
 <tr><td>T-cli-06</td><td>Privileged operation, allowlist-based config export, redaction pass, encrypted archive.</td><td>#227</td><td>RT-cli-03</td></tr>
 <tr><td>T-cli-07</td><td>Lockout is time-limited and an admin can unlock remotely; unlock tokens still work.</td><td>#222</td><td>BYP-tamper-16</td></tr>
 <tr><td>T-cli-08</td><td>The agent writes only to the protected data directory. Reading from or writing to a path the caller chose is done by the CLI in the caller's own context, which keeps the pipe at identification-level impersonation (T-tray-02).</td><td>#220</td><td>RT-agent-04</td></tr>
-<tr><td>T-cache-01</td><td>Signature from an active trust-set key is verified on a private copy before any parsing; tenant and target must match this device (ADR 0007, #225).</td><td>#225</td><td>BYP-policy-01 (tampered bundle)</td></tr>
+<tr><td>T-cache-01</td><td>Signature from an active trust-set key is verified on a private copy before any parsing; tenant and target must match this device (ADR 0007, #225). The envelope and its verification are <code>palisade_proto::policy_bundle::envelope</code> (#325): only the header is read before a signature verifies, and the body is decoded only after; a delta is applied and the full result's signature verified, never the delta's alone. Reading into a private copy is #61.</td><td>#225</td><td>TEST: <code>palisade-proto</code> <code>policy_bundle::envelope::tests::rejects_a_tampered_bundle</code>, <code>policy_bundle::envelope::tests::rejects_another_tenant_or_target</code>, <code>policy_bundle::envelope::tests::rejects_an_unknown_kid</code>, <code>policy_bundle::envelope::tests::rejects_a_signature_from_another_domain</code>, <code>policy_bundle::envelope::tests::any_single_bit_flip_fails_verification</code>, <code>policy_bundle::envelope::tests::an_unsigned_or_forged_delta_is_never_applied</code>, <code>policy_bundle::envelope::tests::the_signature_is_checked_before_the_target</code>; fuzz: <code>policy_envelope_decode</code>, <code>fuzz_bundle_delta</code>; BYP-policy-01 (tampered bundle)</td></tr>
 <tr><td>T-cache-02</td><td>Signature check at load and every 15 minutes, N-1 fallback with a critical event, emergency policy if both fail, SYSTEM-only directory, driver file protection.</td><td>#225, #220</td><td>BYP-policy-01, BYP-tamper-04 (cache delete/modify)</td></tr>
-<tr><td>T-cache-03</td><td>Anti-rollback record of the highest accepted version, kept in protected storage and mirrored in the registry; lower versions rejected with <code>policy.rollback_rejected</code>; the N-1 fallback raises a critical event and a rapid check-in; deployed native policy versions are compared with the expected one. The decision logic is <code>palisade_proto::policy_bundle</code>; storing the record is #61 and #220.</td><td>#225</td><td>TEST: <code>palisade-proto</code> <code>policy_bundle::tests::a_lower_version_is_never_accepted</code>, <code>policy_bundle::tests::adr_0012_previous_must_be_the_recorded_fallback</code>, <code>policy_bundle::tests::no_sequence_of_crashes_or_tampering_breaks_the_invariants</code>; BYP-policy-03 (older version), BYP-policy-02, BYP-policy-06</td></tr>
+<tr><td>T-cache-03</td><td>Anti-rollback record of the highest accepted version, kept in protected storage and mirrored in the registry; lower versions rejected with <code>policy.rollback_rejected</code>; the N-1 fallback raises a critical event and a rapid check-in; deployed native policy versions are compared with the expected one. The decision logic is <code>palisade_proto::policy_bundle</code>; storing the record is #61 and #220.</td><td>#225</td><td>TEST: <code>palisade-proto</code> <code>policy_bundle::envelope::tests::rejects_an_older_version</code>, <code>policy_bundle::tests::a_lower_version_is_never_accepted</code>, <code>policy_bundle::tests::adr_0012_previous_must_be_the_recorded_fallback</code>, <code>policy_bundle::tests::no_sequence_of_crashes_or_tampering_breaks_the_invariants</code>; BYP-policy-03 (older version), BYP-policy-02, BYP-policy-06</td></tr>
 <tr><td>T-cache-04</td><td>The agent reads the whole file into private memory, verifies, then decodes that copy; no memory mapping (ADR 0007).</td><td>#61</td><td>BYP-toctou-02</td></tr>
 <tr><td>T-cache-05</td><td>"A policy was ever accepted" checks the record, both cache files and the registry mirror; a mismatch raises <code>tamper.policy.rollback_suspected</code> (ADR 0012). Each record copy is sealed with HMAC-SHA-256 and bound to its target.</td><td>#225</td><td>TEST: <code>palisade-proto</code> <code>policy_bundle::tests::a_tampered_record_copy_is_never_trusted</code>, <code>policy_bundle::tests::a_mismatch_between_copies_raises_the_tamper_event</code>, <code>policy_bundle::tests::adr_0012_both_fail_loads_the_emergency_policy</code>; BYP-tamper-04</td></tr>
 <tr><td>T-cache-06</td><td>Each record is authenticated with HMAC-SHA-256 over volume ID, file ID, change stamp and hashes; a failed record is discarded and the file re-hashed (ADR 0007).</td><td>#46</td><td>TEST: <code>palisade-fileid</code> <code>hash_cache::every_tampered_byte_is_detected</code>, <code>hash_cache::a_record_cannot_be_moved_to_another_file</code>, <code>hash_cache::arbitrary_records_are_rejected</code>, <code>hash_cache::a_hit_needs_every_key_component_to_match</code>; BYP-fs-11 (modify after allow)</td></tr>
@@ -12627,7 +12767,7 @@ enforcing (<a href="#0012-fail-open-versus-fail-closed-defaults">ADR 0012</a>); 
 <tr><td>T-ca-04</td><td>Every key event, issuance and ceremony is in the admin audit log.</td><td>#224</td><td>TEST-audit-chain (#229)</td></tr>
 <tr><td>T-ca-05</td><td>Every server listener prefers TLS 1.3, which encrypts client certificates; <code>tls.min_version = "1.3"</code> refuses TLS 1.2, and the <code>asd-strict</code> profile narrows suites and groups (#126).</td><td>#223</td><td>TEST: <code>palisade-server</code> <code>tls12_aead_is_accepted_and_tls13_preferred</code>, <code>min_version_13_rejects_tls12</code>, <code>strict_profile_rejects_aes128_x25519_and_p256</code>; TEST-tls-profile (#223)</td></tr>
 <tr><td>T-ca-06</td><td>Renewal at two thirds of lifetime with alerts, re-enrolment grace period.</td><td>#224, #223</td><td>TEST-renewal (#224)</td></tr>
-<tr><td>T-ca-07</td><td>Device certificates carry clientAuth only; relays have their own profile.</td><td>#223</td><td>TEST-eku (#223)</td></tr>
+<tr><td>T-ca-07</td><td>Device certificates carry clientAuth only; relays have their own profile.</td><td>#223</td><td>TEST: <code>palisade-proto</code> <code>pki::issue::tests::extended_key_usage_keeps_devices_out_of_server_roles</code>, <code>pki::issue::tests::leaves_carry_their_profile</code> (issuance side); TEST-eku (#223, the mTLS handshake)</td></tr>
 <tr><td>T-ca-08</td><td>One canonical binary encoding with bounded counts and lengths, checked before any signature; <code>trust_version</code> must be strictly greater than the current one and at most 1,000,000 greater; <code>issued_at</code> may not go backwards or be in the future beyond the skew tolerance. The agent does not use it yet (#220, #223).</td><td>#224, #220</td><td>TEST: <code>palisade-proto</code> <code>pki::tests::rollback_and_replay_are_rejected</code>, <code>version_fast_forward_is_capped</code>, <code>mutated_envelopes_are_canonical_or_rejected</code>; fuzz: <code>trust_set_decode</code></td></tr>
 <tr><td>T-ingest-01</td><td>The device ID comes from the authenticated certificate, never from the payload.</td><td>#126, #223</td><td>TEST-ingest-identity (#126)</td></tr>
 <tr><td>T-ingest-02</td><td>TLS syslog with client allowlists; each source has a trust level that is shown with its events.</td><td>#207</td><td>TEST-syslog-tls (#207)</td></tr>
@@ -12706,7 +12846,7 @@ least one reviewer other than the author. The review is recorded in the <a href=
 <tr><td>R-08</td><td>A compromised server, a malicious administrator with wide scope, or a database-level attacker can get a permissive policy signed and pushed, unless dual control is on.</td><td>T-console-09, T-db-03, T-signer-01, AT-16</td><td>The server must be able to sign policy to do its job.</td><td>Four-eyes approval, signing audit, agents report bundle kid and hash, staged rollout.</td><td>#142, #229</td></tr>
 <tr><td>R-09</td><td>Two bounded weak points in policy handling: the first-install audit window before any bundle arrives, and the one-step N-1 fallback when the active bundle is corrupt.</td><td>T-cache-03, T-cache-05, AT-06.5, AT-07.3</td><td>Availability: deployment and disk corruption must not lock machines (<a href="#0012-fail-open-versus-fail-closed-defaults">ADR 0012</a>).</td><td>Built-in blocklists during the first-install window; <code>policy.lkg_loaded</code> critical event and rapid check-in.</td><td>#225</td></tr>
 <tr><td>R-10</td><td>Someone who can change the clock can redeem a genuine, unredeemed override code or unlock token outside its window; with opt-in offline scheduling, they can also stretch scheduled grants until the next check-in.</td><td>T-agent-15, T-cache-07, AT-08.4</td><td>Offline override must work without a server (<a href="#0012-fail-open-versus-fail-closed-defaults">ADR 0012</a> "Accepted risk").</td><td>Single use, floor check, skew latch, <code>tamper.clock.skew</code>, offline use visible in uploaded events.</td><td>#220, #222</td></tr>
-<tr><td>R-11</td><td>Compromise of the offline root CA key or the update metadata root has no clean recovery: devices must be re-enrolled or re-provisioned.</td><td>T-ca-03, T-update-01</td><td>Every PKI has a root of trust.</td><td>Ceremonies are audited; the runbook says so plainly (#224).</td><td>#224, #226</td></tr>
+<tr><td>R-11</td><td>Compromise of the offline root CA key or the update metadata root has no clean recovery: devices must be re-enrolled or re-provisioned.</td><td>T-ca-03, T-update-01</td><td>Every PKI has a root of trust.</td><td>Ceremonies are audited; the <a href="#key-compromise-and-emergency-re-key-runbook">key compromise runbook</a> says so plainly (#224).</td><td>#224, #226</td></tr>
 <tr><td>R-12</td><td>On devices without a TPM, the device key is protected by software only, and SYSTEM can copy it.</td><td>T-api-01, AT-15.3</td><td>Not every device has a TPM.</td><td>Keys report their protection type; <code>enrol.require_hardware_key</code>; clone detection.</td><td>#223</td></tr>
 <tr><td>R-13</td><td>A compromised identity provider or directory is trusted for login, provisioning and group membership.</td><td>T-integ-03, T-integ-10</td><td>Delegating identity is the point of SSO.</td><td>Audit of membership-driven changes; alerts on sensitive groups and role grants.</td><td>#204</td></tr>
 <tr><td>R-14</td><td>The project has one maintainer. Required code-owner review cannot be enforced, and a compromised maintainer account can merge and release.</td><td>T-ci-01</td><td>One-person project (<a href="#repository-settings">docs/repo-settings.md</a>).</td><td>Provenance and <code>pal verify</code>; TUF root threshold keys held separately.</td><td>#226</td></tr>
@@ -12730,7 +12870,8 @@ mitigated by Palisade.</li>
 <li><strong>Hypervisor-enforced code integrity</strong> is recommended where hardware supports it. It reduces
 R-02 but is not required.</li>
 <li><strong>Time:</strong> endpoints and the server use a reliable time source. The server keeps its offset
-under 1 s (#224).</li>
+under 1 s (#224); its clock health check (<code>clock.ntp_servers</code>) reports <code>clock_offset</code> in
+readiness when it is not.</li>
 <li><strong>TLS inspection</strong> is bypassed for the agent endpoints. Palisade never disables verification to
 work with an inspecting proxy (<a href="#0005-agent-server-protocol">ADR 0005</a>).</li>
 <li><strong>The server is run by trusted operators</strong> on a hardened host or container (#229), with the
@@ -12800,6 +12941,320 @@ needs an actor this model says Palisade does not resist.</p>
 </div>
 <hr>
 <p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/security/threat-model.md"><code>docs/security/threat-model.md</code></a> on GitHub.</small></p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="key-compromise-and-emergency-re-key-runbook"><a class="header" href="#key-compromise-and-emergency-re-key-runbook">Key compromise and emergency re-key runbook</a></h1>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th></th><th></th></tr>
+</thead>
+<tbody>
+<tr><td>Document version</td><td>0.1.0</td></tr>
+<tr><td>Last reviewed</td><td>2026-11-28</td></tr>
+<tr><td>Status</td><td>Draft. Not yet rehearsed: the lab rehearsal and its notes are still to come (#224).</td></tr>
+<tr><td>Tracking issue</td><td><a href="https://github.com/jusso-dev/palisade/issues/224">#224</a>, under epic <a href="https://github.com/jusso-dev/palisade/issues/18">#18</a></td></tr>
+</tbody>
+</table>
+</div>
+<p>Palisade is an educational, personal-development project (see the <a href="#palisade">README</a>).
+This runbook says what to do when one of Palisade's own keys is, or may be, compromised. It
+covers every key in the inventory of #224, plus device keys. It is written for the operator of
+a Palisade server and the holder of the offline root.</p>
+<p>The PKI building blocks exist in <code>palisade_proto::pki</code>: the key inventory and lifecycle, the
+signed trust set and the agent's acceptance rule, the <code>Signer</code> interface, renewal and rotation
+schedules, and certificate and revocation-list issuance. The tools that drive them do not exist
+yet: the <code>pal pki</code> ceremony commands and <code>pal pki emergency-rotate</code> (#15), the admin audit log
+(#132), the agent's use of the trust set (#220, #223), policy bundles (#225), update metadata
+(#226) and unlock tokens (#222). Each step below says which issue provides it. A step whose tool
+does not exist yet cannot be carried out today; that is stated, not hidden.</p>
+<h2 id="contents-1"><a class="header" href="#contents-1">Contents</a></h2>
+<ol>
+<li><a href="#principles">Principles</a></li>
+<li><a href="#first-hour-any-suspected-compromise">First hour: any suspected compromise</a></li>
+<li><a href="#detection-signals">Detection signals</a></li>
+<li><a href="#per-key-procedures">Per-key procedures</a></li>
+<li><a href="#emergency-rotation-of-everything-except-the-root">Emergency rotation of everything except the root</a></li>
+<li><a href="#what-agents-do">What agents do</a></li>
+<li><a href="#communication-template">Communication template</a></li>
+<li><a href="#after-the-incident">After the incident</a></li>
+<li><a href="#rehearsal">Rehearsal</a></li>
+</ol>
+<h2 id="principles"><a class="header" href="#principles">Principles</a></h2>
+<ul>
+<li><strong>Suspected is compromised.</strong> Treat a key as compromised when its exposure cannot be ruled
+out. Rotating a good key costs a rotation; trusting a stolen one costs the fleet.</li>
+<li><strong><code>compromised</code> is final.</strong> In the key inventory, <code>compromised</code> has no way out
+(<code>KeyStatus::can_become</code>). A compromised key is never reactivated, even if the suspicion turns
+out to be wrong. Generate a new key instead.</li>
+<li><strong>Contain by removal.</strong> A trust set lists only <code>active</code> and <code>retiring</code> keys. A compromised key
+is revoked by publishing a trust set that leaves it out. Agents stop trusting it when they
+accept that set.</li>
+<li><strong>Keys are separate by purpose.</strong> No key signs for two purposes (ADR 0008, ADR 0017), and every
+Palisade signature carries a domain prefix. A stolen key therefore reaches one purpose only.
+Use this to scope the response: rotate the key that leaked, not everything.</li>
+<li><strong>The root has no clean recovery.</strong> If the offline root is compromised, every device must be
+re-enrolled with a new pin. There is no other way (R-11 in the
+<a href="#palisade-threat-model-and-security-architecture">threat model</a>).</li>
+<li><strong>Record everything.</strong> Every key event, signing ceremony and trust-set publication goes in the
+admin audit log with the actor (#132). Until #132 exists, keep a written incident log with
+times, actors and the key IDs (<code>kid</code>) involved.</li>
+</ul>
+<h2 id="first-hour-any-suspected-compromise"><a class="header" href="#first-hour-any-suspected-compromise">First hour: any suspected compromise</a></h2>
+<ol>
+<li><strong>Open an incident</strong> and start the incident log. Name one incident lead.</li>
+<li><strong>Identify the key</strong> by its <code>kid</code> (32 hex digits: the first 16 bytes of the SHA-256 of its
+<code>SubjectPublicKeyInfo</code>) and its purpose. If you do not know which key leaked, assume every key
+held where the leak happened: for example, a server host compromise means <code>issuing-ca</code>,
+<code>server-tls</code>, <code>trust-set</code>, <code>policy-signing</code>, <code>unlock-token</code>, <code>escrow</code> and <code>audit-chain</code> if they
+are file keys on that host.</li>
+<li><strong>Preserve evidence</strong> before changing anything: copies of logs, the audit log, the key store
+metadata (not key material), and the signing history.</li>
+<li><strong>Mark the key <code>compromised</code></strong> in the inventory (<code>KeyRecord::transition</code>), so the server's
+signer refuses to use it (<code>KeyRecord::can_sign</code>). Through the console or <code>pal pki</code> once #15
+exists.</li>
+<li><strong>Follow the per-key procedure</strong> below.</li>
+<li><strong>Tell people</strong> using the <a href="#communication-template">communication template</a>.</li>
+</ol>
+<h2 id="detection-signals"><a class="header" href="#detection-signals">Detection signals</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Signal</th><th>Points to</th></tr>
+</thead>
+<tbody>
+<tr><td>A signature by a <code>kid</code> with no matching entry in the audit log (#132, T-signer-03)</td><td>The key that made it</td></tr>
+<tr><td>Signing volume for a key well above its normal rate</td><td>Oracle use of the signer (T-signer-01)</td></tr>
+<tr><td>A policy bundle or unlock token reported by an agent that the server never issued</td><td><code>policy-signing</code> or <code>unlock-token</code></td></tr>
+<tr><td>A trust set with a <code>trust_version</code> the server never published, seen on any agent</td><td><code>trust-set</code> or <code>root-ca</code></td></tr>
+<tr><td>A device or relay certificate whose serial and key fingerprint do not match an enrolment record (<code>CertificateBinding</code>, T-ca-02)</td><td><code>issuing-ca</code></td></tr>
+<tr><td>A certificate for the server's name that the server did not request (CT logs, inspection, agents reporting <code>transport.pin_mismatch</code>, #223)</td><td><code>server-tls</code>, <code>issuing-ca</code> or the external CA</td></tr>
+<tr><td>Release metadata signed outside the release pipeline (#226)</td><td><code>update-signing</code></td></tr>
+<tr><td>A break in the admin audit hash chain (#229)</td><td><code>audit-chain</code>, or tampering with the log</td></tr>
+<tr><td>Escrowed secrets used without a recorded escrow request</td><td><code>escrow</code></td></tr>
+<tr><td>Host compromise, lost backup, lost or stolen HSM token, departed operator with key access</td><td>Every key held there</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="per-key-procedures"><a class="header" href="#per-key-procedures">Per-key procedures</a></h2>
+<p>Each procedure lists containment (stop the damage now) and recovery (return to a trusted
+state). Overlap periods come from <code>pki::lifecycle::RotationPlan</code>; in an emergency they are cut
+to zero: the old key is dropped at once, not retired gradually.</p>
+<h3 id="root-ca-offline-root"><a class="header" href="#root-ca-offline-root">root-ca (offline root)</a></h3>
+<p>Signs issuing-CA certificates and trust sets. Never on the server.</p>
+<ul>
+<li><strong>Containment:</strong> none that agents can enforce. The root is the anchor every agent pins; an
+attacker with it can sign any trust set and any issuing CA. Take the server's agent endpoints
+to an allowlist of known networks if possible, and watch for unexpected trust sets.</li>
+<li><strong>Recovery:</strong>
+<ol>
+<li>Run a new root ceremony on an offline machine (<code>pal pki root init</code>, #15) and generate a
+new root key.</li>
+<li>Issue a new issuing CA from the new root.</li>
+<li><strong>Re-enrol every device</strong> with the new root pin (#223). Agents cannot be moved to the new
+root by a trust set, because any trust set the old root could sign, the attacker can sign
+too. A cross-certificate from the old root (<code>CaCertificate::cross_signed</code>) does not help
+here: it is for planned rotations, when the old root is still trusted.</li>
+<li>Destroy the old root key and every backup of it, and record that.</li>
+</ol>
+</li>
+<li><strong>Honest limits:</strong> until every device is re-enrolled, the attacker can push trust sets to
+devices that still pin the old root. Plan re-enrolment as a fleet-wide project.</li>
+</ul>
+<h3 id="issuing-ca-online-issuing-ca"><a class="header" href="#issuing-ca-online-issuing-ca">issuing-ca (online issuing CA)</a></h3>
+<p>Issues device, relay and server certificates.</p>
+<ul>
+<li><strong>Containment:</strong>
+<ol>
+<li>Mark it <code>compromised</code>; stop issuing with it.</li>
+<li>The server keeps rejecting any device or relay certificate whose serial <strong>and</strong> key
+fingerprint do not match its enrolment record (<code>CertificateBinding</code>, #223), so certificates
+the attacker mints for new keys are refused at the server at once.</li>
+<li>Revoke the issuing CA: the root signs a revocation list naming its serial
+(<code>issue::revocation_list</code> with reason <code>CaCompromise</code>), published to relays and other
+verifiers. Every certificate under it then fails verification (tested by
+<code>pki::issue::tests::revoked_intermediate_is_refused</code>).</li>
+<li>If <code>server-tls</code> was issued by this CA, its pin path must change too: see
+<a href="#server-tls">server-tls</a>.</li>
+</ol>
+</li>
+<li><strong>Recovery:</strong>
+<ol>
+<li>Offline root ceremony: issue a new issuing CA (<code>pal pki root sign-intermediate</code>, #15).</li>
+<li>Start a forced device-certificate renewal campaign: every device renews against the new
+CA at its next check-in, without waiting for 2/3 of its lifetime (#223).</li>
+<li>Re-issue relay and server certificates from the new CA.</li>
+<li>When every active device reports a certificate from the new CA, drop the old CA from the
+server's client CA bundle.</li>
+</ol>
+</li>
+<li><strong>Agent behaviour:</strong> devices keep their old certificate until they renew; the server accepts
+it only while it matches the enrolment record.</li>
+</ul>
+<h3 id="server-tls"><a class="header" href="#server-tls">server-tls</a></h3>
+<p>The server's TLS key, issued by <code>issuing-ca</code> or by an external CA.</p>
+<ul>
+<li><strong>Containment:</strong>
+<ol>
+<li>Generate a new key and certificate.</li>
+<li>Publish a trust set with the new SPKI pin added and the old pin <strong>removed</strong>, signed by the
+current trust-set key. Agents then refuse the old key at the next handshake (T-ca-01).</li>
+<li>Switch the server to the new certificate.</li>
+</ol>
+</li>
+<li><strong>Recovery:</strong> if the certificate came from an external CA, also revoke it there.</li>
+<li><strong>Agent behaviour:</strong> an agent that has not yet received the new trust set will refuse the new
+certificate, because its pin is not yet known. Publish the trust set <strong>before</strong> switching, and
+give agents one check-in interval to fetch it if the risk allows. In a confirmed interception,
+switch at once and accept that some agents reconnect only after their next successful trust-set
+fetch.</li>
+</ul>
+<h3 id="trust-set-online-trust-set-key"><a class="header" href="#trust-set-online-trust-set-key">trust-set (online trust-set key)</a></h3>
+<p>Signs trust sets, endorsed by the root.</p>
+<ul>
+<li><strong>Containment:</strong>
+<ol>
+<li>Mark it <code>compromised</code>.</li>
+<li>Offline root ceremony: the root signs a trust set without the compromised key and with a
+new trust-set key (<code>pal pki root sign-trustset</code>, #15).</li>
+<li>The new set's <code>trust_version</code> must be greater than any version the attacker may have
+published. An agent accepts a step of at most 1,000,000 (<code>MAX_VERSION_STEP</code>, T-ca-08), so
+if the attacker fast-forwarded some agents, publish intermediate root-signed sets to bring
+them back in line.</li>
+</ol>
+</li>
+<li><strong>Recovery:</strong> resume normal trust-set publication with the new key.</li>
+<li><strong>Honest limits:</strong> until agents accept the root-signed set, the attacker can publish trust
+sets within one version step to agents that reach them.</li>
+</ul>
+<h3 id="policy-signing"><a class="header" href="#policy-signing">policy-signing</a></h3>
+<p>Signs policy bundles (#225).</p>
+<ul>
+<li><strong>Containment:</strong>
+<ol>
+<li>Mark it <code>compromised</code>.</li>
+<li>Generate a new policy-signing key.</li>
+<li>Publish a trust set that adds the new key and removes the compromised one. No dual-signing
+period: in an emergency the old key is not retired gradually.</li>
+<li>Re-sign and publish the current policy with the new key only.</li>
+</ol>
+</li>
+<li><strong>Recovery:</strong> check every agent's reported active bundle hash and <code>kid</code> against the server's
+history (T-signer-03); investigate any bundle the server did not issue.</li>
+<li><strong>Agent behaviour:</strong> once an agent accepts the new trust set, bundles signed by the old key are
+refused as unsigned, and the agent keeps running its current policy (ADR 0018: a missing or
+bad signature never relaxes a decision). Bundles the attacker managed to install before then
+stay active until replaced, so push the re-signed policy at once.</li>
+</ul>
+<h3 id="update-signing"><a class="header" href="#update-signing">update-signing</a></h3>
+<p>Signs release metadata. Held in the release pipeline, not on the server (#226).</p>
+<ul>
+<li><strong>Containment:</strong> stop releases. Rotate the key under the update metadata's own root (#226) and
+update the update-root pointer in the next trust set.</li>
+<li><strong>Recovery:</strong> re-sign the current release metadata; audit every release signed since the
+suspected exposure.</li>
+<li><strong>Honest limits:</strong> if the update metadata <strong>root</strong> is compromised, devices must be
+re-provisioned (R-11).</li>
+</ul>
+<h3 id="unlock-token"><a class="header" href="#unlock-token">unlock-token</a></h3>
+<p>Signs break-glass unlock tokens (#222).</p>
+<ul>
+<li><strong>Containment:</strong> publish a trust set without the key. Unlike a planned rotation, its tokens are
+<strong>not</strong> honoured for the rest of their lifetime: they stop working when an agent accepts the
+set.</li>
+<li><strong>Recovery:</strong> issue a new unlock-token key; check which devices redeemed tokens since the
+exposure (the redemption events, #222).</li>
+<li><strong>Agent behaviour:</strong> an offline agent keeps accepting tokens from the old key until it next
+checks in and accepts the new trust set. That is the accepted risk of offline override (R-10).</li>
+</ul>
+<h3 id="escrow"><a class="header" href="#escrow">escrow</a></h3>
+<p>Encrypts escrowed device secrets.</p>
+<ul>
+<li><strong>Containment:</strong> stop escrow writes with the key. Treat every secret escrowed under it as
+exposed.</li>
+<li><strong>Recovery:</strong> generate a new escrow key; rotate every escrowed device secret (each device
+generates a new one and escrows it under the new key, #227). Envelope-encrypted columns are
+re-wrapped by the background re-wrap job (#227).</li>
+</ul>
+<h3 id="audit-chain"><a class="header" href="#audit-chain">audit-chain</a></h3>
+<p>Anchors the admin audit hash chain (#229).</p>
+<ul>
+<li><strong>Containment:</strong> anchor a new chain segment with a new key, recording the break and why.</li>
+<li><strong>Recovery:</strong> verify the chain up to the last anchor you trust; treat entries after it as
+unverified and compare them with independent records (server logs, agent check-ins).</li>
+</ul>
+<h3 id="device-keys"><a class="header" href="#device-keys">Device keys</a></h3>
+<p>A device's own key (non-exportable through the OS key store where available, #223).</p>
+<ul>
+<li><strong>Containment:</strong> revoke the device in the console (#223). The server refuses its connections at
+once, without waiting for a revocation list.</li>
+<li><strong>Recovery:</strong> re-enrol the device; it generates a new key.</li>
+</ul>
+<h2 id="emergency-rotation-of-everything-except-the-root"><a class="header" href="#emergency-rotation-of-everything-except-the-root">Emergency rotation of everything except the root</a></h2>
+<p><code>pal pki emergency-rotate --scope issuing,policy,unlock</code> (#15, not built yet) will run the
+containment steps above for the issuing CA, the policy-signing key and the unlock-token key in
+one operation: mark the keys <code>compromised</code>, generate new ones, publish one trust set without the
+old keys, and start the device-certificate renewal campaign. The new issuing CA still needs the
+offline root, so the command prepares the signing request and stops for the root ceremony.</p>
+<p>Until it exists, run the per-key procedures in this order: <code>trust-set</code> (if in scope), then
+<code>issuing-ca</code>, then <code>server-tls</code>, <code>policy-signing</code> and <code>unlock-token</code> in one trust set, then
+<code>escrow</code> and <code>audit-chain</code>.</p>
+<h2 id="what-agents-do"><a class="header" href="#what-agents-do">What agents do</a></h2>
+<p>Agents act only on what a trust set tells them; they never learn of a compromise any other way.
+The rules, from <code>TrustAnchor::accept</code> (tested in <code>palisade-proto</code>):</p>
+<ul>
+<li>A key that is not in the current trust set is not trusted, whatever signed it. Removal from
+the set is the revocation.</li>
+<li>A new trust set must be signed by the pinned root or by a trust-set key in the <strong>current</strong> set.
+A set cannot endorse itself.</li>
+<li><code>trust_version</code> must increase, by at most 1,000,000 per step. Older and replayed sets are
+refused.</li>
+<li>A bad or mislabelled signature from a known key rejects the whole set (tampering, not noise).</li>
+<li>When signature checks fail, the agent keeps its current policy and trust set. It never relaxes
+enforcement because something could not be verified (ADR 0018).</li>
+</ul>
+<p>The agent does not use the trust set yet (#220, #223). Until it does, none of the containment
+steps that depend on agents accepting a trust set take effect on endpoints.</p>
+<h2 id="communication-template"><a class="header" href="#communication-template">Communication template</a></h2>
+<p>Send one notice when the incident is opened and one when it is closed. Do not include key
+material, passwords or internal host names.</p>
+<pre><code class="language-text">Subject: [Palisade] Key compromise: &lt;key purpose&gt; (&lt;kid&gt;), &lt;opened | resolved&gt;
+
+What happened:
+  On &lt;date, time, time zone&gt; we found that the Palisade &lt;key purpose&gt; key
+  (kid &lt;kid&gt;) &lt;was | may have been&gt; exposed through &lt;short cause&gt;.
+
+What it could be used for:
+  &lt;one line from the key's procedure: for example "signing policy bundles
+  that agents would accept until &lt;time&gt;"&gt;
+
+What we have done:
+  - &lt;time&gt;: marked the key compromised; it can no longer sign.
+  - &lt;time&gt;: published trust set version &lt;n&gt; without the key.
+  - &lt;other containment steps&gt;
+
+What you need to do:
+  &lt;nothing | re-enrol devices | update the pinned root | rotate a secret&gt;
+
+What we are watching for:
+  &lt;detection signals for this key&gt;
+
+Next update: &lt;time&gt;, or sooner if anything changes.
+Contact: &lt;incident lead&gt;
+</code></pre>
+<h2 id="after-the-incident"><a class="header" href="#after-the-incident">After the incident</a></h2>
+<ul>
+<li>Close the incident only when every containment and recovery step is done and the detection
+signals have been quiet for one full renewal cycle of the affected certificates.</li>
+<li>Write a short review: cause, timeline, what worked, what did not, and changes to this runbook.</li>
+<li>Update the <a href="#palisade-threat-model-and-security-architecture">threat model</a> if the incident showed a threat it does not list.</li>
+</ul>
+<h2 id="rehearsal"><a class="header" href="#rehearsal">Rehearsal</a></h2>
+<p>Not yet done. #224 requires this runbook to be rehearsed once in the lab, with notes committed
+here. That needs the <code>pal pki</code> commands (#15) and an agent that uses the trust set (#220, #223).
+Until then, the parts that exist can be exercised through the <code>palisade-proto</code> tests named
+above.</p>
+<hr>
+<p><small>Source: <a href="https://github.com/jusso-dev/palisade/blob/main/docs/security/key-compromise-runbook.md"><code>docs/security/key-compromise-runbook.md</code></a> on GitHub.</small></p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="hardening-guide"><a class="header" href="#hardening-guide">Hardening guide</a></h1>
 <p>Palisade is educational software and <strong>must not protect production systems</strong>. This page is about
@@ -13906,11 +14361,18 @@ them, and only they need a nightly toolchain. There are three projects:</p>
 <code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code>,
 <code>fuzz_appx_manifest</code> and <code>identity_bytes</code>. The project builds <code>palisade-fileid</code> with its
 <code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
-<li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
-<li><code>crates/palisade-policy/fuzz</code>, with four targets: <code>fuzz_policy_json</code> (the strict JSON reader,
-validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader),
+<li><code>crates/palisade-proto/fuzz</code>, with three targets: <code>trust_set_decode</code>, <code>policy_envelope_decode</code>
+(the signed policy bundle envelope, its verification and delta rebuilding, #325) and
+<code>sntp_reply</code> (the SNTP reply checker behind the server's clock health check, #224).</li>
+<li><code>crates/palisade-agent/fuzz</code>, with two targets: <code>kernel_records</code> (the kernel process provider's
+ETW record decoder and the process monitor that consumes it, #59) and <code>eventlog_records</code> (the
+rendered event-log XML decoder and the ingest chain behind it, #58).</li>
+<li><code>crates/palisade-policy/fuzz</code>, with five targets: <code>fuzz_policy_json</code> (the strict JSON reader,
+the migrating and lenient readers, validation and the evaluator build), <code>fuzz_policy_yaml</code>
+(the YAML reader),
 <code>fuzz_wildcard_regex_compile</code> (compiling and matching wildcards, regular expressions and text
-values) and <code>fuzz_bundle_decode</code> (the policy bundle's header-only and strict decoders, #43).</li>
+values), <code>fuzz_bundle_decode</code> (the policy bundle's header-only and strict decoders, #43) and
+<code>fuzz_bundle_delta</code> (reading a bundle delta and applying it, #43, #325).</li>
 </ul>
 <p>Target names are unique across projects, so <code>--target</code> names one without its project. Each fuzz
 workspace has its own committed <code>Cargo.lock</code>. Dependabot keeps it up to date, cargo-deny checks it against the root <code>deny.toml</code> on every PR and daily, and
@@ -14508,6 +14970,7 @@ cargo xtask docs check
 cargo xtask docs build             # needs mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0, lychee 0.24.2
 typos                              # needs typos 1.52.2
 cargo deny --locked check          # needs cargo-deny 0.22
+cargo deny --locked --manifest-path crates/palisade-agent/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml --config deny.toml check
@@ -15259,7 +15722,10 @@ crate <code>adler2</code>), exempted with a note that names #53. Dependabot PRs 
 (<code>criterion</code> 0.8) were merged before <code>cargo vet</code> passed; the follow-up moved their exemptions to the
 new versions and exempted the 6 crates they added (<code>core_detect</code>, and for criterion <code>alloca</code>,
 <code>page_size</code> and <code>winapi</code> with its two import-library crates), all dev-only except <code>sha2</code>, with a
-note that names the PR. The exemptions are the backlog.
+note that names the PR. X.509 issuance for the internal CA (#224) added 8 more (<code>rcgen</code>, used
+without its cryptography back end, and <code>time</code>, <code>yasna</code> and their helpers), behind
+<code>palisade-proto</code>'s off-by-default <code>issuance</code> feature, exempted with a note that names #224. The
+exemptions are the backlog.
 Each one is removed when the crate is audited, or when an imported audit covers it
 (<code>cargo vet prune</code> removes exemptions that are no longer needed).</p>
 <p>A new crate, or a version bump, fails <code>cargo vet</code> until one of these is done:</p>

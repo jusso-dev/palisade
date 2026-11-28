@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -438,6 +438,25 @@ matcher.</p>
 <tr><td><code>signer.tbs_hash</code></td><td>The hash of a chain certificate's <code>tbsCertificate</code>, under the certificate's own signature digest (40, 64, 96 or 128 hex digits). It identifies that one certificate: the <code>tbsCertificate</code> includes the serial number and the validity period (RFC 5280), so a certificate reissued with the same key has another TBS hash, and each issue needs its own rule; <code>signer.spki_sha256</code> names the key across every certificate that carries it. <code>signer.position</code> says which certificate. A 40-digit (SHA-1) value is compatibility only (ADR 0008).</td></tr>
 <tr><td><code>signer.eku</code></td><td>The extended key usages of the leaf certificate, as dotted OIDs, such as <code>1.3.6.1.5.5.7.3.3</code> (code signing). A leaf without the extension has none.</td></tr>
 <tr><td><code>signer.spki_sha256</code></td><td>The SHA-256 of a chain certificate's DER <code>SubjectPublicKeyInfo</code>: its public key (#318). Unlike the TBS hash it stays the same when a certificate is reissued for the same key, so a deny on a stolen key's hash also blocks every reissue. <code>signer.position</code> says which certificate. A key above the leaf belongs to a certificate authority, which vouches for everything it signs.</td></tr>
+<tr><td><code>meta.legal_copyright</code></td><td>The <code>LegalCopyright</code> string from the version resource (#328).</td></tr>
+<tr><td><code>meta.language</code></td><td>The language and code page of the version-resource block the other <code>meta.*</code> strings were read from, as its key is written: eight hex digits, such as <code>040904b0</code> (#328).</td></tr>
+<tr><td><code>meta.file_name_fallback</code></td><td>The file's effective name (#328): the first of the original file name, internal name, file description and product name that the version resource has, or the name on disk when it has none.</td></tr>
+<tr><td><code>meta.file_size</code></td><td>The file's size in bytes, as a whole number (#328).</td></tr>
+<tr><td><code>meta.pe_machine</code></td><td>The PE image's COFF machine, by name: <code>i386</code>, <code>amd64</code>, <code>arm64</code>, <code>arm64_ec</code>, <code>arm64_x</code>, <code>arm_nt</code> and so on (#328).</td></tr>
+<tr><td><code>meta.pe_subsystem</code></td><td>The PE image's subsystem, by name: <code>windows_gui</code>, <code>windows_cui</code>, <code>native</code>, <code>efi_application</code> and so on (#328).</td></tr>
+<tr><td><code>meta.is_dotnet</code></td><td>Whether the PE image is a .NET assembly: it has a CLR runtime header (#328).</td></tr>
+<tr><td><code>msi.product_code</code></td><td>A Windows Installer package's <code>ProductCode</code> (#328), a GUID. Compared as a GUID: braces and case do not matter.</td></tr>
+<tr><td><code>msi.upgrade_code</code></td><td>A Windows Installer package's <code>UpgradeCode</code> (#328), a GUID shared by every version of a product.</td></tr>
+<tr><td><code>msi.product_name</code></td><td>A Windows Installer package's <code>ProductName</code> (#328). Free text the author chooses.</td></tr>
+<tr><td><code>msi.manufacturer</code></td><td>A Windows Installer package's <code>Manufacturer</code> (#328). Free text the author chooses: never a publisher.</td></tr>
+<tr><td><code>msi.product_version</code></td><td>A Windows Installer package's <code>ProductVersion</code> (#328).</td></tr>
+<tr><td><code>msi.package_code</code></td><td>A Windows Installer package's <code>PackageCode</code> (#328): the GUID of one build of the package.</td></tr>
+<tr><td><code>path.drive_type</code></td><td>The drive type of the file's volume, as the OS reports it (#328): <code>fixed</code>, <code>removable</code>, <code>network</code>, <code>cd_rom</code> or <code>ram_disk</code>. An <code>unknown</code> drive type is a missing fact.</td></tr>
+<tr><td><code>path.bus</code></td><td>The bus of the disk the file's volume is on (#328): <code>usb</code>, <code>sata</code>, <code>nvme</code>, <code>scsi</code>, <code>sd</code>, <code>virtual</code>, <code>file_backed_virtual</code>, <code>iscsi</code> and so on. An <code>unknown</code> bus is a missing fact.</td></tr>
+<tr><td><code>path.is_unc</code></td><td>Whether the file is on a network share: its path, or the other form of it (a mapped drive's UNC path), is a UNC path (#328).</td></tr>
+<tr><td><code>path.is_ads</code></td><td>Whether the object is an alternate data stream of a file (#328).</td></tr>
+<tr><td><code>path.share</code></td><td>The <code>\\server\share</code> a file on a network share is under (#328), from its UNC path. A file on no share has none, so <code>equals</code> does not match it.</td></tr>
+<tr><td><code>path.user_can_change_acl</code></td><td>Whether some non-administrator may change the permissions or the owner of the file or a directory above it (#328).</td></tr>
 </tbody>
 </table>
 </div>

@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,7 +197,7 @@ document and has the default shown in the schema.</p>
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>advanced</code></td><td>map of <a href="types.html#advancedvalue"><code>AdvancedValue</code></a></td><td>no</td><td></td><td>at most 256 entries; keys: matches <code>^[a-z][a-z0-9_.-]{0,127}$</code></td><td>1.0.0</td><td>Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless <code>allow_unknown_advanced</code> is set.</td></tr>
+<tr><td><code>advanced</code></td><td>map of <a href="types.html#advancedvalue"><code>AdvancedValue</code></a></td><td>no</td><td></td><td>at most 256 entries; keys: matches <code>^[a-z][a-z0-9_.-]{0,127}$</code></td><td>1.0.0</td><td>Engineering settings, checked against a registry of known keys. The registry is empty in this version, so any key is rejected unless <code>allow_unknown_advanced</code> is set. Keys are added only with the feature that reads them (#330), and never relax a decision.</td></tr>
 <tr><td><code>allow_unknown_advanced</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Accept keys in <code>advanced</code> that the registry does not know.</td></tr>
 <tr><td><code>capture_command_line</code></td><td>boolean</td><td>no</td><td><code>false</code></td><td></td><td>1.0.0</td><td>Whether the agent records process command lines. Off by default for privacy (#18).</td></tr>
 <tr><td><code>decision_cache_ttl_secs</code></td><td>integer</td><td>no</td><td><code>300</code></td><td>0 to 86400; format <code>uint32</code></td><td>1.0.0</td><td>How long a decision may be cached, in seconds. <code>0</code> disables the cache.</td></tr>
@@ -205,6 +205,9 @@ document and has the default shown in the schema.</p>
 <tr><td><code>driver_control</code></td><td><a href="types.html#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for drivers.</td></tr>
 <tr><td><code>group_cache_max_age_secs</code></td><td>integer</td><td>no</td><td><code>86400</code></td><td>3600 to 86400; format <code>uint32</code></td><td>1.0.0</td><td>How old cached group memberships that are not in the token (cloud-directory groups) may be before scopes treat them as unknown, in seconds (#38). From 3600 to 86400.</td></tr>
 <tr><td><code>max_ancestor_depth</code></td><td>integer</td><td>no</td><td><code>8</code></td><td>1 to 16; format <code>uint8</code></td><td>1.0.0</td><td>How many ancestors process criteria may inspect (#31).</td></tr>
+<tr><td><code>max_criteria_per_rule</code></td><td>integer</td><td>no</td><td></td><td>1 to 32; format <code>uint8</code></td><td>1.0.0</td><td>Most criteria in one rule's match tree (#33): 1 to 32, the fixed maximum and the default. A policy can tighten the limit, never raise it.</td></tr>
+<tr><td><code>max_tree_depth</code></td><td>integer</td><td>no</td><td></td><td>1 to 8; format <code>uint8</code></td><td>1.0.0</td><td>Deepest match tree (#33), where a single criterion has depth 1: 1 to 8, the fixed maximum and the default.</td></tr>
+<tr><td><code>max_values_per_criterion</code></td><td>integer</td><td>no</td><td></td><td>1 to 25; format <code>uint8</code></td><td>1.0.0</td><td>Most values in one criterion (#33): 1 to 25, the fixed maximum and the default.</td></tr>
 <tr><td><code>override_durations</code></td><td>array of integer</td><td>no</td><td></td><td>at most 5 items</td><td>1.0.0</td><td>Durations, in minutes, offered for override sessions (#9). At most 5 slots, each at most 10080. <code>0</code> marks a disabled slot.</td></tr>
 <tr><td><code>poll_interval_secs</code></td><td>integer</td><td>no</td><td><code>900</code></td><td>60 to 604800; format <code>uint32</code></td><td>1.0.0</td><td>Agent check-in interval, in seconds.</td></tr>
 <tr><td><code>script_control</code></td><td><a href="types.html#controllevel"><code>ControlLevel</code></a></td><td>no</td><td><code>"enforce"</code></td><td></td><td>1.0.0</td><td>Control level for scripts of a kind not listed in <code>script_control_by_kind</code>.</td></tr>

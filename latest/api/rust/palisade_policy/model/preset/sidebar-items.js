@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["PublisherProduct"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_METARULE_CONTEXT"],"enum":["PresetError"],"fn":["metarule","publisher_product_version","signed_in_directory"],"struct":["PublisherProduct"]};

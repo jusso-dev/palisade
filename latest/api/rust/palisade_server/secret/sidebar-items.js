@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["read_secret_file"]};
+window.SIDEBAR_ITEMS = {"constant":["REDACTED"],"fn":["read_secret_file"],"struct":["Secret"]};

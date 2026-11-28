@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-de2a680a.js"></script>
+        <script src="../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -633,6 +633,7 @@ cargo xtask docs check
 cargo xtask docs build             # needs mdbook 0.5.2, mdbook-mermaid-ssr 0.3.0, lychee 0.24.2
 typos                              # needs typos 1.52.2
 cargo deny --locked check          # needs cargo-deny 0.22
+cargo deny --locked --manifest-path crates/palisade-agent/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-fileid/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-proto/fuzz/Cargo.toml --config deny.toml check
 cargo deny --locked --manifest-path crates/palisade-policy/fuzz/Cargo.toml --config deny.toml check

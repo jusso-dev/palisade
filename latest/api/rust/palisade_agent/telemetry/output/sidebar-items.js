@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CHANNEL_CAPACITY"],"enum":["ImageKind","TelemetryEvent"],"fn":["process_fields"],"struct":["ChannelSink","Counters","DiscardSink","ImageLoad"],"trait":["PostStartAction","TelemetrySink"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NTSTATUS_NAMES","POLICY_OPTIONS"],"enum":["SignatureType","SigningLevel"],"fn":["ntstatus_name"],"struct":["PolicyOptions"]};

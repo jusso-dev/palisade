@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Examined","Rejection","Scope","SignatureMode"],"fn":["content_hash"],"mod":["record","select","stale"],"struct":["BundleMeta","EffectiveMode","ModeGate","Target"]};
+window.SIDEBAR_ITEMS = {"enum":["Examined","Rejection","Scope","SignatureMode"],"fn":["content_hash"],"mod":["envelope","record","select","stale"],"struct":["BundleMeta","EffectiveMode","ModeGate","Target"]};

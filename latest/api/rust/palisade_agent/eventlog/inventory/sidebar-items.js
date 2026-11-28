@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_POLICIES","POLICY_ACTIVATED"],"struct":["ActivePolicy","PolicyInventory"]};

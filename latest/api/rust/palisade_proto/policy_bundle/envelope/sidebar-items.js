@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FORMAT_VERSION","MAX_OVERHEAD","MAX_SIGNATURES"],"enum":["EnvelopeError","Kind","RebuildError","SignError","SignatureError"],"fn":["max_envelope_len","rebuild","target_of","verify"],"struct":["Agent","Envelope","Verified"]};

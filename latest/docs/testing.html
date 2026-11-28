@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-de2a680a.js"></script>
+        <script src="../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -422,11 +422,18 @@ them, and only they need a nightly toolchain. There are three projects:</p>
 <code>fuzz_ctl</code>, <code>fuzz_classify</code>, <code>fuzz_msi_tables</code>, <code>legacy_parse</code>, <code>fuzz_tags</code>, <code>script_sig</code>,
 <code>fuzz_appx_manifest</code> and <code>identity_bytes</code>. The project builds <code>palisade-fileid</code> with its
 <code>content-rules</code> feature, for <code>fuzz_tags</code>.</li>
-<li><code>crates/palisade-proto/fuzz</code>, with one target: <code>trust_set_decode</code>.</li>
-<li><code>crates/palisade-policy/fuzz</code>, with four targets: <code>fuzz_policy_json</code> (the strict JSON reader,
-validation and the evaluator build), <code>fuzz_policy_yaml</code> (the YAML reader),
+<li><code>crates/palisade-proto/fuzz</code>, with three targets: <code>trust_set_decode</code>, <code>policy_envelope_decode</code>
+(the signed policy bundle envelope, its verification and delta rebuilding, #325) and
+<code>sntp_reply</code> (the SNTP reply checker behind the server's clock health check, #224).</li>
+<li><code>crates/palisade-agent/fuzz</code>, with two targets: <code>kernel_records</code> (the kernel process provider's
+ETW record decoder and the process monitor that consumes it, #59) and <code>eventlog_records</code> (the
+rendered event-log XML decoder and the ingest chain behind it, #58).</li>
+<li><code>crates/palisade-policy/fuzz</code>, with five targets: <code>fuzz_policy_json</code> (the strict JSON reader,
+the migrating and lenient readers, validation and the evaluator build), <code>fuzz_policy_yaml</code>
+(the YAML reader),
 <code>fuzz_wildcard_regex_compile</code> (compiling and matching wildcards, regular expressions and text
-values) and <code>fuzz_bundle_decode</code> (the policy bundle's header-only and strict decoders, #43).</li>
+values), <code>fuzz_bundle_decode</code> (the policy bundle's header-only and strict decoders, #43) and
+<code>fuzz_bundle_delta</code> (reading a bundle delta and applying it, #43, #325).</li>
 </ul>
 <p>Target names are unique across projects, so <code>--target</code> names one without its project. Each fuzz
 workspace has its own committed <code>Cargo.lock</code>. Dependabot keeps it up to date, cargo-deny checks it against the root <code>deny.toml</code> on every PR and daily, and

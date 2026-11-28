@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["events","mapping","pki","policy_bundle"]};
+window.SIDEBAR_ITEMS = {"mod":["events","mapping","pki","policy_bundle","sntp"]};

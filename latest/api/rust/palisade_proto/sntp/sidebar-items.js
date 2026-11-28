@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PACKET_LEN","PORT"],"enum":["SntpError"],"fn":["request"],"struct":["NtpTimestamp","Reply"]};

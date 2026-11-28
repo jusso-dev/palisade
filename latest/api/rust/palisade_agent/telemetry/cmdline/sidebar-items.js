@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_PATTERNS","MAX_CMDLINE_CHARS"],"struct":["CmdlinePolicy"]};

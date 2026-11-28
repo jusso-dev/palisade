@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -200,7 +200,7 @@
 <tr><td><code>expiring_soon_days</code></td><td>integer</td><td>no</td><td><code>14</code></td><td>1 to 365; format <code>uint16</code></td><td>1.0.0</td><td>A rule that expires within this many days is expiring soon: 1 to 365, default 14.</td></tr>
 <tr><td><code>expiry_notice_days</code></td><td>array of integer</td><td>no</td><td><code>[14,3,0]</code></td><td>at most 8 items</td><td>1.0.0</td><td>When the server tells a rule's owner that it expires, in days before the expiry: at most 8 values, each at most 365, default <code>[14, 3, 0]</code>.</td></tr>
 <tr><td><code>require_justification</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance mode: allow, trust, exclusion and exception rules need a justification, allow and trust rules a review date, and exception rules an expiry, an approver and a risk rating. Unset means on for a policy with a compliance preset (<code>unknown.preset</code>) and off otherwise.</td></tr>
-<tr><td><code>severity</code></td><td>map of <a href="types.html#findingseverity"><code>FindingSeverity</code></a></td><td>no</td><td></td><td>keys: one of <code>weak_identity</code>, <code>user_writable_path_allow</code>, <code>restricted_publisher_broad</code>, <code>broad_wildcard</code>, <code>shadowed</code>, <code>contradiction</code>, <code>ineffective_vs_mandatory</code>, <code>duplicate_rule</code>, <code>duplicate_principal</code>, <code>expired_rule_present</code>, <code>expiring_soon</code>, <code>review_overdue</code>, <code>stale_rule</code>, <code>revoked_or_expired_signer</code>, <code>vulnerable_version_allowed</code>, <code>missing_justification</code>, <code>exception_without_expiry</code>, <code>too_many_hash_rules</code>, <code>regex_cost</code>, <code>future_dated_metadata</code></td><td>1.0.0</td><td>The severity of policy-assistant findings, per finding code, replacing the default.</td></tr>
+<tr><td><code>severity</code></td><td>map of <a href="types.html#findingseverity"><code>FindingSeverity</code></a></td><td>no</td><td></td><td>keys: one of <code>weak_identity</code>, <code>user_writable_path_allow</code>, <code>restricted_publisher_broad</code>, <code>broad_wildcard</code>, <code>shadowed</code>, <code>contradiction</code>, <code>ineffective_vs_mandatory</code>, <code>duplicate_rule</code>, <code>duplicate_principal</code>, <code>expired_rule_present</code>, <code>expiring_soon</code>, <code>review_overdue</code>, <code>stale_rule</code>, <code>revoked_or_expired_signer</code>, <code>vulnerable_version_allowed</code>, <code>missing_justification</code>, <code>exception_without_expiry</code>, <code>too_many_hash_rules</code>, <code>regex_cost</code>, <code>future_dated_metadata</code>, <code>hash_with_other_criteria</code></td><td>1.0.0</td><td>The severity of policy-assistant findings, per finding code, replacing the default.</td></tr>
 <tr><td><code>stale_after_days</code></td><td>integer</td><td>no</td><td><code>90</code></td><td>1 to 3650; format <code>uint16</code></td><td>1.0.0</td><td>A rule with no hits for this many days, while usage was observed, is stale: 1 to 3650, default 90.</td></tr>
 </tbody>
 </table>

@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -196,6 +196,7 @@
 <tr><th>Field</th><th>Type</th><th>Required</th><th>Default</th><th>Constraints</th><th>Since</th><th>Description</th></tr>
 </thead>
 <tbody>
+<tr><td><code>confirm_permit_all</code></td><td>string</td><td>no</td><td></td><td>1 to 128 characters</td><td>1.0.0</td><td>The confirmation a catch-all rule that lets objects run needs (#35, #329): exactly <code>CONFIRM_PERMIT_ALL</code>. Without it, such a rule is rejected (<code>permit_all_unconfirmed</code>).</td></tr>
 <tr><td><code>description</code></td><td>string</td><td>no</td><td></td><td>at most 4096 characters</td><td>1.0.0</td><td>Free-text description, at most 4096 characters.</td></tr>
 <tr><td><code>governance</code></td><td><a href="governance-settings.html"><code>GovernanceSettings</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance settings: justification, review and expiry rules, the policy assistant's severities and counter reporting (#40).</td></tr>
 <tr><td><code>id</code></td><td><a href="types.html#policyid"><code>PolicyId</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>Stable ID. Renaming the policy never changes it.</td></tr>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CAPACITY","DEFAULT_RETENTION"],"enum":["CommandLine","Inserted"],"fn":["key_text"],"struct":["ProcInfo","ProcessTree","TokenFacts"]};

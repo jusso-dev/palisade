@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EVENT_IMAGE_LOAD","EVENT_IMAGE_UNLOAD","EVENT_PROCESS_START","EVENT_PROCESS_STOP","KERNEL_PROCESS","KEYWORD_IMAGE","KEYWORD_PROCESS","MAX_STRING_UNITS","MAX_USER_DATA"],"enum":["DecodeError","KernelEvent"],"fn":["decode"],"mod":["encode"],"struct":["ImageEvent","ProcessStart","ProcessStop","RawEvent"]};

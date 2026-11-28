@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["JUMP_THRESHOLD","SAMPLE_INTERVAL"],"struct":["ClockJump","ClockJumpDetector","ClockMonitor"]};

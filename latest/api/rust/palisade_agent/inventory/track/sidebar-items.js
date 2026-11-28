@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COALESCE_WINDOW","MAX_HOLD","MAX_PENDING"],"enum":["Action","DeltaKind","Invalidation"],"fn":["apply","invalidate","invalidate_under"],"struct":["Applied","Change","ChangeFlags","Coalesced","Coalescer"]};

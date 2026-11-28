@@ -36,10 +36,10 @@
             const path_to_root = "../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../toc-de2a680a.js"></script>
+        <script src="../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -202,14 +202,21 @@ Specified in <a href="https://github.com/jusso-dev/palisade/issues/31">#31</a> (
 <tr><td>Key</td><td><code>signer.spki_sha256</code></td><td>strong at <code>position: leaf</code>: names the signing key, in every certificate issued for it (a key above the leaf is a CA's, so it is weak in an allow)</td></tr>
 <tr><td>Certificate authority</td><td><code>signer.issuer</code>, <code>signer.pca</code>, <code>signer.root_thumbprint</code>, <code>signer.eku</code>, SHA-1 thumbprints</td><td>weak alone: a CA vouches for every file it signs</td></tr>
 <tr><td>Path</td><td><code>path.full</code>, <code>path.directory</code>, <code>path.file_name</code>, <code>path.extension</code></td><td>medium, and only where users cannot write</td></tr>
-<tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, ...</td><td>weak: easy to copy into another file</td></tr>
+<tr><td>Path location</td><td><code>path.drive_type</code>, <code>path.bus</code>, <code>path.is_unc</code>, <code>path.is_ads</code>, <code>path.share</code>, <code>path.user_can_change_acl</code>; the <code>%REMOVABLE%</code> and <code>%HOT%</code> variables (the roots of mounted removable and hot-pluggable volumes)</td><td>weak: say where a file is, never which file; for denies and scoping, such as "block anything on a USB disk"</td></tr>
+<tr><td>Metadata</td><td><code>meta.original_filename</code>, <code>meta.product_name</code>, <code>meta.file_version</code>, <code>meta.legal_copyright</code>, <code>meta.language</code>, <code>meta.file_name_fallback</code>, ...</td><td>weak: easy to copy into another file</td></tr>
+<tr><td>File and image</td><td><code>meta.file_size</code> (a number), <code>meta.pe_machine</code>, <code>meta.pe_subsystem</code>, <code>meta.is_dotnet</code> (yes or no)</td><td>weak: describe a file, never name one</td></tr>
+<tr><td>Windows Installer</td><td><code>msi.product_code</code>, <code>msi.upgrade_code</code>, <code>msi.package_code</code> (GUIDs, compared with or without braces, in either case), <code>msi.product_name</code>, <code>msi.manufacturer</code>, <code>msi.product_version</code></td><td>weak: the package's author writes them all</td></tr>
 </tbody>
 </table>
 </div>
 <p>The strength matters. Validation warns about an allow rule whose only identity is weak, and an
 allow rule must have a positive identity on every branch of its match tree, so a rule cannot
 allow "anything not named X". A path rule only allows a file in a location that ordinary users
-cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time.</p>
+cannot write (ISM-1392); the engine checks the path's ACL safety at evaluation time. The ACL
+counts only on a fixed local disk: on a removable, optical or network volume, or one whose kind
+the agent could not tell, a path allow does not match, because whoever holds the disk, or the
+server, decides what its folders hold whatever their permissions say. A path deny matches
+everywhere.</p>
 <p><strong>Hash rules</strong> are the most precise and the most work: every update needs a new rule.
 <strong>Publisher rules</strong> trust what a signer signs, optionally narrowed by product name and minimum
 version (ISM-1471: use publisher <em>and</em> product names). The <code>publisher_product</code> preset
@@ -230,6 +237,12 @@ authority, which vouches for everything it signs, so validation warns about it a
 with every signer criterion, a revoked or otherwise untrusted signature does not take part by
 default, and an unknown key hash never makes a rule match. <strong>Path rules</strong> are the easiest to write and
 the easiest to get wrong.</p>
+<p>Path criteria match the <strong>final</strong> path, after symbolic links and junctions are resolved. A
+<strong>hard link</strong> is another name for the same file, with no final path to resolve to: a file
+hard-linked into an allowed folder from somewhere else is the same content under both names, and
+a path rule sees only the name it was started by. Only a hash or signer criterion follows the
+content across its names. Write those rules for files that must never run, and do not rely on a
+path deny alone to stop a file that users can hard-link elsewhere.</p>
 <p>A workstation baseline with hash, publisher and path rules (ISM-0955), validated in CI:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://raw.githubusercontent.com/jusso-dev/palisade/main/schemas/policy/v1.json
 #

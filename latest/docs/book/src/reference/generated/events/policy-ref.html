@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -198,6 +198,7 @@
 <tbody>
 <tr><td><code>hash</code></td><td>string</td><td>no</td><td></td><td>matches <code>^[0-9a-f]{64}$</code></td><td>1.0.0</td><td>The SHA-256 of the policy bundle.</td></tr>
 <tr><td><code>id</code></td><td><a href="types.html#policyid"><code>PolicyId</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The policy ID.</td></tr>
+<tr><td><code>kid</code></td><td>string</td><td>no</td><td></td><td>matches <code>^[0-9a-f]{32}$</code></td><td>1.3.0</td><td>The key that signed the policy bundle: its key ID, the first 16 bytes of the SHA-256 of its <code>SubjectPublicKeyInfo</code>, in 32 lowercase hex digits (#325). Since 1.3.</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>no</td><td></td><td>1 to 256 characters</td><td>1.0.0</td><td>The policy name.</td></tr>
 <tr><td><code>profile_id</code></td><td><a href="types.html#uuid7"><code>Uuid7</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The profile the policy was assigned through.</td></tr>
 <tr><td><code>rule_id</code></td><td><a href="types.html#ruleid"><code>RuleId</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule that decided.</td></tr>

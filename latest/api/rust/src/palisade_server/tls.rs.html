@@ -103,7 +103,7 @@
 <a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>key_pem = read_secret_file(<span class="kw-2">&amp;</span>tls.key_file, MAX_KEY_FILE)<span class="question-mark">?</span>;
 <a href=#104 id=104 data-nosnippet>104</a>        <span class="comment">// The PEM parser's error text can quote input lines, so it is not
 <a href=#105 id=105 data-nosnippet>105</a>        // passed on: only the path and a fixed reason are reported.
-<a href=#106 id=106 data-nosnippet>106</a>        </span><span class="kw">let </span>key = PrivateKeyDer::from_pem_slice(<span class="kw-2">&amp;</span>key_pem).map_err(|<span class="kw">_</span>| {
+<a href=#106 id=106 data-nosnippet>106</a>        </span><span class="kw">let </span>key = PrivateKeyDer::from_pem_slice(key_pem.expose()).map_err(|<span class="kw">_</span>| {
 <a href=#107 id=107 data-nosnippet>107</a>            <span class="macro">format!</span>(
 <a href=#108 id=108 data-nosnippet>108</a>                <span class="string">"{}: no PKCS#8, PKCS#1 or SEC1 private key found in PEM form"</span>,
 <a href=#109 id=109 data-nosnippet>109</a>                tls.key_file.display()

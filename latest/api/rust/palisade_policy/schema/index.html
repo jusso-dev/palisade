@@ -6,8 +6,8 @@ differs from what <a href="fn.generate.html" title="fn palisade_policy::schema::
 <div class="example-wrap"><pre class="language-sh"><code>PALISADE_BLESS=1 cargo test -p palisade-policy --test schema</code></pre></div><h2 id="versioning"><a class="doc-anchor" href="#versioning">§</a>Versioning</h2>
 <p><a href="constant.CURRENT.html" title="constant palisade_policy::schema::CURRENT"><code>CURRENT</code></a> is the version this crate writes and the major version it
 reads. A minor bump adds optional fields; a major bump is a breaking
-change, gets a new file (<code>v2.json</code>) and needs a migration (future work in
-#30). The schema’s <code>$id</code> names the major version only, because every
+change, gets a new file (<code>v2.json</code>) and a migration step
+(<a href="../migrate/index.html" title="mod palisade_policy::migrate"><code>crate::migrate</code></a>). The schema’s <code>$id</code> names the major version only, because every
 minor version of a major is a valid instance of the latest schema for
 that major.</p>
 </div></details><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.CURRENT.html" title="constant palisade_policy::schema::CURRENT">CURRENT</a></dt><dd>The schema version this crate implements.</dd><dt><a class="constant" href="constant.SCHEMA_ID.html" title="constant palisade_policy::schema::SCHEMA_ID">SCHEMA_<wbr>ID</a></dt><dd>The schema’s <code>$id</code>.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.generate.html" title="fn palisade_policy::schema::generate">generate</a></dt><dd>Generates the JSON Schema of a policy document.</dd><dt><a class="fn" href="fn.generate_pretty.html" title="fn palisade_policy::schema::generate_pretty">generate_<wbr>pretty</a></dt><dd>The generated schema as the exact text that is committed: pretty-printed

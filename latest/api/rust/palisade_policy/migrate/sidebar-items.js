@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STEPS"],"enum":["MigrateError"],"fn":["migrate","read_json","schema_version","v0_to_v1"],"struct":["Migrated","Step","StepError"],"type":["Object"]};

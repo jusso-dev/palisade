@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Domain"],"mod":["key","signer","time","trust_set"]};
+window.SIDEBAR_ITEMS = {"enum":["Domain"],"mod":["issue","key","lifecycle","signer","time","trust_set"]};

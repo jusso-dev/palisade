@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IgnoredKind","LenientError"],"fn":["read_json"],"struct":["Ignored","Lenient"]};

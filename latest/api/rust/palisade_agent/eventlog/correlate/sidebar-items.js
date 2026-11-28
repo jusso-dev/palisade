@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CODE_INTEGRITY","DEFAULT_RATE","DEFAULT_WAIT","MAX_PENDING","SCRIPT_HOSTS"],"struct":["Correlator","CorrelatorStats","Group","Pairing","RateLimiter"]};

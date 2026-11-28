@@ -36,10 +36,10 @@
             const path_to_root = "../../../../../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../../../../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../../../../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../../../../../toc-de2a680a.js"></script>
+        <script src="../../../../../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -198,6 +198,7 @@
 <tbody>
 <tr><td><code>action</code></td><td><a href="action.html"><code>Action</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>What happens when it matches (#34).</td></tr>
 <tr><td><code>activates_at</code></td><td><a href="types.html#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent before this instant (#40).</td></tr>
+<tr><td><code>catch_all</code></td><td>boolean</td><td>no</td><td></td><td></td><td>1.0.0</td><td>A catch-all rule (#33, #35, #329): the default of its rule set, which decides only when no other rule of stage 4 matched, under every precedence model. It is the only rule that may have no identity anchor, and the only one whose <code>match</code> may be an empty <code>all</code>, which matches every object. At most one per rule set; its name starts with <code>Default</code> or contains <code>Catch-all</code>; it allows, denies or audits; and it is never in a mandatory rule set. Unset means <code>false</code>.</td></tr>
 <tr><td><code>description</code></td><td>string</td><td>no</td><td></td><td>at most 4096 characters</td><td>1.0.0</td><td>Free-text description, at most 4096 characters.</td></tr>
 <tr><td><code>display_id</code></td><td>string</td><td>no</td><td></td><td>matches <code>^R-[0-9]{6,12}$</code></td><td>1.0.0</td><td>Human short ID from the tenant's sequence, <code>R-</code> and 6 to 12 digits.</td></tr>
 <tr><td><code>effects</code></td><td><a href="effects.html"><code>Effects</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Logging, upload, notification, severity and tags (#34). Unset fields take the action's defaults.</td></tr>
@@ -205,7 +206,7 @@
 <tr><td><code>enforcement_override</code></td><td><a href="types.html#enforcementoverride"><code>EnforcementOverride</code></a></td><td>no</td><td><code>"inherit"</code></td><td></td><td>1.0.0</td><td>Per-rule enforcement override (#36). Only for <code>deny</code> rules.</td></tr>
 <tr><td><code>expires_at</code></td><td><a href="types.html#timestamp"><code>Timestamp</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The rule is absent from this instant on (#40). An expired allow never revives, even if the clock is set back (<code>crate::lifecycle</code>).</td></tr>
 <tr><td><code>id</code></td><td><a href="types.html#ruleid"><code>RuleId</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>Stable ID, never reused.</td></tr>
-<tr><td><code>match</code></td><td><a href="match.html"><code>Match</code></a></td><td>yes</td><td></td><td></td><td>1.0.0</td><td>When the rule matches (#33).</td></tr>
+<tr><td><code>match</code></td><td><a href="match.html"><code>Match</code></a> or object</td><td>yes</td><td></td><td></td><td>1.0.0</td><td></td></tr>
 <tr><td><code>metadata</code></td><td><a href="metadata.html"><code>Metadata</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>Governance metadata (#40).</td></tr>
 <tr><td><code>name</code></td><td>string</td><td>yes</td><td></td><td>1 to 128 characters</td><td>1.0.0</td><td>Display name, with the same rules as a policy name.</td></tr>
 <tr><td><code>object_types</code></td><td>array of <a href="types.html#objecttype"><code>ObjectType</code></a></td><td>no</td><td></td><td></td><td>1.0.0</td><td>The object classes the rule applies to. Empty means every class.</td></tr>

@@ -36,10 +36,10 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-6c5136c6.js";
+            window.path_to_searchindex_js = "../../searchindex-9cda0d46.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc-de2a680a.js"></script>
+        <script src="../../toc-049dbba3.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -405,6 +405,9 @@ point on a chain fails closed), and the OS access check
 (<code>AuthzAccessCheck</code> with a synthetic token of the standard user's SIDs).
 <code>cross_check_writability</code> compares that check with the portable
 evaluator: the evaluator must never miss a right the OS grants.
+<code>assess_file</code> merges the OS verdict into every result, as the union
+of the two (<code>acl::OsCheck</code>): the OS check can only add rights, and a
+check that fails leaves the evaluator's over-reporting result.
 <code>OsDirectories</code> lets <code>enumerate_user_writable_dirs</code> walk real folders
 without following junctions or mount points. Windows tests build a
 weak-ACL fixture tree (a user-writable folder under a locked one, an
@@ -443,6 +446,16 @@ file ID, USN, timestamps and attributes.
 <code>win::links::read_details</code> fills them into an <code>FsContext</code>. Windows tests
 make a symbolic link, a relative link, a junction, a mount point and an
 app execution alias, 21 hard links and tagged and executable streams.</li>
+<li><code>win::journal</code> (Windows, <code>os-trust</code> feature), for the file inventory
+(<a href="https://github.com/jusso-dev/palisade/issues/60">#60</a>): a volume's
+change journal state, reading records from a saved cursor
+(<code>FSCTL_READ_USN_JOURNAL</code>), listing every file of the master file table
+for an initial scan (<code>FSCTL_ENUM_USN_DATA</code>), and opening a file by its
+128-bit ID without following a reparse point. <code>fsctx::ntfs</code> parses the
+journal state and the record lists, failing a whole batch on any
+malformed record, so a change is never skipped silently.
+<code>JournalData::can_resume</code> says whether a saved <code>(journal ID, next USN)</code>
+cursor is still readable or the volume needs a reconciliation scan.</li>
 </ul>
 </li>
 <li>
@@ -1031,14 +1044,34 @@ with any of those leaves no signature valid, and so does a signature on
 an archive without ZIP64 end records, which the OS rejects whatever its
 digest (Windows CI: the OS signing tool always writes them). A bundle's block map lists
 only its bundle manifest; each payload package must be a stored member at
-the offset and of the size the bundle manifest gives. On Windows,
+the offset and of the size the bundle manifest gives.
+<code>PackageSignature::status()</code> gives the package-level verdict
+(<code>PackageSignatureStatus</code>: <code>Valid</code>, <code>Rejected(issue)</code> by a package check,
+or <code>Invalid</code> by the signatures themselves); the shared report keeps
+<code>DigestMismatch</code> for both kinds of rejection. A digest input that is
+present but unreadable (an over-limit <code>[Content_Types].xml</code>, a broken
+code integrity catalog) is named as <code>DigestInput</code>.
+<code>tests/package_signed.rs</code> signs packages at test time with a per-run key,
+so a package changed <strong>before</strong> signing (a block map that leaves a file
+out, a bundle manifest with a wrong payload offset) has a matching digest
+and only the package check rejects it. On Windows,
 <code>tests/package_os.rs</code> checks the family names against the OS package
 identity API and the signature verdicts against the OS trust-verification
 API, on the committed fixtures and on a package and bundle that the OS
 SDK's own packaging and signing tools build and sign during the test. It
 also has the SDK's signing tool sign the test builder's packages in every
 archive layout, and requires the digest that tool signs to equal this
-crate's, tag by tag.</p>
+crate's, tag by tag.
+<code>package::installed</code> models installed packages (identity checked for
+consistency, install folder as a final path, signature kind, framework,
+bundle, resource and stub flags, users, applications), maps an
+executable's final path to the one package whose folder holds it
+(<code>owner_of</code>: owned, not owned, or ambiguous), and resolves an app
+execution alias only when its family, app user model ID, application
+and target executable all check out against an installed package
+(<code>resolve_alias</code>). <code>win::packages</code> fills it for one family and the
+current user from the OS app-model API and the installed manifest,
+kept only when the manifest gives the full name the OS reported.</p>
 </li>
 </ul>
 <h2 id="handling-untrusted-input"><a class="header" href="#handling-untrusted-input">Handling untrusted input</a></h2>
