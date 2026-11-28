@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ff309dc.js";
+            window.path_to_searchindex_js = "../searchindex-d15c7af5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -197,7 +197,7 @@ the pinned toolchain and needs no other tools.</p>
 <tbody>
 <tr><td><code>ci [--fast]</code></td><td>Runs every check in <code>.github/workflows/ci.yml</code> locally, with the same commands. <code>--fast</code> skips coverage, fuzz, docs, the book build, feature-powerset, msrv and the package, signing and server-image builds. A unit test keeps its step list identical to <code>ci.yml</code>. Steps: <code>src/ci.rs</code>.</td></tr>
 <tr><td><code>check-banned-terms [--digest &lt;term&gt;]</code></td><td>No commercial vendor or product name in any file or path, matched as whole words in any letter case (<a href="../docs/NAMING.html"><code>docs/NAMING.md</code></a>). The list, <code>docs/banned-terms.txt</code>, holds SHA-256 digests only; <code>--digest</code> prints the line for a new term. Rules: <code>src/banned_terms.rs</code>.</td></tr>
-<tr><td><code>docs generate</code>, <code>docs check</code>, <code>docs build</code>, <code>docs assemble</code></td><td>The documentation site (#27): generates the reference pages, checks that they are current and that every page is in the book and accessible, builds the book with mdBook and checks its links, and assembles the GitHub Pages tree. Code: <code>src/docs/</code>; see <a href="../docs/ci.html#documentation-site"><code>docs/ci.md</code></a>.</td></tr>
+<tr><td><code>docs generate</code>, <code>docs check</code>, <code>docs build</code>, <code>docs serve</code>, <code>docs assemble</code></td><td>The documentation site (#27): generates the reference pages, checks that they are current and that every page is in the book and accessible, builds the book with mdBook and checks its links, serves it locally with <code>mdbook serve</code>, and assembles the GitHub Pages tree. Code: <code>src/docs/</code>; see <a href="../docs/ci.html#documentation-site"><code>docs/ci.md</code></a>.</td></tr>
 <tr><td><code>check-deps</code></td><td>The allowed dependency directions between workspace crates, and crates banned from the <code>palisade-policy</code> and <code>palisade-agent</code> dependency trees. Rules: <code>src/deps.rs</code>.</td></tr>
 <tr><td><code>check-manifests</code></td><td>Every member crate inherits version, edition, MSRV, licence, repository, authors, <code>publish</code> and lints from the workspace, and takes every dependency from <code>[workspace.dependencies]</code>. <code>test-util</code> is never on by default and only dev-dependencies may enable it (an explicit <code>--features test-util</code> on the command line still can). Every crate README has no HTML comments, opens with a purpose paragraph, has the required sections and documents every feature. Rules: <code>src/manifests.rs</code>.</td></tr>
 <tr><td><code>adr new "&lt;title&gt;"</code>, <code>adr index</code>, <code>adr lint</code></td><td>The ADR tooling from <code>docs/adr/PROCESS.md</code>: scaffold the next ADR from the template, regenerate the index in <code>docs/adr/README.md</code>, and check every ADR's file name, number, title, Status, Date and Deciders lines, sections (present, in order, not empty), supersession links and the index. Rules: <code>src/adr.rs</code>.</td></tr>

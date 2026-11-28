@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4ff309dc.js";
+            window.path_to_searchindex_js = "../searchindex-d15c7af5.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -501,6 +501,7 @@ only the book's configuration, theme, the pages that are new, and the generated 
 <tr><td><code>cargo xtask docs generate</code></td><td>Regenerates <code>docs/book/src/reference/generated/</code>: the policy and event reference from <code>schemas/*/v1.json</code>, the CLI reference from each binary's <code>--help</code>, the crate map from the crate READMEs and <code>xtask/src/deps.rs</code>, and the reference and ADR lists in <code>SUMMARY.md</code>. Commit the result</td></tr>
 <tr><td><code>cargo xtask docs check</code></td><td>Fails if a generated page or list is stale; if a <code>docs/**/*.md</code>, crate README or root Markdown file is not in the book; if a page has no single title, skips a heading level or has an image without alt text; if a policy example is inline instead of included from <code>docs/examples/policies/</code> (where <code>palisade-policy</code>'s <code>tests/yaml.rs</code> validates it), or an example there is not shown; if a <code>rust</code> block is untested and not marked <code>ignore</code>; or if the disclaimer is missing from the README or the theme</td></tr>
 <tr><td><code>cargo xtask docs build</code></td><td>Stages the sources into <code>target/book-src</code> (repository links that are not chapters become links to GitHub; a broken one fails), runs <code>mdbook build</code> with every warning an error, renders every Mermaid diagram (a diagram that does not parse fails), checks every internal link and anchor with <code>lychee --offline</code>, and checks every page has the disclaimer banner. The site is in <code>target/book</code></td></tr>
+<tr><td><code>cargo xtask docs serve [--port &lt;n&gt;] [--open]</code></td><td>Stages the book as <code>docs build</code> does and serves it with <code>mdbook serve</code> at <code>http://127.0.0.1:3000/</code> (this machine only) until interrupted. mdBook rebuilds when the staged copy changes, not the repository sources, so run it again after editing a page. It writes to <code>target/book-serve</code> and checks no links: run <code>docs build</code> before pushing, as CI does</td></tr>
 <tr><td><code>cargo xtask docs assemble &lt;dir&gt; --version &lt;name&gt;</code></td><td>Assembles the GitHub Pages tree: the book and the <code>cargo doc</code> API docs under <code>&lt;dir&gt;/&lt;name&gt;/</code> and <code>&lt;dir&gt;/&lt;name&gt;/api/rust/</code>, <code>versions.json</code> for the version switcher, and a root redirect to <code>latest/</code></td></tr>
 </tbody>
 </table>
