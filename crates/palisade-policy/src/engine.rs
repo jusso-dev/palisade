@@ -240,13 +240,14 @@ pub struct SystemClock {
 impl SystemClock {
     /// A clock whose origin is now.
     #[must_use]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the engine's Clock implementation is the one place that reads the monotonic clock"
+    )]
     pub fn new() -> Self {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "the engine's Clock implementation is the one place that reads the monotonic clock"
-        )]
-        let origin = std::time::Instant::now();
-        Self { origin }
+        Self {
+            origin: std::time::Instant::now(),
+        }
     }
 }
 
