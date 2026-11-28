@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-68f16415.js";
+            window.path_to_searchindex_js = "../../searchindex-ed538ce1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -843,16 +843,22 @@ into an earlier one of the same content.</li>
 <li>Every group is a <code>Field</code>: <code>computed</code>, <code>not_requested</code>,
 <code>not_applicable</code>, <code>unavailable</code> (with why) or <code>not_yet_supported</code> (with
 the issue numbers). <code>kind</code> is the content classification of
-<code>filetype</code> (#44). Groups other issues still deliver are in the schema
-already: <code>script</code> (#52), <code>installer</code> and <code>package</code> (#53),
-and the owner, writability, streams, reparse points, file ID, volume
-and provenance (#54).</li>
-<li><code>signing_state</code> folds the embedded signatures (#48, #49, #50) and the
-catalog lookup (#51) into <code>trusted</code>, <code>untrusted</code>, <code>invalid</code>, <code>unsigned</code>
-or <code>unverified</code>. It is <code>trusted</code> only for an embedded signature that
-passed every check, or a trusted catalog match that does not rely on
-SHA-1. It is <code>unsigned</code> only when a catalog lookup ran too; a format
-whose signatures are not read yet is <code>unverified</code>.</li>
+<code>filetype</code> (#44). The deep tier fills <code>script</code> (#52), <code>installer</code> and
+<code>package</code> (#53), chosen by content, never by name. Groups other issues
+still deliver are in the schema already: the owner, writability,
+streams, reparse points, file ID, volume and provenance (#54).</li>
+<li><code>signing_state</code> folds the embedded signatures (#48, #49, #50) of PE
+images, scripts, installers and packages, and the catalog lookup (#51),
+into <code>trusted</code>, <code>untrusted</code>, <code>invalid</code>, <code>unsigned</code> or <code>unverified</code>. It
+is <code>trusted</code> only for a signature that passed every check, or a trusted
+catalog match that does not rely on SHA-1. A package whose manifest
+names another publisher than its signer is <code>invalid</code>. It is <code>unsigned</code>
+only when a catalog lookup ran and can prove a miss; a format whose
+signatures are not read, and a script or installer no catalog lists, is
+<code>unverified</code>.</li>
+<li><code>hashes.msi_normalised_sha256</code> (Medium) and
+<code>hashes.script_normalised_sha256</code> (Weak) are the tolerant identities of
+#53 and #52, for explicit opt-in rules only.</li>
 <li><code>hashes.authoritative</code> names the identity digest: the Authenticode
 SHA-256 of a conformant image, otherwise the flat SHA-256, <code>none</code> for
 an empty file (#47).</li>

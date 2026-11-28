@@ -36,7 +36,7 @@
             const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../../searchindex-68f16415.js";
+            window.path_to_searchindex_js = "../../searchindex-ed538ce1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../../toc-de2a680a.js"></script>
@@ -217,8 +217,11 @@ TBS hash; protected binaries such as interpreters are expected to chain
 to one. <code>--catroot</code> loads every <code>*.cat</code> under a directory (such as the OS
 catalog root) and looks files up in it. Revocation is not fetched
 (offline).</li>
-<li><code>hash</code> prints only the selected digests. <code>msi-normalised</code> and
-<code>script-normalised</code> are not computed yet (#53, #52) and exit 1.</li>
+<li><code>hash</code> prints only the selected digests. <code>msi-normalised</code> (an
+installer's timestamp-free hash) and <code>script-normalised</code> (a script's text
+without its signature block, byte order mark and line-ending
+differences) parse the file; for any other file they are not available
+and exit 1.</li>
 <li><code>certs</code> writes each certificate of a signed PE file, cabinet, catalog or
 other PKCS#7 file (nested signatures included) to
 <code>&lt;out&gt;/&lt;sha256 thumbprint&gt;.der</code> (or <code>.pem</code>), once each, through
