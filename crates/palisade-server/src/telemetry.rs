@@ -10,10 +10,13 @@
 //!
 //! No secret value is ever passed to a log macro: the configuration holds
 //! secret paths only, and the secret reader's errors never include file
-//! contents. The redaction layer for field names in #227 adds a second line
-//! of defence.
+//! contents. As a second line of defence, every line goes through
+//! [`crate::redact`] on its way out (#227): fields with sensitive names and
+//! secret-looking values are replaced by `[REDACTED]`.
 
 use tracing::level_filters::LevelFilter;
+
+use crate::redact::RedactingMakeWriter;
 
 /// Installs the JSON subscriber as the global default, and a panic hook
 /// that logs panics through it, so standard error carries JSON lines only.
@@ -24,7 +27,7 @@ pub fn init_json(level: LevelFilter) -> Result<(), String> {
         .with_max_level(level)
         .with_current_span(true)
         .with_span_list(true)
-        .with_writer(std::io::stderr)
+        .with_writer(RedactingMakeWriter(std::io::stderr))
         .try_init()
         .map_err(|e| format!("cannot install the log subscriber: {e}"))?;
     std::panic::set_hook(Box::new(|info| {

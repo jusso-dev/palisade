@@ -9,6 +9,7 @@ pub mod health;
 pub mod http;
 pub mod net;
 pub mod problem;
+pub mod redact;
 pub mod secret;
 pub mod server;
 pub mod telemetry;

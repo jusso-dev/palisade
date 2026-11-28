@@ -103,7 +103,7 @@ impl Identity {
         let key_pem = read_secret_file(&tls.key_file, MAX_KEY_FILE)?;
         // The PEM parser's error text can quote input lines, so it is not
         // passed on: only the path and a fixed reason are reported.
-        let key = PrivateKeyDer::from_pem_slice(&key_pem).map_err(|_| {
+        let key = PrivateKeyDer::from_pem_slice(key_pem.expose()).map_err(|_| {
             format!(
                 "{}: no PKCS#8, PKCS#1 or SEC1 private key found in PEM form",
                 tls.key_file.display()
