@@ -1347,10 +1347,12 @@ dependencies = [
  "palisade-policy",
  "palisade-proto",
  "proptest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
+ "tokio-rustls",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -1358,6 +1360,7 @@ dependencies = [
  "windows-service",
  "windows-sys 0.61.2",
  "windows-version",
+ "zeroize",
 ]
 
 [[package]]

@@ -314,7 +314,19 @@ pub fn builtin_subsystems(loaded: &LoadedConfig) -> Vec<Arc<dyn Subsystem>> {
         )),
         Arc::new(SystemClock),
     ));
-    vec![config, clock, inventory, policy]
+    let mut subsystems: Vec<Arc<dyn Subsystem>> = vec![config, clock, inventory, policy];
+    // Server communication (#223, #62), when an install-time server URL is
+    // set. A bad value stops nothing else: it is logged and comms stays off.
+    match crate::comms::config_from_env(|k| std::env::var(k).ok()) {
+        Ok(Some(c)) => subsystems.push(Arc::new(
+            crate::comms::subsystem::CommsSubsystem::for_platform(c),
+        )),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "server communication is misconfigured; it stays off")
+        }
+    }
+    subsystems
 }
 
 /// Starts `supervisor`, runs until `stop` resolves, then shuts down within the

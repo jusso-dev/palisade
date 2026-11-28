@@ -33,6 +33,14 @@ palisade-fileid = { workspace = true }
 palisade-proto = { workspace = true }
 # Interface addresses for the environment backend, as in the server.
 if-addrs = { workspace = true }
+# Server communication (#223, #62): TLS with the device key as the client
+# identity and pinned server roots, through the same restricted `ring`
+# provider as the server. No HTTP client stack: the agent's own bounded
+# HTTP/1.1 head parser is in `palisade_proto::comms::http`.
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+serde_json = { workspace = true }
+zeroize = { workspace = true }
 # The policy cache (#61): the bundle format and engine, the anti-rollback
 # and last-known-good decisions, and the lock-free swap of the running
 # policy (already in the agent's tree through `palisade-policy`).
@@ -43,7 +51,7 @@ palisade-policy = { workspace = true }
 serde = { workspace = true }
 # The simulator's placeholder event chain.
 sha2 = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -85,7 +93,10 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+# The comms tests run a stand-in server that issues device certificates
+# with the internal CA (#223). Test builds only: the shipped agent never
+# links the issuance code.
+palisade-proto = { workspace = true, features = ["issuance"] }
 # The facts bridge's property tests (`tests/facts.rs`).
 proptest = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "test-util"] }
