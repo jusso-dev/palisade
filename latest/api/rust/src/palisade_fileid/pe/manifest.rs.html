@@ -395,11 +395,11 @@
 <a href=#395 id=395 data-nosnippet>395</a>    e: <span class="kw-2">&amp;</span>BytesStart&lt;<span class="lifetime">'_</span>&gt;,
 <a href=#396 id=396 data-nosnippet>396</a>    wanted: [<span class="kw-2">&amp;</span>str; N],
 <a href=#397 id=397 data-nosnippet>397</a>) -&gt; <span class="prelude-ty">Result</span>&lt;[<span class="prelude-ty">Option</span>&lt;Value&gt;; N], ManifestError&gt; {
-<a href=#398 id=398 data-nosnippet>398</a>    check_tag(e.as_ref())<span class="question-mark">?</span>;
+<a href=#398 id=398 data-nosnippet>398</a>    check_tag(e.as_bytes())<span class="question-mark">?</span>;
 <a href=#399 id=399 data-nosnippet>399</a>    <span class="kw">let </span><span class="kw-2">mut </span>out: [<span class="prelude-ty">Option</span>&lt;Value&gt;; N] = std::array::from_fn(|<span class="kw">_</span>| <span class="prelude-val">None</span>);
 <a href=#400 id=400 data-nosnippet>400</a>    <span class="kw">for </span>a <span class="kw">in </span>e.attributes() {
 <a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">let </span>a = a.map_err(|err| ManifestError::Xml(err.to_string()))<span class="question-mark">?</span>;
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">if </span>!is_xml_name(a.key.as_ref()) {
+<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">if </span>!is_xml_name(a.key.as_ref().as_bytes()) {
 <a href=#403 id=403 data-nosnippet>403</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"invalid attribute name"</span>.into()));
 <a href=#404 id=404 data-nosnippet>404</a>        }
 <a href=#405 id=405 data-nosnippet>405</a>        <span class="comment">// Only the five predefined entities resolve; anything else fails.
@@ -414,7 +414,7 @@
 <a href=#414 id=414 data-nosnippet>414</a>        }
 <a href=#415 id=415 data-nosnippet>415</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(slot) = wanted
 <a href=#416 id=416 data-nosnippet>416</a>            .iter()
-<a href=#417 id=417 data-nosnippet>417</a>            .position(|w| a.key.as_ref() == w.as_bytes())
+<a href=#417 id=417 data-nosnippet>417</a>            .position(|w| a.key.as_ref() == <span class="kw-2">*</span>w)
 <a href=#418 id=418 data-nosnippet>418</a>            .and_then(|i| out.get_mut(i))
 <a href=#419 id=419 data-nosnippet>419</a>        {
 <a href=#420 id=420 data-nosnippet>420</a>            <span class="kw-2">*</span>slot = <span class="prelude-val">Some</span>(Value::new(<span class="kw-2">&amp;</span>value));
@@ -580,7 +580,7 @@
 <a href=#580 id=580 data-nosnippet>580</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::TooDeep);
 <a href=#581 id=581 data-nosnippet>581</a>                }
 <a href=#582 id=582 data-nosnippet>582</a>                bind_prefixes(e, <span class="kw-2">&amp;mut </span>scopes)<span class="question-mark">?</span>;
-<a href=#583 id=583 data-nosnippet>583</a>                path.<span class="number">0</span>.push(e.local_name().as_ref().to_vec());
+<a href=#583 id=583 data-nosnippet>583</a>                path.<span class="number">0</span>.push(e.local_name().as_ref().as_bytes().to_vec());
 <a href=#584 id=584 data-nosnippet>584</a>                element(e, <span class="kw-2">&amp;</span>path, <span class="kw-2">&amp;mut </span>out, <span class="kw-2">&amp;mut </span>seen_execution_level)<span class="question-mark">?</span>;
 <a href=#585 id=585 data-nosnippet>585</a>                <span class="comment">// Text belongs to a setting only directly inside it.
 <a href=#586 id=586 data-nosnippet>586</a>                </span>text_field = <span class="prelude-val">None</span>;
@@ -633,387 +633,379 @@
 <a href=#633 id=633 data-nosnippet>633</a>                }
 <a href=#634 id=634 data-nosnippet>634</a>            }
 <a href=#635 id=635 data-nosnippet>635</a>            Event::Text(t) =&gt; {
-<a href=#636 id=636 data-nosnippet>636</a>                <span class="kw">let </span>raw = t
-<a href=#637 id=637 data-nosnippet>637</a>                    .xml10_content()
-<a href=#638 id=638 data-nosnippet>638</a>                    .map_err(|e| ManifestError::Xml(e.to_string()))<span class="question-mark">?</span>;
-<a href=#639 id=639 data-nosnippet>639</a>                check_chars(<span class="kw-2">&amp;</span>raw)<span class="question-mark">?</span>;
-<a href=#640 id=640 data-nosnippet>640</a>                <span class="kw">if </span>raw.contains(<span class="string">"]]&gt;"</span>) {
-<a href=#641 id=641 data-nosnippet>641</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"`]]&gt;` in character data"</span>.into()));
-<a href=#642 id=642 data-nosnippet>642</a>                }
-<a href=#643 id=643 data-nosnippet>643</a>                <span class="kw">if </span>outside(<span class="kw-2">&amp;</span>path, <span class="kw-2">&amp;</span>raw) {
-<a href=#644 id=644 data-nosnippet>644</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"text outside the root element"</span>.into()));
-<a href=#645 id=645 data-nosnippet>645</a>                }
-<a href=#646 id=646 data-nosnippet>646</a>                <span class="kw">if </span>text_field.is_some() {
-<a href=#647 id=647 data-nosnippet>647</a>                    <span class="comment">// References arrive as their own events, so the text is
-<a href=#648 id=648 data-nosnippet>648</a>                    // already plain.
-<a href=#649 id=649 data-nosnippet>649</a>                    </span>text.push(<span class="kw-2">&amp;</span>raw);
-<a href=#650 id=650 data-nosnippet>650</a>                }
-<a href=#651 id=651 data-nosnippet>651</a>            }
-<a href=#652 id=652 data-nosnippet>652</a>            Event::CData(t) =&gt; {
-<a href=#653 id=653 data-nosnippet>653</a>                <span class="kw">let </span>raw = t
-<a href=#654 id=654 data-nosnippet>654</a>                    .xml10_content()
-<a href=#655 id=655 data-nosnippet>655</a>                    .map_err(|e| ManifestError::Xml(e.to_string()))<span class="question-mark">?</span>;
-<a href=#656 id=656 data-nosnippet>656</a>                check_chars(<span class="kw-2">&amp;</span>raw)<span class="question-mark">?</span>;
-<a href=#657 id=657 data-nosnippet>657</a>                <span class="kw">if </span>path.<span class="number">0</span>.is_empty() {
-<a href=#658 id=658 data-nosnippet>658</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"CDATA outside the root element"</span>.into()));
-<a href=#659 id=659 data-nosnippet>659</a>                }
-<a href=#660 id=660 data-nosnippet>660</a>                <span class="kw">if </span>text_field.is_some() {
-<a href=#661 id=661 data-nosnippet>661</a>                    text.push(<span class="kw-2">&amp;</span>raw);
-<a href=#662 id=662 data-nosnippet>662</a>                }
-<a href=#663 id=663 data-nosnippet>663</a>            }
-<a href=#664 id=664 data-nosnippet>664</a>            Event::GeneralRef(r) =&gt; {
-<a href=#665 id=665 data-nosnippet>665</a>                <span class="comment">// Only character references and the five predefined
-<a href=#666 id=666 data-nosnippet>666</a>                // entities are accepted; anything else is undefined.
-<a href=#667 id=667 data-nosnippet>667</a>                </span><span class="kw">let </span>resolved = <span class="kw">match </span>r.resolve_char_ref() {
-<a href=#668 id=668 data-nosnippet>668</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(c)) <span class="kw">if </span>is_xml_char(c) =&gt; c.to_string(),
-<a href=#669 id=669 data-nosnippet>669</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; {
-<a href=#670 id=670 data-nosnippet>670</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(
-<a href=#671 id=671 data-nosnippet>671</a>                            <span class="string">"character reference to a character XML does not allow"</span>.into(),
-<a href=#672 id=672 data-nosnippet>672</a>                        ));
-<a href=#673 id=673 data-nosnippet>673</a>                    }
-<a href=#674 id=674 data-nosnippet>674</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; {
-<a href=#675 id=675 data-nosnippet>675</a>                        <span class="kw">let </span>name = r.decode().map_err(|e| ManifestError::Xml(e.to_string()))<span class="question-mark">?</span>;
-<a href=#676 id=676 data-nosnippet>676</a>                        quick_xml::escape::resolve_predefined_entity(<span class="kw-2">&amp;</span>name)
-<a href=#677 id=677 data-nosnippet>677</a>                            .ok_or_else(|| {
-<a href=#678 id=678 data-nosnippet>678</a>                                ManifestError::Xml(<span class="macro">format!</span>(<span class="string">"undefined entity &amp;{name};"</span>))
-<a href=#679 id=679 data-nosnippet>679</a>                            })<span class="question-mark">?
-<a href=#680 id=680 data-nosnippet>680</a>                            </span>.to_owned()
-<a href=#681 id=681 data-nosnippet>681</a>                    }
-<a href=#682 id=682 data-nosnippet>682</a>                    <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(e.to_string())),
-<a href=#683 id=683 data-nosnippet>683</a>                };
-<a href=#684 id=684 data-nosnippet>684</a>                <span class="kw">if </span>path.<span class="number">0</span>.is_empty() {
-<a href=#685 id=685 data-nosnippet>685</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(
-<a href=#686 id=686 data-nosnippet>686</a>                        <span class="string">"reference outside the root element"</span>.into(),
-<a href=#687 id=687 data-nosnippet>687</a>                    ));
-<a href=#688 id=688 data-nosnippet>688</a>                }
-<a href=#689 id=689 data-nosnippet>689</a>                <span class="kw">if </span>text_field.is_some() {
-<a href=#690 id=690 data-nosnippet>690</a>                    text.push(<span class="kw-2">&amp;</span>resolved);
-<a href=#691 id=691 data-nosnippet>691</a>                }
-<a href=#692 id=692 data-nosnippet>692</a>            }
-<a href=#693 id=693 data-nosnippet>693</a>            Event::End(<span class="kw">_</span>) =&gt; {
-<a href=#694 id=694 data-nosnippet>694</a>                path.<span class="number">0</span>.pop();
-<a href=#695 id=695 data-nosnippet>695</a>                scopes.pop();
-<a href=#696 id=696 data-nosnippet>696</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(field) = text_field.take() {
-<a href=#697 id=697 data-nosnippet>697</a>                    <span class="kw">let </span>value = text.value();
-<a href=#698 id=698 data-nosnippet>698</a>                    <span class="kw">match </span>field {
-<a href=#699 id=699 data-nosnippet>699</a>                        TextField::AutoElevate =&gt; out.auto_elevate = value.as_bool(),
-<a href=#700 id=700 data-nosnippet>700</a>                        TextField::DpiAware =&gt; out.dpi_aware = <span class="prelude-val">Some</span>(value.text),
-<a href=#701 id=701 data-nosnippet>701</a>                        TextField::DpiAwareness =&gt; out.dpi_awareness = <span class="prelude-val">Some</span>(value.text),
-<a href=#702 id=702 data-nosnippet>702</a>                    }
-<a href=#703 id=703 data-nosnippet>703</a>                }
-<a href=#704 id=704 data-nosnippet>704</a>            }
-<a href=#705 id=705 data-nosnippet>705</a>            Event::Eof =&gt; {
-<a href=#706 id=706 data-nosnippet>706</a>                <span class="kw">if </span>!path.<span class="number">0</span>.is_empty() {
-<a href=#707 id=707 data-nosnippet>707</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"an element is not closed"</span>.into()));
-<a href=#708 id=708 data-nosnippet>708</a>                }
-<a href=#709 id=709 data-nosnippet>709</a>                <span class="kw">if </span>roots == <span class="number">0 </span>{
-<a href=#710 id=710 data-nosnippet>710</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"no root element"</span>.into()));
-<a href=#711 id=711 data-nosnippet>711</a>                }
-<a href=#712 id=712 data-nosnippet>712</a>                <span class="kw">break</span>;
-<a href=#713 id=713 data-nosnippet>713</a>            }
-<a href=#714 id=714 data-nosnippet>714</a>            Event::Decl(d) =&gt; {
-<a href=#715 id=715 data-nosnippet>715</a>                <span class="comment">// Only as the very first thing, with a valid version.
-<a href=#716 id=716 data-nosnippet>716</a>                </span><span class="kw">if </span>seen_anything {
-<a href=#717 id=717 data-nosnippet>717</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"misplaced XML declaration"</span>.into()));
-<a href=#718 id=718 data-nosnippet>718</a>                }
-<a href=#719 id=719 data-nosnippet>719</a>                check_decl(d.as_ref())<span class="question-mark">?</span>;
-<a href=#720 id=720 data-nosnippet>720</a>            }
-<a href=#721 id=721 data-nosnippet>721</a>            Event::PI(pi) =&gt; {
-<a href=#722 id=722 data-nosnippet>722</a>                <span class="kw">let </span>target = pi.target();
-<a href=#723 id=723 data-nosnippet>723</a>                <span class="kw">if </span>target.eq_ignore_ascii_case(<span class="string">b"xml"</span>)
-<a href=#724 id=724 data-nosnippet>724</a>                    || !is_xml_name(target)
-<a href=#725 id=725 data-nosnippet>725</a>                    || target.contains(<span class="kw-2">&amp;</span><span class="string">b':'</span>)
-<a href=#726 id=726 data-nosnippet>726</a>                {
-<a href=#727 id=727 data-nosnippet>727</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"bad processing instruction"</span>.into()));
-<a href=#728 id=728 data-nosnippet>728</a>                }
-<a href=#729 id=729 data-nosnippet>729</a>                <span class="kw">let </span>content =
-<a href=#730 id=730 data-nosnippet>730</a>                    std::str::from_utf8(pi.as_ref()).map_err(|<span class="kw">_</span>| ManifestError::NotUtf8)<span class="question-mark">?</span>;
-<a href=#731 id=731 data-nosnippet>731</a>                check_chars(content)<span class="question-mark">?</span>;
-<a href=#732 id=732 data-nosnippet>732</a>            }
-<a href=#733 id=733 data-nosnippet>733</a>            Event::Comment(c) =&gt; {
-<a href=#734 id=734 data-nosnippet>734</a>                <span class="kw">let </span>content =
-<a href=#735 id=735 data-nosnippet>735</a>                    std::str::from_utf8(c.as_ref()).map_err(|<span class="kw">_</span>| ManifestError::NotUtf8)<span class="question-mark">?</span>;
-<a href=#736 id=736 data-nosnippet>736</a>                check_chars(content)<span class="question-mark">?</span>;
-<a href=#737 id=737 data-nosnippet>737</a>            }
-<a href=#738 id=738 data-nosnippet>738</a>        }
-<a href=#739 id=739 data-nosnippet>739</a>        seen_anything = <span class="bool-val">true</span>;
-<a href=#740 id=740 data-nosnippet>740</a>    }
-<a href=#741 id=741 data-nosnippet>741</a>    <span class="prelude-val">Ok</span>(out)
-<a href=#742 id=742 data-nosnippet>742</a>}
-<a href=#743 id=743 data-nosnippet>743</a>
-<a href=#744 id=744 data-nosnippet>744</a><span class="doccomment">/// The namespace prefixes in scope: how many open elements declare each
-<a href=#745 id=745 data-nosnippet>745</a>/// one, and what each open element declared, so closing it undoes exactly
-<a href=#746 id=746 data-nosnippet>746</a>/// that. Lookups are logarithmic, however many prefixes are declared.
-<a href=#747 id=747 data-nosnippet>747</a></span><span class="attr">#[derive(Default)]
-<a href=#748 id=748 data-nosnippet>748</a></span><span class="kw">struct </span>Scopes {
-<a href=#749 id=749 data-nosnippet>749</a>    bound: BTreeMap&lt;Vec&lt;u8&gt;, usize&gt;,
-<a href=#750 id=750 data-nosnippet>750</a>    frames: Vec&lt;Vec&lt;Vec&lt;u8&gt;&gt;&gt;,
-<a href=#751 id=751 data-nosnippet>751</a>}
-<a href=#752 id=752 data-nosnippet>752</a>
-<a href=#753 id=753 data-nosnippet>753</a><span class="kw">impl </span>Scopes {
-<a href=#754 id=754 data-nosnippet>754</a>    <span class="kw">fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, declared: Vec&lt;Vec&lt;u8&gt;&gt;) {
-<a href=#755 id=755 data-nosnippet>755</a>        <span class="kw">for </span>prefix <span class="kw">in </span><span class="kw-2">&amp;</span>declared {
-<a href=#756 id=756 data-nosnippet>756</a>            <span class="kw">let </span>count = <span class="self">self</span>.bound.entry(prefix.clone()).or_insert(<span class="number">0</span>);
-<a href=#757 id=757 data-nosnippet>757</a>            <span class="kw-2">*</span>count = count.saturating_add(<span class="number">1</span>);
-<a href=#758 id=758 data-nosnippet>758</a>        }
-<a href=#759 id=759 data-nosnippet>759</a>        <span class="self">self</span>.frames.push(declared);
-<a href=#760 id=760 data-nosnippet>760</a>    }
-<a href=#761 id=761 data-nosnippet>761</a>
-<a href=#762 id=762 data-nosnippet>762</a>    <span class="kw">fn </span>pop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#763 id=763 data-nosnippet>763</a>        <span class="kw">for </span>prefix <span class="kw">in </span><span class="self">self</span>.frames.pop().unwrap_or_default() {
-<a href=#764 id=764 data-nosnippet>764</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(count) = <span class="self">self</span>.bound.get_mut(<span class="kw-2">&amp;</span>prefix) {
-<a href=#765 id=765 data-nosnippet>765</a>                <span class="kw-2">*</span>count = count.saturating_sub(<span class="number">1</span>);
-<a href=#766 id=766 data-nosnippet>766</a>                <span class="kw">if </span><span class="kw-2">*</span>count == <span class="number">0 </span>{
-<a href=#767 id=767 data-nosnippet>767</a>                    <span class="self">self</span>.bound.remove(<span class="kw-2">&amp;</span>prefix);
-<a href=#768 id=768 data-nosnippet>768</a>                }
-<a href=#769 id=769 data-nosnippet>769</a>            }
-<a href=#770 id=770 data-nosnippet>770</a>        }
-<a href=#771 id=771 data-nosnippet>771</a>    }
-<a href=#772 id=772 data-nosnippet>772</a>
-<a href=#773 id=773 data-nosnippet>773</a>    <span class="kw">fn </span>is_bound(<span class="kw-2">&amp;</span><span class="self">self</span>, prefix: <span class="kw-2">&amp;</span>[u8]) -&gt; bool {
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="self">self</span>.bound.contains_key(prefix)
-<a href=#775 id=775 data-nosnippet>775</a>    }
-<a href=#776 id=776 data-nosnippet>776</a>}
-<a href=#777 id=777 data-nosnippet>777</a>
-<a href=#778 id=778 data-nosnippet>778</a><span class="doccomment">/// Records the namespace prefixes `e` declares (`xmlns:p="..."`) as a new
-<a href=#779 id=779 data-nosnippet>779</a>/// scope, then checks that its own prefix and its attributes' prefixes are
-<a href=#780 id=780 data-nosnippet>780</a>/// declared, as XML Namespaces requires. `xml` is always bound and `xmlns`
-<a href=#781 id=781 data-nosnippet>781</a>/// only declares. A name with an undeclared prefix is not namespace
-<a href=#782 id=782 data-nosnippet>782</a>/// well formed, so the manifest is an error rather than read by its local
-<a href=#783 id=783 data-nosnippet>783</a>/// name.
-<a href=#784 id=784 data-nosnippet>784</a></span><span class="kw">fn </span>bind_prefixes(e: <span class="kw-2">&amp;</span>BytesStart&lt;<span class="lifetime">'_</span>&gt;, scopes: <span class="kw-2">&amp;mut </span>Scopes) -&gt; <span class="prelude-ty">Result</span>&lt;(), ManifestError&gt; {
-<a href=#785 id=785 data-nosnippet>785</a>    <span class="kw">let </span>bad = |what: <span class="kw-2">&amp;</span>str| <span class="prelude-val">Err</span>(ManifestError::Xml(<span class="macro">format!</span>(<span class="string">"namespace prefix: {what}"</span>)));
-<a href=#786 id=786 data-nosnippet>786</a>    <span class="kw">let </span><span class="kw-2">mut </span>declared = Vec::new();
-<a href=#787 id=787 data-nosnippet>787</a>    <span class="kw">let </span><span class="kw-2">mut </span>used = Vec::new();
-<a href=#788 id=788 data-nosnippet>788</a>    <span class="kw">for </span>a <span class="kw">in </span>e.attributes() {
-<a href=#789 id=789 data-nosnippet>789</a>        <span class="kw">let </span>a = a.map_err(|err| ManifestError::Xml(err.to_string()))<span class="question-mark">?</span>;
-<a href=#790 id=790 data-nosnippet>790</a>        <span class="kw">let </span>key = a.key.as_ref();
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(prefix) = key.strip_prefix(<span class="string">b"xmlns:"</span>) {
-<a href=#792 id=792 data-nosnippet>792</a>            <span class="comment">// Undeclaring a prefix (`xmlns:p=""`) is not allowed in XML
-<a href=#793 id=793 data-nosnippet>793</a>            // Namespaces 1.0, and `xmlns` itself cannot be declared.
-<a href=#794 id=794 data-nosnippet>794</a>            </span><span class="kw">if </span>a.value.is_empty() || prefix == <span class="string">b"xmlns" </span>{
-<a href=#795 id=795 data-nosnippet>795</a>                <span class="kw">return </span>bad(<span class="string">"bad declaration"</span>);
-<a href=#796 id=796 data-nosnippet>796</a>            }
-<a href=#797 id=797 data-nosnippet>797</a>            declared.push(prefix.to_vec());
-<a href=#798 id=798 data-nosnippet>798</a>        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(prefix) = a.key.prefix() {
-<a href=#799 id=799 data-nosnippet>799</a>            used.push(prefix.as_ref().to_vec());
-<a href=#800 id=800 data-nosnippet>800</a>        }
-<a href=#801 id=801 data-nosnippet>801</a>    }
-<a href=#802 id=802 data-nosnippet>802</a>    scopes.push(declared);
-<a href=#803 id=803 data-nosnippet>803</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(prefix) = e.name().prefix() {
-<a href=#804 id=804 data-nosnippet>804</a>        used.push(prefix.as_ref().to_vec());
+<a href=#636 id=636 data-nosnippet>636</a>                <span class="kw">let </span>raw = t.xml10_content();
+<a href=#637 id=637 data-nosnippet>637</a>                check_chars(<span class="kw-2">&amp;</span>raw)<span class="question-mark">?</span>;
+<a href=#638 id=638 data-nosnippet>638</a>                <span class="kw">if </span>raw.contains(<span class="string">"]]&gt;"</span>) {
+<a href=#639 id=639 data-nosnippet>639</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"`]]&gt;` in character data"</span>.into()));
+<a href=#640 id=640 data-nosnippet>640</a>                }
+<a href=#641 id=641 data-nosnippet>641</a>                <span class="kw">if </span>outside(<span class="kw-2">&amp;</span>path, <span class="kw-2">&amp;</span>raw) {
+<a href=#642 id=642 data-nosnippet>642</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"text outside the root element"</span>.into()));
+<a href=#643 id=643 data-nosnippet>643</a>                }
+<a href=#644 id=644 data-nosnippet>644</a>                <span class="kw">if </span>text_field.is_some() {
+<a href=#645 id=645 data-nosnippet>645</a>                    <span class="comment">// References arrive as their own events, so the text is
+<a href=#646 id=646 data-nosnippet>646</a>                    // already plain.
+<a href=#647 id=647 data-nosnippet>647</a>                    </span>text.push(<span class="kw-2">&amp;</span>raw);
+<a href=#648 id=648 data-nosnippet>648</a>                }
+<a href=#649 id=649 data-nosnippet>649</a>            }
+<a href=#650 id=650 data-nosnippet>650</a>            Event::CData(t) =&gt; {
+<a href=#651 id=651 data-nosnippet>651</a>                <span class="kw">let </span>raw = t.xml10_content();
+<a href=#652 id=652 data-nosnippet>652</a>                check_chars(<span class="kw-2">&amp;</span>raw)<span class="question-mark">?</span>;
+<a href=#653 id=653 data-nosnippet>653</a>                <span class="kw">if </span>path.<span class="number">0</span>.is_empty() {
+<a href=#654 id=654 data-nosnippet>654</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"CDATA outside the root element"</span>.into()));
+<a href=#655 id=655 data-nosnippet>655</a>                }
+<a href=#656 id=656 data-nosnippet>656</a>                <span class="kw">if </span>text_field.is_some() {
+<a href=#657 id=657 data-nosnippet>657</a>                    text.push(<span class="kw-2">&amp;</span>raw);
+<a href=#658 id=658 data-nosnippet>658</a>                }
+<a href=#659 id=659 data-nosnippet>659</a>            }
+<a href=#660 id=660 data-nosnippet>660</a>            Event::GeneralRef(r) =&gt; {
+<a href=#661 id=661 data-nosnippet>661</a>                <span class="comment">// Only character references and the five predefined
+<a href=#662 id=662 data-nosnippet>662</a>                // entities are accepted; anything else is undefined.
+<a href=#663 id=663 data-nosnippet>663</a>                </span><span class="kw">let </span>resolved = <span class="kw">match </span>r.resolve_char_ref() {
+<a href=#664 id=664 data-nosnippet>664</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(c)) <span class="kw">if </span>is_xml_char(c) =&gt; c.to_string(),
+<a href=#665 id=665 data-nosnippet>665</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; {
+<a href=#666 id=666 data-nosnippet>666</a>                        <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(
+<a href=#667 id=667 data-nosnippet>667</a>                            <span class="string">"character reference to a character XML does not allow"</span>.into(),
+<a href=#668 id=668 data-nosnippet>668</a>                        ));
+<a href=#669 id=669 data-nosnippet>669</a>                    }
+<a href=#670 id=670 data-nosnippet>670</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; {
+<a href=#671 id=671 data-nosnippet>671</a>                        <span class="kw">let </span>name: <span class="kw-2">&amp;</span>str = <span class="kw-2">&amp;</span>r;
+<a href=#672 id=672 data-nosnippet>672</a>                        quick_xml::escape::resolve_predefined_entity(name)
+<a href=#673 id=673 data-nosnippet>673</a>                            .ok_or_else(|| {
+<a href=#674 id=674 data-nosnippet>674</a>                                ManifestError::Xml(<span class="macro">format!</span>(<span class="string">"undefined entity &amp;{name};"</span>))
+<a href=#675 id=675 data-nosnippet>675</a>                            })<span class="question-mark">?
+<a href=#676 id=676 data-nosnippet>676</a>                            </span>.to_owned()
+<a href=#677 id=677 data-nosnippet>677</a>                    }
+<a href=#678 id=678 data-nosnippet>678</a>                    <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(e.to_string())),
+<a href=#679 id=679 data-nosnippet>679</a>                };
+<a href=#680 id=680 data-nosnippet>680</a>                <span class="kw">if </span>path.<span class="number">0</span>.is_empty() {
+<a href=#681 id=681 data-nosnippet>681</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(
+<a href=#682 id=682 data-nosnippet>682</a>                        <span class="string">"reference outside the root element"</span>.into(),
+<a href=#683 id=683 data-nosnippet>683</a>                    ));
+<a href=#684 id=684 data-nosnippet>684</a>                }
+<a href=#685 id=685 data-nosnippet>685</a>                <span class="kw">if </span>text_field.is_some() {
+<a href=#686 id=686 data-nosnippet>686</a>                    text.push(<span class="kw-2">&amp;</span>resolved);
+<a href=#687 id=687 data-nosnippet>687</a>                }
+<a href=#688 id=688 data-nosnippet>688</a>            }
+<a href=#689 id=689 data-nosnippet>689</a>            Event::End(<span class="kw">_</span>) =&gt; {
+<a href=#690 id=690 data-nosnippet>690</a>                path.<span class="number">0</span>.pop();
+<a href=#691 id=691 data-nosnippet>691</a>                scopes.pop();
+<a href=#692 id=692 data-nosnippet>692</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(field) = text_field.take() {
+<a href=#693 id=693 data-nosnippet>693</a>                    <span class="kw">let </span>value = text.value();
+<a href=#694 id=694 data-nosnippet>694</a>                    <span class="kw">match </span>field {
+<a href=#695 id=695 data-nosnippet>695</a>                        TextField::AutoElevate =&gt; out.auto_elevate = value.as_bool(),
+<a href=#696 id=696 data-nosnippet>696</a>                        TextField::DpiAware =&gt; out.dpi_aware = <span class="prelude-val">Some</span>(value.text),
+<a href=#697 id=697 data-nosnippet>697</a>                        TextField::DpiAwareness =&gt; out.dpi_awareness = <span class="prelude-val">Some</span>(value.text),
+<a href=#698 id=698 data-nosnippet>698</a>                    }
+<a href=#699 id=699 data-nosnippet>699</a>                }
+<a href=#700 id=700 data-nosnippet>700</a>            }
+<a href=#701 id=701 data-nosnippet>701</a>            Event::Eof =&gt; {
+<a href=#702 id=702 data-nosnippet>702</a>                <span class="kw">if </span>!path.<span class="number">0</span>.is_empty() {
+<a href=#703 id=703 data-nosnippet>703</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"an element is not closed"</span>.into()));
+<a href=#704 id=704 data-nosnippet>704</a>                }
+<a href=#705 id=705 data-nosnippet>705</a>                <span class="kw">if </span>roots == <span class="number">0 </span>{
+<a href=#706 id=706 data-nosnippet>706</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"no root element"</span>.into()));
+<a href=#707 id=707 data-nosnippet>707</a>                }
+<a href=#708 id=708 data-nosnippet>708</a>                <span class="kw">break</span>;
+<a href=#709 id=709 data-nosnippet>709</a>            }
+<a href=#710 id=710 data-nosnippet>710</a>            Event::Decl(d) =&gt; {
+<a href=#711 id=711 data-nosnippet>711</a>                <span class="comment">// Only as the very first thing, with a valid version.
+<a href=#712 id=712 data-nosnippet>712</a>                </span><span class="kw">if </span>seen_anything {
+<a href=#713 id=713 data-nosnippet>713</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"misplaced XML declaration"</span>.into()));
+<a href=#714 id=714 data-nosnippet>714</a>                }
+<a href=#715 id=715 data-nosnippet>715</a>                check_decl(d.as_bytes())<span class="question-mark">?</span>;
+<a href=#716 id=716 data-nosnippet>716</a>            }
+<a href=#717 id=717 data-nosnippet>717</a>            Event::PI(pi) =&gt; {
+<a href=#718 id=718 data-nosnippet>718</a>                <span class="kw">let </span>target = pi.target();
+<a href=#719 id=719 data-nosnippet>719</a>                <span class="kw">if </span>target.eq_ignore_ascii_case(<span class="string">"xml"</span>)
+<a href=#720 id=720 data-nosnippet>720</a>                    || !is_xml_name(target.as_bytes())
+<a href=#721 id=721 data-nosnippet>721</a>                    || target.contains(<span class="string">':'</span>)
+<a href=#722 id=722 data-nosnippet>722</a>                {
+<a href=#723 id=723 data-nosnippet>723</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(ManifestError::Xml(<span class="string">"bad processing instruction"</span>.into()));
+<a href=#724 id=724 data-nosnippet>724</a>                }
+<a href=#725 id=725 data-nosnippet>725</a>                check_chars(<span class="kw-2">&amp;</span>pi)<span class="question-mark">?</span>;
+<a href=#726 id=726 data-nosnippet>726</a>            }
+<a href=#727 id=727 data-nosnippet>727</a>            Event::Comment(c) =&gt; {
+<a href=#728 id=728 data-nosnippet>728</a>                check_chars(<span class="kw-2">&amp;</span>c)<span class="question-mark">?</span>;
+<a href=#729 id=729 data-nosnippet>729</a>            }
+<a href=#730 id=730 data-nosnippet>730</a>        }
+<a href=#731 id=731 data-nosnippet>731</a>        seen_anything = <span class="bool-val">true</span>;
+<a href=#732 id=732 data-nosnippet>732</a>    }
+<a href=#733 id=733 data-nosnippet>733</a>    <span class="prelude-val">Ok</span>(out)
+<a href=#734 id=734 data-nosnippet>734</a>}
+<a href=#735 id=735 data-nosnippet>735</a>
+<a href=#736 id=736 data-nosnippet>736</a><span class="doccomment">/// The namespace prefixes in scope: how many open elements declare each
+<a href=#737 id=737 data-nosnippet>737</a>/// one, and what each open element declared, so closing it undoes exactly
+<a href=#738 id=738 data-nosnippet>738</a>/// that. Lookups are logarithmic, however many prefixes are declared.
+<a href=#739 id=739 data-nosnippet>739</a></span><span class="attr">#[derive(Default)]
+<a href=#740 id=740 data-nosnippet>740</a></span><span class="kw">struct </span>Scopes {
+<a href=#741 id=741 data-nosnippet>741</a>    bound: BTreeMap&lt;Vec&lt;u8&gt;, usize&gt;,
+<a href=#742 id=742 data-nosnippet>742</a>    frames: Vec&lt;Vec&lt;Vec&lt;u8&gt;&gt;&gt;,
+<a href=#743 id=743 data-nosnippet>743</a>}
+<a href=#744 id=744 data-nosnippet>744</a>
+<a href=#745 id=745 data-nosnippet>745</a><span class="kw">impl </span>Scopes {
+<a href=#746 id=746 data-nosnippet>746</a>    <span class="kw">fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, declared: Vec&lt;Vec&lt;u8&gt;&gt;) {
+<a href=#747 id=747 data-nosnippet>747</a>        <span class="kw">for </span>prefix <span class="kw">in </span><span class="kw-2">&amp;</span>declared {
+<a href=#748 id=748 data-nosnippet>748</a>            <span class="kw">let </span>count = <span class="self">self</span>.bound.entry(prefix.clone()).or_insert(<span class="number">0</span>);
+<a href=#749 id=749 data-nosnippet>749</a>            <span class="kw-2">*</span>count = count.saturating_add(<span class="number">1</span>);
+<a href=#750 id=750 data-nosnippet>750</a>        }
+<a href=#751 id=751 data-nosnippet>751</a>        <span class="self">self</span>.frames.push(declared);
+<a href=#752 id=752 data-nosnippet>752</a>    }
+<a href=#753 id=753 data-nosnippet>753</a>
+<a href=#754 id=754 data-nosnippet>754</a>    <span class="kw">fn </span>pop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#755 id=755 data-nosnippet>755</a>        <span class="kw">for </span>prefix <span class="kw">in </span><span class="self">self</span>.frames.pop().unwrap_or_default() {
+<a href=#756 id=756 data-nosnippet>756</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(count) = <span class="self">self</span>.bound.get_mut(<span class="kw-2">&amp;</span>prefix) {
+<a href=#757 id=757 data-nosnippet>757</a>                <span class="kw-2">*</span>count = count.saturating_sub(<span class="number">1</span>);
+<a href=#758 id=758 data-nosnippet>758</a>                <span class="kw">if </span><span class="kw-2">*</span>count == <span class="number">0 </span>{
+<a href=#759 id=759 data-nosnippet>759</a>                    <span class="self">self</span>.bound.remove(<span class="kw-2">&amp;</span>prefix);
+<a href=#760 id=760 data-nosnippet>760</a>                }
+<a href=#761 id=761 data-nosnippet>761</a>            }
+<a href=#762 id=762 data-nosnippet>762</a>        }
+<a href=#763 id=763 data-nosnippet>763</a>    }
+<a href=#764 id=764 data-nosnippet>764</a>
+<a href=#765 id=765 data-nosnippet>765</a>    <span class="kw">fn </span>is_bound(<span class="kw-2">&amp;</span><span class="self">self</span>, prefix: <span class="kw-2">&amp;</span>[u8]) -&gt; bool {
+<a href=#766 id=766 data-nosnippet>766</a>        <span class="self">self</span>.bound.contains_key(prefix)
+<a href=#767 id=767 data-nosnippet>767</a>    }
+<a href=#768 id=768 data-nosnippet>768</a>}
+<a href=#769 id=769 data-nosnippet>769</a>
+<a href=#770 id=770 data-nosnippet>770</a><span class="doccomment">/// Records the namespace prefixes `e` declares (`xmlns:p="..."`) as a new
+<a href=#771 id=771 data-nosnippet>771</a>/// scope, then checks that its own prefix and its attributes' prefixes are
+<a href=#772 id=772 data-nosnippet>772</a>/// declared, as XML Namespaces requires. `xml` is always bound and `xmlns`
+<a href=#773 id=773 data-nosnippet>773</a>/// only declares. A name with an undeclared prefix is not namespace
+<a href=#774 id=774 data-nosnippet>774</a>/// well formed, so the manifest is an error rather than read by its local
+<a href=#775 id=775 data-nosnippet>775</a>/// name.
+<a href=#776 id=776 data-nosnippet>776</a></span><span class="kw">fn </span>bind_prefixes(e: <span class="kw-2">&amp;</span>BytesStart&lt;<span class="lifetime">'_</span>&gt;, scopes: <span class="kw-2">&amp;mut </span>Scopes) -&gt; <span class="prelude-ty">Result</span>&lt;(), ManifestError&gt; {
+<a href=#777 id=777 data-nosnippet>777</a>    <span class="kw">let </span>bad = |what: <span class="kw-2">&amp;</span>str| <span class="prelude-val">Err</span>(ManifestError::Xml(<span class="macro">format!</span>(<span class="string">"namespace prefix: {what}"</span>)));
+<a href=#778 id=778 data-nosnippet>778</a>    <span class="kw">let </span><span class="kw-2">mut </span>declared = Vec::new();
+<a href=#779 id=779 data-nosnippet>779</a>    <span class="kw">let </span><span class="kw-2">mut </span>used = Vec::new();
+<a href=#780 id=780 data-nosnippet>780</a>    <span class="kw">for </span>a <span class="kw">in </span>e.attributes() {
+<a href=#781 id=781 data-nosnippet>781</a>        <span class="kw">let </span>a = a.map_err(|err| ManifestError::Xml(err.to_string()))<span class="question-mark">?</span>;
+<a href=#782 id=782 data-nosnippet>782</a>        <span class="kw">let </span>key = a.key.as_ref();
+<a href=#783 id=783 data-nosnippet>783</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(prefix) = key.strip_prefix(<span class="string">"xmlns:"</span>) {
+<a href=#784 id=784 data-nosnippet>784</a>            <span class="comment">// Undeclaring a prefix (`xmlns:p=""`) is not allowed in XML
+<a href=#785 id=785 data-nosnippet>785</a>            // Namespaces 1.0, and `xmlns` itself cannot be declared.
+<a href=#786 id=786 data-nosnippet>786</a>            </span><span class="kw">if </span>a.value.is_empty() || prefix == <span class="string">"xmlns" </span>{
+<a href=#787 id=787 data-nosnippet>787</a>                <span class="kw">return </span>bad(<span class="string">"bad declaration"</span>);
+<a href=#788 id=788 data-nosnippet>788</a>            }
+<a href=#789 id=789 data-nosnippet>789</a>            declared.push(prefix.as_bytes().to_vec());
+<a href=#790 id=790 data-nosnippet>790</a>        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(prefix) = a.key.prefix() {
+<a href=#791 id=791 data-nosnippet>791</a>            used.push(prefix.as_ref().as_bytes().to_vec());
+<a href=#792 id=792 data-nosnippet>792</a>        }
+<a href=#793 id=793 data-nosnippet>793</a>    }
+<a href=#794 id=794 data-nosnippet>794</a>    scopes.push(declared);
+<a href=#795 id=795 data-nosnippet>795</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(prefix) = e.name().prefix() {
+<a href=#796 id=796 data-nosnippet>796</a>        used.push(prefix.as_ref().as_bytes().to_vec());
+<a href=#797 id=797 data-nosnippet>797</a>    }
+<a href=#798 id=798 data-nosnippet>798</a>    <span class="kw">for </span>prefix <span class="kw">in </span>used {
+<a href=#799 id=799 data-nosnippet>799</a>        <span class="kw">if </span>prefix == <span class="string">b"xmlns" </span>{
+<a href=#800 id=800 data-nosnippet>800</a>            <span class="kw">return </span>bad(<span class="string">"`xmlns` used as a prefix"</span>);
+<a href=#801 id=801 data-nosnippet>801</a>        }
+<a href=#802 id=802 data-nosnippet>802</a>        <span class="kw">if </span>prefix != <span class="string">b"xml" </span>&amp;&amp; !scopes.is_bound(<span class="kw-2">&amp;</span>prefix) {
+<a href=#803 id=803 data-nosnippet>803</a>            <span class="kw">return </span>bad(<span class="string">"undeclared"</span>);
+<a href=#804 id=804 data-nosnippet>804</a>        }
 <a href=#805 id=805 data-nosnippet>805</a>    }
-<a href=#806 id=806 data-nosnippet>806</a>    <span class="kw">for </span>prefix <span class="kw">in </span>used {
-<a href=#807 id=807 data-nosnippet>807</a>        <span class="kw">if </span>prefix == <span class="string">b"xmlns" </span>{
-<a href=#808 id=808 data-nosnippet>808</a>            <span class="kw">return </span>bad(<span class="string">"`xmlns` used as a prefix"</span>);
-<a href=#809 id=809 data-nosnippet>809</a>        }
-<a href=#810 id=810 data-nosnippet>810</a>        <span class="kw">if </span>prefix != <span class="string">b"xml" </span>&amp;&amp; !scopes.is_bound(<span class="kw-2">&amp;</span>prefix) {
-<a href=#811 id=811 data-nosnippet>811</a>            <span class="kw">return </span>bad(<span class="string">"undeclared"</span>);
-<a href=#812 id=812 data-nosnippet>812</a>        }
-<a href=#813 id=813 data-nosnippet>813</a>    }
-<a href=#814 id=814 data-nosnippet>814</a>    <span class="prelude-val">Ok</span>(())
-<a href=#815 id=815 data-nosnippet>815</a>}
-<a href=#816 id=816 data-nosnippet>816</a>
-<a href=#817 id=817 data-nosnippet>817</a><span class="kw">fn </span>element(
-<a href=#818 id=818 data-nosnippet>818</a>    e: <span class="kw-2">&amp;</span>BytesStart&lt;<span class="lifetime">'_</span>&gt;,
-<a href=#819 id=819 data-nosnippet>819</a>    path: <span class="kw-2">&amp;</span>Path,
-<a href=#820 id=820 data-nosnippet>820</a>    out: <span class="kw-2">&amp;mut </span>Manifest,
-<a href=#821 id=821 data-nosnippet>821</a>    seen_execution_level: <span class="kw-2">&amp;mut </span>bool,
-<a href=#822 id=822 data-nosnippet>822</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ManifestError&gt; {
-<a href=#823 id=823 data-nosnippet>823</a>    <span class="kw">if </span>path.is(<span class="kw-2">&amp;</span>EXECUTION_LEVEL) {
-<a href=#824 id=824 data-nosnippet>824</a>        <span class="kw">let </span>[level, ui_access] = attrs(e, [<span class="string">"level"</span>, <span class="string">"uiAccess"</span>])<span class="question-mark">?</span>;
-<a href=#825 id=825 data-nosnippet>825</a>        <span class="comment">// The first element decides, even if it lacks one of them.
-<a href=#826 id=826 data-nosnippet>826</a>        </span><span class="kw">if </span>!<span class="kw-2">*</span>seen_execution_level {
-<a href=#827 id=827 data-nosnippet>827</a>            <span class="kw-2">*</span>seen_execution_level = <span class="bool-val">true</span>;
-<a href=#828 id=828 data-nosnippet>828</a>            <span class="comment">// A cut level is kept as `Other`, never matched as a keyword.
-<a href=#829 id=829 data-nosnippet>829</a>            </span>out.execution_level = level.map(|v| {
-<a href=#830 id=830 data-nosnippet>830</a>                <span class="kw">if </span>v.cut {
-<a href=#831 id=831 data-nosnippet>831</a>                    ExecutionLevel::Other(v.text)
-<a href=#832 id=832 data-nosnippet>832</a>                } <span class="kw">else </span>{
-<a href=#833 id=833 data-nosnippet>833</a>                    ExecutionLevel::parse(<span class="kw-2">&amp;</span>v.text)
-<a href=#834 id=834 data-nosnippet>834</a>                }
-<a href=#835 id=835 data-nosnippet>835</a>            });
-<a href=#836 id=836 data-nosnippet>836</a>            out.ui_access = ui_access.and_then(|v| v.as_bool());
-<a href=#837 id=837 data-nosnippet>837</a>        }
-<a href=#838 id=838 data-nosnippet>838</a>    } <span class="kw">else if </span>path.is(<span class="kw-2">&amp;</span>IDENTITY) {
-<a href=#839 id=839 data-nosnippet>839</a>        <span class="kw">let </span>[name, version, arch, token, kind] = attrs(
-<a href=#840 id=840 data-nosnippet>840</a>            e,
-<a href=#841 id=841 data-nosnippet>841</a>            [
-<a href=#842 id=842 data-nosnippet>842</a>                <span class="string">"name"</span>,
-<a href=#843 id=843 data-nosnippet>843</a>                <span class="string">"version"</span>,
-<a href=#844 id=844 data-nosnippet>844</a>                <span class="string">"processorArchitecture"</span>,
-<a href=#845 id=845 data-nosnippet>845</a>                <span class="string">"publicKeyToken"</span>,
-<a href=#846 id=846 data-nosnippet>846</a>                <span class="string">"type"</span>,
-<a href=#847 id=847 data-nosnippet>847</a>            ],
-<a href=#848 id=848 data-nosnippet>848</a>        )<span class="question-mark">?</span>;
-<a href=#849 id=849 data-nosnippet>849</a>        <span class="kw">if </span>out.identity.is_none() {
-<a href=#850 id=850 data-nosnippet>850</a>            <span class="kw">let </span>text = |v: <span class="prelude-ty">Option</span>&lt;Value&gt;| v.map(|v| v.text);
-<a href=#851 id=851 data-nosnippet>851</a>            out.identity = <span class="prelude-val">Some</span>(AssemblyIdentity {
-<a href=#852 id=852 data-nosnippet>852</a>                name: text(name),
-<a href=#853 id=853 data-nosnippet>853</a>                version: text(version),
-<a href=#854 id=854 data-nosnippet>854</a>                processor_architecture: text(arch),
-<a href=#855 id=855 data-nosnippet>855</a>                public_key_token: text(token),
-<a href=#856 id=856 data-nosnippet>856</a>                kind: text(kind),
-<a href=#857 id=857 data-nosnippet>857</a>            });
-<a href=#858 id=858 data-nosnippet>858</a>        }
-<a href=#859 id=859 data-nosnippet>859</a>    } <span class="kw">else if </span>path.is(<span class="kw-2">&amp;</span>SUPPORTED_OS) {
-<a href=#860 id=860 data-nosnippet>860</a>        <span class="kw">let </span>[id] = attrs(e, [<span class="string">"Id"</span>])<span class="question-mark">?</span>;
-<a href=#861 id=861 data-nosnippet>861</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(id) = id {
-<a href=#862 id=862 data-nosnippet>862</a>            <span class="kw">if </span>out.supported_os.len() &lt; MAX_SUPPORTED_OS {
-<a href=#863 id=863 data-nosnippet>863</a>                out.supported_os.push(id.text);
-<a href=#864 id=864 data-nosnippet>864</a>            } <span class="kw">else </span>{
-<a href=#865 id=865 data-nosnippet>865</a>                out.truncated = <span class="bool-val">true</span>;
-<a href=#866 id=866 data-nosnippet>866</a>            }
-<a href=#867 id=867 data-nosnippet>867</a>        }
-<a href=#868 id=868 data-nosnippet>868</a>    } <span class="kw">else </span>{
-<a href=#869 id=869 data-nosnippet>869</a>        <span class="comment">// Not read, but still checked.
-<a href=#870 id=870 data-nosnippet>870</a>        </span><span class="kw">let _ </span>= attrs(e, [])<span class="question-mark">?</span>;
-<a href=#871 id=871 data-nosnippet>871</a>    }
-<a href=#872 id=872 data-nosnippet>872</a>    <span class="prelude-val">Ok</span>(())
-<a href=#873 id=873 data-nosnippet>873</a>}
-<a href=#874 id=874 data-nosnippet>874</a>
-<a href=#875 id=875 data-nosnippet>875</a><span class="doccomment">/// Why [`requires_elevation`] decided as it did.
-<a href=#876 id=876 data-nosnippet>876</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
-<a href=#877 id=877 data-nosnippet>877</a>#[non_exhaustive]
-<a href=#878 id=878 data-nosnippet>878</a></span><span class="kw">pub enum </span>ElevationReason {
-<a href=#879 id=879 data-nosnippet>879</a>    <span class="doccomment">/// The manifest requests `requireAdministrator`.
-<a href=#880 id=880 data-nosnippet>880</a>    </span>RequireAdministrator,
-<a href=#881 id=881 data-nosnippet>881</a>    <span class="doccomment">/// The manifest requests `highestAvailable`, which elevates for an
-<a href=#882 id=882 data-nosnippet>882</a>    /// administrator. Reported, but not counted as requiring elevation.
-<a href=#883 id=883 data-nosnippet>883</a>    </span>HighestAvailable,
-<a href=#884 id=884 data-nosnippet>884</a>    <span class="doccomment">/// The manifest requests `asInvoker`, so no installer heuristic
-<a href=#885 id=885 data-nosnippet>885</a>    /// applies.
-<a href=#886 id=886 data-nosnippet>886</a>    </span>ManifestAsInvoker,
-<a href=#887 id=887 data-nosnippet>887</a>    <span class="doccomment">/// The manifest requests a level this parser does not recognise. The
-<a href=#888 id=888 data-nosnippet>888</a>    /// OS refuses to start such a file, so it is not treated as `asInvoker`;
-<a href=#889 id=889 data-nosnippet>889</a>    /// the installer heuristics still apply.
-<a href=#890 id=890 data-nosnippet>890</a>    </span>UnknownLevel(String),
-<a href=#891 id=891 data-nosnippet>891</a>    <span class="doccomment">/// A manifest is present but requests no execution level. The
-<a href=#892 id=892 data-nosnippet>892</a>    /// installer heuristics apply only when there is no manifest, so they
-<a href=#893 id=893 data-nosnippet>893</a>    /// are not used.
-<a href=#894 id=894 data-nosnippet>894</a>    </span>ManifestWithoutLevel,
-<a href=#895 id=895 data-nosnippet>895</a>    <span class="doccomment">/// The process manifest (ID 1) is present but could not be read or
-<a href=#896 id=896 data-nosnippet>896</a>    /// parsed, so what it requests is unknown. Treated as requiring
-<a href=#897 id=897 data-nosnippet>897</a>    /// elevation, and never decided from another manifest or from the
-<a href=#898 id=898 data-nosnippet>898</a>    /// installer heuristics.
-<a href=#899 id=899 data-nosnippet>899</a>    </span>ManifestUnreadable,
-<a href=#900 id=900 data-nosnippet>900</a>    <span class="doccomment">/// There is no manifest, and the file name contains this installer
-<a href=#901 id=901 data-nosnippet>901</a>    /// word.
-<a href=#902 id=902 data-nosnippet>902</a>    </span>InstallerFileName(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#903 id=903 data-nosnippet>903</a>    <span class="doccomment">/// There is no manifest, and this version field mentions installing.
-<a href=#904 id=904 data-nosnippet>904</a>    </span>InstallerVersionInfo(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
-<a href=#905 id=905 data-nosnippet>905</a>    <span class="doccomment">/// Nothing suggests elevation.
-<a href=#906 id=906 data-nosnippet>906</a>    </span><span class="prelude-val">None</span>,
-<a href=#907 id=907 data-nosnippet>907</a>}
-<a href=#908 id=908 data-nosnippet>908</a>
-<a href=#909 id=909 data-nosnippet>909</a><span class="doccomment">/// The #45 elevation heuristic.
-<a href=#910 id=910 data-nosnippet>910</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
-<a href=#911 id=911 data-nosnippet>911</a></span><span class="kw">pub struct </span>Elevation {
-<a href=#912 id=912 data-nosnippet>912</a>    <span class="doccomment">/// Whether starting the file is expected to ask for administrator
-<a href=#913 id=913 data-nosnippet>913</a>    /// rights.
-<a href=#914 id=914 data-nosnippet>914</a>    </span><span class="kw">pub </span>requires_elevation: bool,
-<a href=#915 id=915 data-nosnippet>915</a>    <span class="doccomment">/// Why.
-<a href=#916 id=916 data-nosnippet>916</a>    </span><span class="kw">pub </span>reason: ElevationReason,
-<a href=#917 id=917 data-nosnippet>917</a>}
-<a href=#918 id=918 data-nosnippet>918</a>
-<a href=#919 id=919 data-nosnippet>919</a><span class="doccomment">/// The words in a file name that the OS installer detection looks for.
-<a href=#920 id=920 data-nosnippet>920</a></span><span class="kw">const </span>INSTALLER_WORDS: [<span class="kw-2">&amp;</span>str; <span class="number">4</span>] = [<span class="string">"setup"</span>, <span class="string">"install"</span>, <span class="string">"update"</span>, <span class="string">"patch"</span>];
-<a href=#921 id=921 data-nosnippet>921</a>
-<a href=#922 id=922 data-nosnippet>922</a><span class="doccomment">/// Whether starting a file is expected to ask for administrator rights:
-<a href=#923 id=923 data-nosnippet>923</a>/// true if its manifest requests `requireAdministrator`, or if it has no
-<a href=#924 id=924 data-nosnippet>924</a>/// manifest (or one with an unrecognised execution level) and the
-<a href=#925 id=925 data-nosnippet>925</a>/// installer heuristics match (its file name contains setup, install,
-<a href=#926 id=926 data-nosnippet>926</a>/// update or patch, or its version info mentions installing). A manifest
-<a href=#927 id=927 data-nosnippet>927</a>/// without an execution level is [`ElevationReason::ManifestWithoutLevel`]
-<a href=#928 id=928 data-nosnippet>928</a>/// and is not counted. `manifest` is the parsed process manifest, or
-<a href=#929 id=929 data-nosnippet>929</a>/// `None` when there is none; a process manifest that is present but
-<a href=#930 id=930 data-nosnippet>930</a>/// cannot be read is decided by [`super::PeInfo::requires_elevation`]
-<a href=#931 id=931 data-nosnippet>931</a>/// ([`ElevationReason::ManifestUnreadable`]), never passed as `None`. The
-<a href=#932 id=932 data-nosnippet>932</a>/// OS applies the installer heuristics only to 32-bit images; the caller
-<a href=#933 id=933 data-nosnippet>933</a>/// decides whether that applies.
-<a href=#934 id=934 data-nosnippet>934</a>///
-<a href=#935 id=935 data-nosnippet>935</a>/// `version_fields` are `(field name, value)` pairs, such as
-<a href=#936 id=936 data-nosnippet>936</a>/// `("FileDescription", "Foo Installer")`.
-<a href=#937 id=937 data-nosnippet>937</a></span><span class="attr">#[must_use]
-<a href=#938 id=938 data-nosnippet>938</a></span><span class="kw">pub fn </span>requires_elevation(
-<a href=#939 id=939 data-nosnippet>939</a>    manifest: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Manifest&gt;,
-<a href=#940 id=940 data-nosnippet>940</a>    file_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#941 id=941 data-nosnippet>941</a>    version_fields: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, <span class="kw-2">&amp;</span>str)],
-<a href=#942 id=942 data-nosnippet>942</a>) -&gt; Elevation {
-<a href=#943 id=943 data-nosnippet>943</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(manifest) = manifest <span class="kw">else </span>{
-<a href=#944 id=944 data-nosnippet>944</a>        <span class="kw">return match </span>installer_heuristic(file_name, version_fields) {
-<a href=#945 id=945 data-nosnippet>945</a>            <span class="prelude-val">Some</span>(reason) =&gt; Elevation {
-<a href=#946 id=946 data-nosnippet>946</a>                requires_elevation: <span class="bool-val">true</span>,
-<a href=#947 id=947 data-nosnippet>947</a>                reason,
-<a href=#948 id=948 data-nosnippet>948</a>            },
-<a href=#949 id=949 data-nosnippet>949</a>            <span class="prelude-val">None </span>=&gt; Elevation {
-<a href=#950 id=950 data-nosnippet>950</a>                requires_elevation: <span class="bool-val">false</span>,
-<a href=#951 id=951 data-nosnippet>951</a>                reason: ElevationReason::None,
-<a href=#952 id=952 data-nosnippet>952</a>            },
-<a href=#953 id=953 data-nosnippet>953</a>        };
-<a href=#954 id=954 data-nosnippet>954</a>    };
-<a href=#955 id=955 data-nosnippet>955</a>    <span class="kw">match </span><span class="kw-2">&amp;</span>manifest.execution_level {
-<a href=#956 id=956 data-nosnippet>956</a>        <span class="prelude-val">Some</span>(ExecutionLevel::RequireAdministrator) =&gt; Elevation {
-<a href=#957 id=957 data-nosnippet>957</a>            requires_elevation: <span class="bool-val">true</span>,
-<a href=#958 id=958 data-nosnippet>958</a>            reason: ElevationReason::RequireAdministrator,
+<a href=#806 id=806 data-nosnippet>806</a>    <span class="prelude-val">Ok</span>(())
+<a href=#807 id=807 data-nosnippet>807</a>}
+<a href=#808 id=808 data-nosnippet>808</a>
+<a href=#809 id=809 data-nosnippet>809</a><span class="kw">fn </span>element(
+<a href=#810 id=810 data-nosnippet>810</a>    e: <span class="kw-2">&amp;</span>BytesStart&lt;<span class="lifetime">'_</span>&gt;,
+<a href=#811 id=811 data-nosnippet>811</a>    path: <span class="kw-2">&amp;</span>Path,
+<a href=#812 id=812 data-nosnippet>812</a>    out: <span class="kw-2">&amp;mut </span>Manifest,
+<a href=#813 id=813 data-nosnippet>813</a>    seen_execution_level: <span class="kw-2">&amp;mut </span>bool,
+<a href=#814 id=814 data-nosnippet>814</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ManifestError&gt; {
+<a href=#815 id=815 data-nosnippet>815</a>    <span class="kw">if </span>path.is(<span class="kw-2">&amp;</span>EXECUTION_LEVEL) {
+<a href=#816 id=816 data-nosnippet>816</a>        <span class="kw">let </span>[level, ui_access] = attrs(e, [<span class="string">"level"</span>, <span class="string">"uiAccess"</span>])<span class="question-mark">?</span>;
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="comment">// The first element decides, even if it lacks one of them.
+<a href=#818 id=818 data-nosnippet>818</a>        </span><span class="kw">if </span>!<span class="kw-2">*</span>seen_execution_level {
+<a href=#819 id=819 data-nosnippet>819</a>            <span class="kw-2">*</span>seen_execution_level = <span class="bool-val">true</span>;
+<a href=#820 id=820 data-nosnippet>820</a>            <span class="comment">// A cut level is kept as `Other`, never matched as a keyword.
+<a href=#821 id=821 data-nosnippet>821</a>            </span>out.execution_level = level.map(|v| {
+<a href=#822 id=822 data-nosnippet>822</a>                <span class="kw">if </span>v.cut {
+<a href=#823 id=823 data-nosnippet>823</a>                    ExecutionLevel::Other(v.text)
+<a href=#824 id=824 data-nosnippet>824</a>                } <span class="kw">else </span>{
+<a href=#825 id=825 data-nosnippet>825</a>                    ExecutionLevel::parse(<span class="kw-2">&amp;</span>v.text)
+<a href=#826 id=826 data-nosnippet>826</a>                }
+<a href=#827 id=827 data-nosnippet>827</a>            });
+<a href=#828 id=828 data-nosnippet>828</a>            out.ui_access = ui_access.and_then(|v| v.as_bool());
+<a href=#829 id=829 data-nosnippet>829</a>        }
+<a href=#830 id=830 data-nosnippet>830</a>    } <span class="kw">else if </span>path.is(<span class="kw-2">&amp;</span>IDENTITY) {
+<a href=#831 id=831 data-nosnippet>831</a>        <span class="kw">let </span>[name, version, arch, token, kind] = attrs(
+<a href=#832 id=832 data-nosnippet>832</a>            e,
+<a href=#833 id=833 data-nosnippet>833</a>            [
+<a href=#834 id=834 data-nosnippet>834</a>                <span class="string">"name"</span>,
+<a href=#835 id=835 data-nosnippet>835</a>                <span class="string">"version"</span>,
+<a href=#836 id=836 data-nosnippet>836</a>                <span class="string">"processorArchitecture"</span>,
+<a href=#837 id=837 data-nosnippet>837</a>                <span class="string">"publicKeyToken"</span>,
+<a href=#838 id=838 data-nosnippet>838</a>                <span class="string">"type"</span>,
+<a href=#839 id=839 data-nosnippet>839</a>            ],
+<a href=#840 id=840 data-nosnippet>840</a>        )<span class="question-mark">?</span>;
+<a href=#841 id=841 data-nosnippet>841</a>        <span class="kw">if </span>out.identity.is_none() {
+<a href=#842 id=842 data-nosnippet>842</a>            <span class="kw">let </span>text = |v: <span class="prelude-ty">Option</span>&lt;Value&gt;| v.map(|v| v.text);
+<a href=#843 id=843 data-nosnippet>843</a>            out.identity = <span class="prelude-val">Some</span>(AssemblyIdentity {
+<a href=#844 id=844 data-nosnippet>844</a>                name: text(name),
+<a href=#845 id=845 data-nosnippet>845</a>                version: text(version),
+<a href=#846 id=846 data-nosnippet>846</a>                processor_architecture: text(arch),
+<a href=#847 id=847 data-nosnippet>847</a>                public_key_token: text(token),
+<a href=#848 id=848 data-nosnippet>848</a>                kind: text(kind),
+<a href=#849 id=849 data-nosnippet>849</a>            });
+<a href=#850 id=850 data-nosnippet>850</a>        }
+<a href=#851 id=851 data-nosnippet>851</a>    } <span class="kw">else if </span>path.is(<span class="kw-2">&amp;</span>SUPPORTED_OS) {
+<a href=#852 id=852 data-nosnippet>852</a>        <span class="kw">let </span>[id] = attrs(e, [<span class="string">"Id"</span>])<span class="question-mark">?</span>;
+<a href=#853 id=853 data-nosnippet>853</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(id) = id {
+<a href=#854 id=854 data-nosnippet>854</a>            <span class="kw">if </span>out.supported_os.len() &lt; MAX_SUPPORTED_OS {
+<a href=#855 id=855 data-nosnippet>855</a>                out.supported_os.push(id.text);
+<a href=#856 id=856 data-nosnippet>856</a>            } <span class="kw">else </span>{
+<a href=#857 id=857 data-nosnippet>857</a>                out.truncated = <span class="bool-val">true</span>;
+<a href=#858 id=858 data-nosnippet>858</a>            }
+<a href=#859 id=859 data-nosnippet>859</a>        }
+<a href=#860 id=860 data-nosnippet>860</a>    } <span class="kw">else </span>{
+<a href=#861 id=861 data-nosnippet>861</a>        <span class="comment">// Not read, but still checked.
+<a href=#862 id=862 data-nosnippet>862</a>        </span><span class="kw">let _ </span>= attrs(e, [])<span class="question-mark">?</span>;
+<a href=#863 id=863 data-nosnippet>863</a>    }
+<a href=#864 id=864 data-nosnippet>864</a>    <span class="prelude-val">Ok</span>(())
+<a href=#865 id=865 data-nosnippet>865</a>}
+<a href=#866 id=866 data-nosnippet>866</a>
+<a href=#867 id=867 data-nosnippet>867</a><span class="doccomment">/// Why [`requires_elevation`] decided as it did.
+<a href=#868 id=868 data-nosnippet>868</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
+<a href=#869 id=869 data-nosnippet>869</a>#[non_exhaustive]
+<a href=#870 id=870 data-nosnippet>870</a></span><span class="kw">pub enum </span>ElevationReason {
+<a href=#871 id=871 data-nosnippet>871</a>    <span class="doccomment">/// The manifest requests `requireAdministrator`.
+<a href=#872 id=872 data-nosnippet>872</a>    </span>RequireAdministrator,
+<a href=#873 id=873 data-nosnippet>873</a>    <span class="doccomment">/// The manifest requests `highestAvailable`, which elevates for an
+<a href=#874 id=874 data-nosnippet>874</a>    /// administrator. Reported, but not counted as requiring elevation.
+<a href=#875 id=875 data-nosnippet>875</a>    </span>HighestAvailable,
+<a href=#876 id=876 data-nosnippet>876</a>    <span class="doccomment">/// The manifest requests `asInvoker`, so no installer heuristic
+<a href=#877 id=877 data-nosnippet>877</a>    /// applies.
+<a href=#878 id=878 data-nosnippet>878</a>    </span>ManifestAsInvoker,
+<a href=#879 id=879 data-nosnippet>879</a>    <span class="doccomment">/// The manifest requests a level this parser does not recognise. The
+<a href=#880 id=880 data-nosnippet>880</a>    /// OS refuses to start such a file, so it is not treated as `asInvoker`;
+<a href=#881 id=881 data-nosnippet>881</a>    /// the installer heuristics still apply.
+<a href=#882 id=882 data-nosnippet>882</a>    </span>UnknownLevel(String),
+<a href=#883 id=883 data-nosnippet>883</a>    <span class="doccomment">/// A manifest is present but requests no execution level. The
+<a href=#884 id=884 data-nosnippet>884</a>    /// installer heuristics apply only when there is no manifest, so they
+<a href=#885 id=885 data-nosnippet>885</a>    /// are not used.
+<a href=#886 id=886 data-nosnippet>886</a>    </span>ManifestWithoutLevel,
+<a href=#887 id=887 data-nosnippet>887</a>    <span class="doccomment">/// The process manifest (ID 1) is present but could not be read or
+<a href=#888 id=888 data-nosnippet>888</a>    /// parsed, so what it requests is unknown. Treated as requiring
+<a href=#889 id=889 data-nosnippet>889</a>    /// elevation, and never decided from another manifest or from the
+<a href=#890 id=890 data-nosnippet>890</a>    /// installer heuristics.
+<a href=#891 id=891 data-nosnippet>891</a>    </span>ManifestUnreadable,
+<a href=#892 id=892 data-nosnippet>892</a>    <span class="doccomment">/// There is no manifest, and the file name contains this installer
+<a href=#893 id=893 data-nosnippet>893</a>    /// word.
+<a href=#894 id=894 data-nosnippet>894</a>    </span>InstallerFileName(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#895 id=895 data-nosnippet>895</a>    <span class="doccomment">/// There is no manifest, and this version field mentions installing.
+<a href=#896 id=896 data-nosnippet>896</a>    </span>InstallerVersionInfo(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str),
+<a href=#897 id=897 data-nosnippet>897</a>    <span class="doccomment">/// Nothing suggests elevation.
+<a href=#898 id=898 data-nosnippet>898</a>    </span><span class="prelude-val">None</span>,
+<a href=#899 id=899 data-nosnippet>899</a>}
+<a href=#900 id=900 data-nosnippet>900</a>
+<a href=#901 id=901 data-nosnippet>901</a><span class="doccomment">/// The #45 elevation heuristic.
+<a href=#902 id=902 data-nosnippet>902</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
+<a href=#903 id=903 data-nosnippet>903</a></span><span class="kw">pub struct </span>Elevation {
+<a href=#904 id=904 data-nosnippet>904</a>    <span class="doccomment">/// Whether starting the file is expected to ask for administrator
+<a href=#905 id=905 data-nosnippet>905</a>    /// rights.
+<a href=#906 id=906 data-nosnippet>906</a>    </span><span class="kw">pub </span>requires_elevation: bool,
+<a href=#907 id=907 data-nosnippet>907</a>    <span class="doccomment">/// Why.
+<a href=#908 id=908 data-nosnippet>908</a>    </span><span class="kw">pub </span>reason: ElevationReason,
+<a href=#909 id=909 data-nosnippet>909</a>}
+<a href=#910 id=910 data-nosnippet>910</a>
+<a href=#911 id=911 data-nosnippet>911</a><span class="doccomment">/// The words in a file name that the OS installer detection looks for.
+<a href=#912 id=912 data-nosnippet>912</a></span><span class="kw">const </span>INSTALLER_WORDS: [<span class="kw-2">&amp;</span>str; <span class="number">4</span>] = [<span class="string">"setup"</span>, <span class="string">"install"</span>, <span class="string">"update"</span>, <span class="string">"patch"</span>];
+<a href=#913 id=913 data-nosnippet>913</a>
+<a href=#914 id=914 data-nosnippet>914</a><span class="doccomment">/// Whether starting a file is expected to ask for administrator rights:
+<a href=#915 id=915 data-nosnippet>915</a>/// true if its manifest requests `requireAdministrator`, or if it has no
+<a href=#916 id=916 data-nosnippet>916</a>/// manifest (or one with an unrecognised execution level) and the
+<a href=#917 id=917 data-nosnippet>917</a>/// installer heuristics match (its file name contains setup, install,
+<a href=#918 id=918 data-nosnippet>918</a>/// update or patch, or its version info mentions installing). A manifest
+<a href=#919 id=919 data-nosnippet>919</a>/// without an execution level is [`ElevationReason::ManifestWithoutLevel`]
+<a href=#920 id=920 data-nosnippet>920</a>/// and is not counted. `manifest` is the parsed process manifest, or
+<a href=#921 id=921 data-nosnippet>921</a>/// `None` when there is none; a process manifest that is present but
+<a href=#922 id=922 data-nosnippet>922</a>/// cannot be read is decided by [`super::PeInfo::requires_elevation`]
+<a href=#923 id=923 data-nosnippet>923</a>/// ([`ElevationReason::ManifestUnreadable`]), never passed as `None`. The
+<a href=#924 id=924 data-nosnippet>924</a>/// OS applies the installer heuristics only to 32-bit images; the caller
+<a href=#925 id=925 data-nosnippet>925</a>/// decides whether that applies.
+<a href=#926 id=926 data-nosnippet>926</a>///
+<a href=#927 id=927 data-nosnippet>927</a>/// `version_fields` are `(field name, value)` pairs, such as
+<a href=#928 id=928 data-nosnippet>928</a>/// `("FileDescription", "Foo Installer")`.
+<a href=#929 id=929 data-nosnippet>929</a></span><span class="attr">#[must_use]
+<a href=#930 id=930 data-nosnippet>930</a></span><span class="kw">pub fn </span>requires_elevation(
+<a href=#931 id=931 data-nosnippet>931</a>    manifest: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Manifest&gt;,
+<a href=#932 id=932 data-nosnippet>932</a>    file_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#933 id=933 data-nosnippet>933</a>    version_fields: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, <span class="kw-2">&amp;</span>str)],
+<a href=#934 id=934 data-nosnippet>934</a>) -&gt; Elevation {
+<a href=#935 id=935 data-nosnippet>935</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(manifest) = manifest <span class="kw">else </span>{
+<a href=#936 id=936 data-nosnippet>936</a>        <span class="kw">return match </span>installer_heuristic(file_name, version_fields) {
+<a href=#937 id=937 data-nosnippet>937</a>            <span class="prelude-val">Some</span>(reason) =&gt; Elevation {
+<a href=#938 id=938 data-nosnippet>938</a>                requires_elevation: <span class="bool-val">true</span>,
+<a href=#939 id=939 data-nosnippet>939</a>                reason,
+<a href=#940 id=940 data-nosnippet>940</a>            },
+<a href=#941 id=941 data-nosnippet>941</a>            <span class="prelude-val">None </span>=&gt; Elevation {
+<a href=#942 id=942 data-nosnippet>942</a>                requires_elevation: <span class="bool-val">false</span>,
+<a href=#943 id=943 data-nosnippet>943</a>                reason: ElevationReason::None,
+<a href=#944 id=944 data-nosnippet>944</a>            },
+<a href=#945 id=945 data-nosnippet>945</a>        };
+<a href=#946 id=946 data-nosnippet>946</a>    };
+<a href=#947 id=947 data-nosnippet>947</a>    <span class="kw">match </span><span class="kw-2">&amp;</span>manifest.execution_level {
+<a href=#948 id=948 data-nosnippet>948</a>        <span class="prelude-val">Some</span>(ExecutionLevel::RequireAdministrator) =&gt; Elevation {
+<a href=#949 id=949 data-nosnippet>949</a>            requires_elevation: <span class="bool-val">true</span>,
+<a href=#950 id=950 data-nosnippet>950</a>            reason: ElevationReason::RequireAdministrator,
+<a href=#951 id=951 data-nosnippet>951</a>        },
+<a href=#952 id=952 data-nosnippet>952</a>        <span class="prelude-val">Some</span>(ExecutionLevel::HighestAvailable) =&gt; Elevation {
+<a href=#953 id=953 data-nosnippet>953</a>            requires_elevation: <span class="bool-val">false</span>,
+<a href=#954 id=954 data-nosnippet>954</a>            reason: ElevationReason::HighestAvailable,
+<a href=#955 id=955 data-nosnippet>955</a>        },
+<a href=#956 id=956 data-nosnippet>956</a>        <span class="prelude-val">Some</span>(ExecutionLevel::AsInvoker) =&gt; Elevation {
+<a href=#957 id=957 data-nosnippet>957</a>            requires_elevation: <span class="bool-val">false</span>,
+<a href=#958 id=958 data-nosnippet>958</a>            reason: ElevationReason::ManifestAsInvoker,
 <a href=#959 id=959 data-nosnippet>959</a>        },
-<a href=#960 id=960 data-nosnippet>960</a>        <span class="prelude-val">Some</span>(ExecutionLevel::HighestAvailable) =&gt; Elevation {
-<a href=#961 id=961 data-nosnippet>961</a>            requires_elevation: <span class="bool-val">false</span>,
-<a href=#962 id=962 data-nosnippet>962</a>            reason: ElevationReason::HighestAvailable,
-<a href=#963 id=963 data-nosnippet>963</a>        },
-<a href=#964 id=964 data-nosnippet>964</a>        <span class="prelude-val">Some</span>(ExecutionLevel::AsInvoker) =&gt; Elevation {
-<a href=#965 id=965 data-nosnippet>965</a>            requires_elevation: <span class="bool-val">false</span>,
-<a href=#966 id=966 data-nosnippet>966</a>            reason: ElevationReason::ManifestAsInvoker,
-<a href=#967 id=967 data-nosnippet>967</a>        },
-<a href=#968 id=968 data-nosnippet>968</a>        <span class="prelude-val">Some</span>(ExecutionLevel::Other(level)) =&gt; {
-<a href=#969 id=969 data-nosnippet>969</a>            <span class="kw">let </span>heuristic = installer_heuristic(file_name, version_fields);
-<a href=#970 id=970 data-nosnippet>970</a>            Elevation {
-<a href=#971 id=971 data-nosnippet>971</a>                requires_elevation: heuristic.is_some(),
-<a href=#972 id=972 data-nosnippet>972</a>                reason: heuristic.unwrap_or(ElevationReason::UnknownLevel(level.clone())),
-<a href=#973 id=973 data-nosnippet>973</a>            }
-<a href=#974 id=974 data-nosnippet>974</a>        }
-<a href=#975 id=975 data-nosnippet>975</a>        <span class="prelude-val">None </span>=&gt; Elevation {
-<a href=#976 id=976 data-nosnippet>976</a>            requires_elevation: <span class="bool-val">false</span>,
-<a href=#977 id=977 data-nosnippet>977</a>            reason: ElevationReason::ManifestWithoutLevel,
-<a href=#978 id=978 data-nosnippet>978</a>        },
-<a href=#979 id=979 data-nosnippet>979</a>    }
-<a href=#980 id=980 data-nosnippet>980</a>}
-<a href=#981 id=981 data-nosnippet>981</a>
-<a href=#982 id=982 data-nosnippet>982</a><span class="doccomment">/// The installer heuristics: a file name with an installer word, or a
-<a href=#983 id=983 data-nosnippet>983</a>/// version field mentioning installing.
-<a href=#984 id=984 data-nosnippet>984</a></span><span class="kw">fn </span>installer_heuristic(
-<a href=#985 id=985 data-nosnippet>985</a>    file_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#986 id=986 data-nosnippet>986</a>    version_fields: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, <span class="kw-2">&amp;</span>str)],
-<a href=#987 id=987 data-nosnippet>987</a>) -&gt; <span class="prelude-ty">Option</span>&lt;ElevationReason&gt; {
-<a href=#988 id=988 data-nosnippet>988</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = file_name {
-<a href=#989 id=989 data-nosnippet>989</a>        <span class="kw">let </span>lower = name.to_lowercase();
-<a href=#990 id=990 data-nosnippet>990</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(word) = INSTALLER_WORDS.iter().find(|w| lower.contains(<span class="kw-2">*</span>w)) {
-<a href=#991 id=991 data-nosnippet>991</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(ElevationReason::InstallerFileName(word));
-<a href=#992 id=992 data-nosnippet>992</a>        }
-<a href=#993 id=993 data-nosnippet>993</a>    }
-<a href=#994 id=994 data-nosnippet>994</a>    version_fields
-<a href=#995 id=995 data-nosnippet>995</a>        .iter()
-<a href=#996 id=996 data-nosnippet>996</a>        .find(|(<span class="kw">_</span>, value)| value.to_lowercase().contains(<span class="string">"install"</span>))
-<a href=#997 id=997 data-nosnippet>997</a>        .map(|(field, <span class="kw">_</span>)| ElevationReason::InstallerVersionInfo(field))
-<a href=#998 id=998 data-nosnippet>998</a>}
-<a href=#999 id=999 data-nosnippet>999</a>
-<a href=#1000 id=1000 data-nosnippet>1000</a><span class="attr">#[cfg(test)]
-<a href=#1001 id=1001 data-nosnippet>1001</a></span><span class="kw">mod </span>tests {
-<a href=#1002 id=1002 data-nosnippet>1002</a>    <span class="kw">use </span><span class="kw">super</span>::Scopes;
-<a href=#1003 id=1003 data-nosnippet>1003</a>
-<a href=#1004 id=1004 data-nosnippet>1004</a>    <span class="attr">#[test]
-<a href=#1005 id=1005 data-nosnippet>1005</a>    </span><span class="kw">fn </span>a_prefix_declared_twice_stays_bound_until_both_close() {
-<a href=#1006 id=1006 data-nosnippet>1006</a>        <span class="kw">let </span><span class="kw-2">mut </span>scopes = Scopes::default();
-<a href=#1007 id=1007 data-nosnippet>1007</a>        scopes.push(<span class="macro">vec!</span>[<span class="string">b"x"</span>.to_vec()]);
-<a href=#1008 id=1008 data-nosnippet>1008</a>        scopes.push(<span class="macro">vec!</span>[<span class="string">b"x"</span>.to_vec(), <span class="string">b"y"</span>.to_vec()]);
-<a href=#1009 id=1009 data-nosnippet>1009</a>        <span class="macro">assert!</span>(scopes.is_bound(<span class="string">b"x"</span>) &amp;&amp; scopes.is_bound(<span class="string">b"y"</span>));
-<a href=#1010 id=1010 data-nosnippet>1010</a>        scopes.pop();
-<a href=#1011 id=1011 data-nosnippet>1011</a>        <span class="macro">assert!</span>(scopes.is_bound(<span class="string">b"x"</span>) &amp;&amp; !scopes.is_bound(<span class="string">b"y"</span>));
-<a href=#1012 id=1012 data-nosnippet>1012</a>        scopes.pop();
-<a href=#1013 id=1013 data-nosnippet>1013</a>        <span class="macro">assert!</span>(!scopes.is_bound(<span class="string">b"x"</span>));
-<a href=#1014 id=1014 data-nosnippet>1014</a>        <span class="comment">// Popping past the root is harmless.
-<a href=#1015 id=1015 data-nosnippet>1015</a>        </span>scopes.pop();
-<a href=#1016 id=1016 data-nosnippet>1016</a>        <span class="macro">assert!</span>(!scopes.is_bound(<span class="string">b"x"</span>));
-<a href=#1017 id=1017 data-nosnippet>1017</a>    }
-<a href=#1018 id=1018 data-nosnippet>1018</a>}
+<a href=#960 id=960 data-nosnippet>960</a>        <span class="prelude-val">Some</span>(ExecutionLevel::Other(level)) =&gt; {
+<a href=#961 id=961 data-nosnippet>961</a>            <span class="kw">let </span>heuristic = installer_heuristic(file_name, version_fields);
+<a href=#962 id=962 data-nosnippet>962</a>            Elevation {
+<a href=#963 id=963 data-nosnippet>963</a>                requires_elevation: heuristic.is_some(),
+<a href=#964 id=964 data-nosnippet>964</a>                reason: heuristic.unwrap_or(ElevationReason::UnknownLevel(level.clone())),
+<a href=#965 id=965 data-nosnippet>965</a>            }
+<a href=#966 id=966 data-nosnippet>966</a>        }
+<a href=#967 id=967 data-nosnippet>967</a>        <span class="prelude-val">None </span>=&gt; Elevation {
+<a href=#968 id=968 data-nosnippet>968</a>            requires_elevation: <span class="bool-val">false</span>,
+<a href=#969 id=969 data-nosnippet>969</a>            reason: ElevationReason::ManifestWithoutLevel,
+<a href=#970 id=970 data-nosnippet>970</a>        },
+<a href=#971 id=971 data-nosnippet>971</a>    }
+<a href=#972 id=972 data-nosnippet>972</a>}
+<a href=#973 id=973 data-nosnippet>973</a>
+<a href=#974 id=974 data-nosnippet>974</a><span class="doccomment">/// The installer heuristics: a file name with an installer word, or a
+<a href=#975 id=975 data-nosnippet>975</a>/// version field mentioning installing.
+<a href=#976 id=976 data-nosnippet>976</a></span><span class="kw">fn </span>installer_heuristic(
+<a href=#977 id=977 data-nosnippet>977</a>    file_name: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#978 id=978 data-nosnippet>978</a>    version_fields: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, <span class="kw-2">&amp;</span>str)],
+<a href=#979 id=979 data-nosnippet>979</a>) -&gt; <span class="prelude-ty">Option</span>&lt;ElevationReason&gt; {
+<a href=#980 id=980 data-nosnippet>980</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = file_name {
+<a href=#981 id=981 data-nosnippet>981</a>        <span class="kw">let </span>lower = name.to_lowercase();
+<a href=#982 id=982 data-nosnippet>982</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(word) = INSTALLER_WORDS.iter().find(|w| lower.contains(<span class="kw-2">*</span>w)) {
+<a href=#983 id=983 data-nosnippet>983</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(ElevationReason::InstallerFileName(word));
+<a href=#984 id=984 data-nosnippet>984</a>        }
+<a href=#985 id=985 data-nosnippet>985</a>    }
+<a href=#986 id=986 data-nosnippet>986</a>    version_fields
+<a href=#987 id=987 data-nosnippet>987</a>        .iter()
+<a href=#988 id=988 data-nosnippet>988</a>        .find(|(<span class="kw">_</span>, value)| value.to_lowercase().contains(<span class="string">"install"</span>))
+<a href=#989 id=989 data-nosnippet>989</a>        .map(|(field, <span class="kw">_</span>)| ElevationReason::InstallerVersionInfo(field))
+<a href=#990 id=990 data-nosnippet>990</a>}
+<a href=#991 id=991 data-nosnippet>991</a>
+<a href=#992 id=992 data-nosnippet>992</a><span class="attr">#[cfg(test)]
+<a href=#993 id=993 data-nosnippet>993</a></span><span class="kw">mod </span>tests {
+<a href=#994 id=994 data-nosnippet>994</a>    <span class="kw">use </span><span class="kw">super</span>::Scopes;
+<a href=#995 id=995 data-nosnippet>995</a>
+<a href=#996 id=996 data-nosnippet>996</a>    <span class="attr">#[test]
+<a href=#997 id=997 data-nosnippet>997</a>    </span><span class="kw">fn </span>a_prefix_declared_twice_stays_bound_until_both_close() {
+<a href=#998 id=998 data-nosnippet>998</a>        <span class="kw">let </span><span class="kw-2">mut </span>scopes = Scopes::default();
+<a href=#999 id=999 data-nosnippet>999</a>        scopes.push(<span class="macro">vec!</span>[<span class="string">b"x"</span>.to_vec()]);
+<a href=#1000 id=1000 data-nosnippet>1000</a>        scopes.push(<span class="macro">vec!</span>[<span class="string">b"x"</span>.to_vec(), <span class="string">b"y"</span>.to_vec()]);
+<a href=#1001 id=1001 data-nosnippet>1001</a>        <span class="macro">assert!</span>(scopes.is_bound(<span class="string">b"x"</span>) &amp;&amp; scopes.is_bound(<span class="string">b"y"</span>));
+<a href=#1002 id=1002 data-nosnippet>1002</a>        scopes.pop();
+<a href=#1003 id=1003 data-nosnippet>1003</a>        <span class="macro">assert!</span>(scopes.is_bound(<span class="string">b"x"</span>) &amp;&amp; !scopes.is_bound(<span class="string">b"y"</span>));
+<a href=#1004 id=1004 data-nosnippet>1004</a>        scopes.pop();
+<a href=#1005 id=1005 data-nosnippet>1005</a>        <span class="macro">assert!</span>(!scopes.is_bound(<span class="string">b"x"</span>));
+<a href=#1006 id=1006 data-nosnippet>1006</a>        <span class="comment">// Popping past the root is harmless.
+<a href=#1007 id=1007 data-nosnippet>1007</a>        </span>scopes.pop();
+<a href=#1008 id=1008 data-nosnippet>1008</a>        <span class="macro">assert!</span>(!scopes.is_bound(<span class="string">b"x"</span>));
+<a href=#1009 id=1009 data-nosnippet>1009</a>    }
+<a href=#1010 id=1010 data-nosnippet>1010</a>}
 </code></pre></div></section></main></body></html>
