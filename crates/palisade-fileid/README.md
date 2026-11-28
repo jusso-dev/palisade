@@ -214,6 +214,10 @@ File identity: PE parsing, hashing (SHA-256, Authenticode, page and flat hashes)
     final path, plus the path's own folders; a final link or any reparse
     point on a chain fails closed), and the OS access check
     (`AuthzAccessCheck` with a synthetic token of the standard user's SIDs).
+    `assess_open_file` assesses a file the caller holds open: the target's
+    descriptor is read through that handle and its folders come from the
+    handle's final path, so a path swapped and restored meanwhile cannot
+    lend another file's verdict (#60); the identity's context tier uses it.
     `cross_check_writability` compares that check with the portable
     evaluator: the evaluator must never miss a right the OS grants.
     `assess_file` merges the OS verdict into every result, as the union

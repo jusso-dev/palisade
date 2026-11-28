@@ -13,6 +13,9 @@
 //!   OS check can add a right the evaluator missed, never remove one the
 //!   evaluator reports, and a check that fails leaves the evaluator's
 //!   over-reporting result (#332, ADR 0018).
+//! - [`assess_open_file`]: the same for a file the caller holds open, with
+//!   the target's descriptor read through that handle, so the verdict is
+//!   bound to the opened object (#60).
 //! - [`cross_check_writability`]: the portable evaluator's verdict for the
 //!   synthetic standard user compared with the OS access check on the same
 //!   descriptor (#54: "`AuthzAccessCheck` … as the authoritative method on
@@ -238,6 +241,68 @@ pub fn assess_file(
             Err(_) => chain.push(a),
         }
     }
+    Ok(assess_ancestors(
+        target_sd.as_ref(),
+        kind,
+        chain.into_iter().map(read_ancestor_result),
+        options,
+        assess,
+        cache,
+    ))
+}
+
+/// As [`assess_file`], for a file or folder the caller already holds open:
+/// the target's descriptor is read through `file` itself, and its folders
+/// are those of the handle's own final path. So the verdict is about the
+/// opened object even if its path is swapped for another file meanwhile,
+/// and even if the swap is undone before the caller looks again (#60,
+/// the race left open in #344).
+///
+/// `file` must have been opened with `READ_CONTROL` (`GENERIC_READ`
+/// includes it). A handle to a reparse point itself (opened with
+/// `FILE_FLAG_OPEN_REPARSE_POINT`) counts as user-writable, as in
+/// [`assess_file`]: it is a link, not the object a run would reach.
+///
+/// The folders above are still read by path. Replacing one of them needs
+/// delete or add rights on the folder above it, which is on the same chain,
+/// so a non-administrator able to swap a folder makes the chain report
+/// user-writable anyway.
+pub fn assess_open_file(
+    file: &File,
+    options: &EvaluationOptions,
+    assess: AssessOptions,
+    cache: &mut WritabilityCache,
+) -> io::Result<Writability> {
+    if !super::sys::is_disk_file(file) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a file on disk",
+        ));
+    }
+    cache.set_os_check(Some(os_standard_user_rights));
+    let attrs = attributes(file)?;
+    let kind = if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        ObjectKind::Directory
+    } else {
+        ObjectKind::File
+    };
+    let target_sd = if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        None
+    } else {
+        descriptor_of(file)
+    };
+    let final_text = super::sys::final_path_by_handle(file, 0)
+        .or_else(|_| super::sys::final_path_by_handle(file, 1))?;
+    let mut real =
+        normalize_win32(&final_text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    if !is_file_system_root(real.root()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a file-system path",
+        ));
+    }
+    real.mark_long_names_verified();
+    let chain: Vec<_> = real.ancestors().collect();
     Ok(assess_ancestors(
         target_sd.as_ref(),
         kind,
