@@ -140,6 +140,14 @@ pub struct FileIdentity {
     pub package: Field<PackageSummary>,
     /// Script signature and identity (#52, deep tier).
     pub script: Field<ScriptSummary>,
+    /// Content tags (#44, deep tier): installer engines, self-extracting
+    /// archives, embedded executables and the organisation's patterns.
+    /// Descriptive only: no verdict reads them.
+    pub content_tags: Field<ContentTagsSummary>,
+    /// The OS trust-verification API's verdict on the embedded signatures,
+    /// compared with this record's (#48, trust tier). **Diagnostic only**
+    /// (ADR 0018): nothing in this library reads it to change a verdict.
+    pub os_cross_check: Field<OsCrossCheckSummary>,
     /// File system context (stat and context tiers).
     pub fs: FsInfo,
     /// Attributes worked out from the groups above.
@@ -176,6 +184,8 @@ impl FileIdentity {
             installer: Field::NotRequested,
             package: Field::NotRequested,
             script: Field::NotRequested,
+            content_tags: Field::NotRequested,
+            os_cross_check: Field::NotRequested,
             fs: FsInfo::not_requested(),
             derived: Derived::default(),
             masquerade: Masquerade::default(),
@@ -801,6 +811,47 @@ pub struct ChainSummary {
     pub well_known_root_id: Option<u8>,
     /// How many issues chain building found.
     pub issues: usize,
+}
+
+/// The content tags of a file (#44).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContentTagsSummary {
+    /// The tags, built-in first, then the scan status tag
+    /// (`content_scan_partial`, `content_scan_timeout`,
+    /// `content_scan_error`) when the scan did not see every byte.
+    pub tags: Vec<String>,
+    /// Every byte was scanned. When `false`, a tag that is absent may still
+    /// apply.
+    pub complete: bool,
+    /// The built-in rule set's version.
+    pub builtin_version: u16,
+    /// The organisation rule set's version, when one was given.
+    pub rules_version: Option<u64>,
+    /// The organisation rule set's digest, hex.
+    pub rules_digest: Option<String>,
+}
+
+/// The OS trust-verification cross-check (#48). Diagnostic only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OsCrossCheckSummary {
+    /// Every compared signature agrees and the secondary counts match.
+    pub agrees: bool,
+    /// One entry per OS signature index either side has.
+    pub comparisons: Vec<OsComparisonSummary>,
+    /// The OS and this library count different secondary signatures.
+    pub secondary_count_differs: bool,
+}
+
+/// One OS comparison (#48).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OsComparisonSummary {
+    /// The OS signature index.
+    pub os_index: u32,
+    /// The OS result code.
+    pub os_code: Option<u32>,
+    /// `agree`, `os_accepts_rust_rejects`, `rust_accepts_os_rejects`,
+    /// `only_os`, `only_rust` or `not_comparable`.
+    pub outcome: String,
 }
 
 /// The file's identity on its volume (#54).

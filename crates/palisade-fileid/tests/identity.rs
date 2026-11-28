@@ -67,9 +67,12 @@ fn tiers_compute_only_what_was_asked() {
     assert_eq!(h.script_normalised_sha256, Field::NotApplicable);
     // Uploads have no file system context.
     assert_eq!(all.fs.owner, Field::NotApplicable);
-    // Nothing in the deep tier applies to a PE yet (content tags are not
-    // run), so it is not marked computed.
-    assert!(!all.computed_tiers.contains(Tier::Deep));
+    // A PE's deep tier is its content tags, when the content rules are
+    // built in.
+    assert_eq!(
+        all.computed_tiers.contains(Tier::Deep),
+        cfg!(feature = "content-rules")
+    );
     assert!(all.computed_tiers.contains(Tier::Trust));
 }
 
@@ -314,6 +317,8 @@ fn serialised_form_is_stable() {
         "installer",
         "package",
         "script",
+        "content_tags",
+        "os_cross_check",
         "fs",
         "derived",
         "masquerade",
@@ -322,7 +327,7 @@ fn serialised_form_is_stable() {
     ] {
         assert!(keys.contains(&k), "missing {k}");
     }
-    assert_eq!(keys.len(), 24, "{keys:?}");
+    assert_eq!(keys.len(), 26, "{keys:?}");
 }
 
 #[test]
@@ -654,4 +659,91 @@ fn merging_compares_each_part_of_the_file_key() {
     assert!(!a.merge(with(key(Some(5), Some(9), "01"), late), &ctx()));
     let mut a = with(key(None, None, "01"), early);
     assert!(!a.merge(with(key(None, None, "02"), late), &ctx()));
+}
+
+/// #55 wiring: the OS cross-check is a diagnostic (ADR 0018). A recorded
+/// disagreement changes neither the signing state nor the recommendation,
+/// and uploads, which the OS cannot verify, have none.
+#[test]
+fn os_cross_check_never_decides() {
+    use palisade_fileid::identity::{OsComparisonSummary, OsCrossCheckSummary, masquerade};
+    let image = tool_image((1, 0, 0, 0));
+    let mut id = identify_bytes(&image, Some("extool.exe"), Tiers::ALL, &ctx());
+    assert_eq!(id.os_cross_check, Field::NotApplicable);
+    let state = id.signing_state.clone();
+    let level = recommend(&id).level;
+    id.os_cross_check = Field::Computed(OsCrossCheckSummary {
+        agrees: false,
+        comparisons: vec![OsComparisonSummary {
+            os_index: 0,
+            os_code: Some(0x8009_6010),
+            outcome: "rust_accepts_os_rejects".to_owned(),
+        }],
+        secondary_count_differs: false,
+    });
+    let c = ctx();
+    id.masquerade = masquerade::assess(&id, c.protected, c.code_trust, c.known_folders);
+    assert_eq!(id.signing_state, state);
+    assert_eq!(recommend(&id).level, level);
+    // A file on disk: the cross-check is recorded where the OS API exists.
+    let dir = std::env::temp_dir().join(format!("palisade-oscheck-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("extool.exe");
+    std::fs::write(&path, &image).unwrap();
+    let id = identify(&path, Tiers::ALL, &ctx()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    if cfg!(windows) {
+        assert!(!matches!(id.os_cross_check, Field::NotRequested));
+    } else {
+        assert!(matches!(id.os_cross_check, Field::Unavailable(_)));
+    }
+}
+
+/// #55 wiring: the deep tier tags content (#44), and the tags are
+/// descriptive only.
+#[test]
+fn deep_tier_tags_content() {
+    let image = tool_image((1, 0, 0, 0));
+    let id = identify_bytes(&image, Some("extool.exe"), Tiers::ALL, &ctx());
+    if cfg!(feature = "content-rules") {
+        let tags = id.content_tags.computed().unwrap();
+        assert!(tags.complete);
+        assert!(id.computed_tiers.contains(Tier::Deep));
+        // A plain image carries none of the built-in tags.
+        assert!(tags.tags.is_empty(), "{tags:?}");
+    } else {
+        assert!(matches!(id.content_tags, Field::Unavailable(_)));
+    }
+    let early = identify_bytes(&image, Some("extool.exe"), Tiers::EXECUTION, &ctx());
+    assert_eq!(early.content_tags, Field::NotRequested);
+}
+
+/// #345 review m4: `IdentityContext::content_rules` exists whatever the
+/// features, so a context built field by field compiles either way.
+#[test]
+fn a_context_built_field_by_field_compiles_with_any_features() {
+    use palisade_fileid::authenticode::{RevocationSet, TrustConfig, ValidityPolicy};
+    use palisade_fileid::hash::{AlgorithmSet, HashOptions};
+    use palisade_fileid::identity::{MAX_IN_MEMORY, ProtectedList};
+    let trust = TrustConfig::new();
+    let revocation = RevocationSet::new();
+    let validity = ValidityPolicy::default();
+    let protected = ProtectedList::defaults();
+    let c = IdentityContext {
+        code_trust: &trust,
+        tsa_trust: &trust,
+        catalogs: None,
+        revocation: &revocation,
+        validity: &validity,
+        now: NOW,
+        clock_floor: None,
+        protected: &protected,
+        known_folders: None,
+        flat_algorithms: AlgorithmSet::DEFAULT,
+        hash_options: HashOptions::default(),
+        max_in_memory: MAX_IN_MEMORY,
+        content_rules: None,
+    };
+    let id = identify_bytes(&tool_image((1, 0, 0, 0)), Some("a.exe"), Tiers::ALL, &c);
+    assert!(matches!(id.content_tags, Field::Unavailable(_)));
 }

@@ -15,6 +15,8 @@
 //! | `hashes.script_normalised_sha256`, `hashes.msi_normalised_sha256` | [`crate::script`], [`crate::installer`] | hash (T2), when T3 or T5 read the content |
 //! | `fs.motw`, `fs.path_variables` | [`crate::fsctx`] (#54) | context (T4) |
 //! | `script`, `installer`, `package` | [`crate::script`], [`crate::installer`], [`crate::package`] | deep (T5) |
+//! | `content_tags` | `crate::tags` (#44, feature `content-rules`) | deep (T5) |
+//! | `os_cross_check` | [`crate::authenticode::cross_check`] and the OS trust API (#48, Windows, `os-trust`), **diagnostic only** | trust (T3), files on disk |
 //! | `derived`, `masquerade`, `strengths` | this module | always |
 //!
 //! Which reader runs is decided by the content the classifier saw, never by
@@ -43,6 +45,15 @@
 //! installer that no catalog lists: which digest catalogs made by OS
 //! tooling list them under is not yet checked (#51), so a miss proves
 //! nothing.
+//!
+//! # Diagnostics never decide
+//!
+//! `os_cross_check` records how the OS trust-verification API's verdict on
+//! a PE image's embedded signatures compares with this library's. It is a
+//! diagnostic (ADR 0018): `signing_state`, the masquerade assessment, the
+//! strengths and [`recommend`] never read it, so an OS that accepts or
+//! rejects a signature cannot change a verdict. `content_tags` are
+//! descriptive in the same way.
 //!
 //! # Fail-conservative
 //!
@@ -81,19 +92,22 @@ mod record;
 pub mod strength;
 mod tier;
 
-pub use compose::{IdentifyError, IdentityContext, MAX_IN_MEMORY, identify, identify_bytes};
+pub use compose::{
+    ContentRules, IdentifyError, IdentityContext, MAX_IN_MEMORY, identify, identify_bytes,
+};
 pub use protected::{
     DEFAULT_LIST_VERSION, ExpectedDir, ExpectedSigner, ProtectedBinary, ProtectedList,
     ProtectedVendor,
 };
 pub use recommend::{MASQUERADE_THRESHOLD, Recommendation, RuleLevel, recommend};
 pub use record::{
-    AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary, Derived,
-    EffectiveName, ElevationSummary, EmbeddedState, ExportSummary, Field, FileIdSummary,
-    FileIdentity, FsInfo, Hashes, IdentityError, InstallerSummary, ManifestSummary, Masquerade,
-    MasqueradeReason, MotwSummary, NameInfo, NotYetDefined, OwnerSummary, PackageSummary, PathInfo,
-    PdbSummary, PeSummary, Pending, PublisherProduct, ReparseSummary, SCHEMA_VERSION,
-    ScriptSummary, SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary,
+    AuthenticodeSummary, CatalogMatchSummary, CatalogState, CertBrief, ChainSummary,
+    ContentTagsSummary, Derived, EffectiveName, ElevationSummary, EmbeddedState, ExportSummary,
+    Field, FileIdSummary, FileIdentity, FsInfo, Hashes, IdentityError, InstallerSummary,
+    ManifestSummary, Masquerade, MasqueradeReason, MotwSummary, NameInfo, NotYetDefined,
+    OsComparisonSummary, OsCrossCheckSummary, OwnerSummary, PackageSummary, PathInfo, PdbSummary,
+    PeSummary, Pending, PublisherProduct, ReparseSummary, SCHEMA_VERSION, ScriptSummary,
+    SectionSummary, SignatureSummary, SigningState, SigningStateKind, StreamSummary,
     StreamsSummary, Timestamps, TrustSource, TrustedSigner, VersionSummary, VolumeSummary,
     WritableSummary,
 };
@@ -198,6 +212,8 @@ impl FileIdentity {
         self.installer.absorb(other.installer);
         self.package.absorb(other.package);
         self.script.absorb(other.script);
+        self.content_tags.absorb(other.content_tags);
+        self.os_cross_check.absorb(other.os_cross_check);
         self.fs.absorb(other.fs);
         for e in other.errors {
             if !self.errors.contains(&e) {
