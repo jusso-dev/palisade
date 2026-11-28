@@ -162,6 +162,10 @@ const KERNEL_SEEDS: Seed = Seed {
     test: "telemetry",
     name: "write_kernel_fuzz_seeds",
 };
+const EVENTLOG_SEEDS: Seed = Seed {
+    test: "eventlog",
+    name: "write_eventlog_fuzz_seeds",
+};
 
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
 /// the test PKI's certificates.
@@ -256,11 +260,18 @@ pub const PROJECTS: &[Project] = &[
     Project {
         dir: "crates/palisade-agent/fuzz",
         package: "palisade-agent",
-        targets: &[Target {
-            name: "kernel_records",
-            dict: None,
-            seeds: &[KERNEL_SEEDS],
-        }],
+        targets: &[
+            Target {
+                name: "kernel_records",
+                dict: None,
+                seeds: &[KERNEL_SEEDS],
+            },
+            Target {
+                name: "eventlog_records",
+                dict: None,
+                seeds: &[EVENTLOG_SEEDS],
+            },
+        ],
     },
     Project {
         dir: "crates/palisade-proto/fuzz",

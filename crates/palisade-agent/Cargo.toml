@@ -76,6 +76,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 palisade-core = { workspace = true, features = ["std", "test-util"] }
 palisade-proto = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
