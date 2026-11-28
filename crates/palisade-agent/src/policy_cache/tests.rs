@@ -16,7 +16,7 @@ use palisade_policy::{
     context::EvaluationContext,
     decision::{Outcome as Verdict2, TraceId},
     demand::FactSet,
-    engine::{EngineConfig, Outcome, Request, SystemClock},
+    engine::{EngineConfig, Outcome, Request},
     evaluate::Subject,
     facts::{
         ObjectFacts, PathFact, PathVariable, PathVariables, SignatureSource, SignerFact,
@@ -258,6 +258,16 @@ fn version(cache: &PolicyCache) -> u64 {
     cache.current().policy_version()
 }
 
+/// A monotonic clock that never advances, so the engine's evaluation
+/// budget never runs out in a test.
+struct FrozenClock;
+
+impl palisade_policy::engine::Clock for FrozenClock {
+    fn monotonic_micros(&self) -> u64 {
+        0
+    }
+}
+
 /// Decides an object with hash `digit`, with every fact computed.
 fn decide(active: &Active, digit: char) -> (Verdict2, Verdict) {
     let mut facts = ObjectFacts::new();
@@ -289,7 +299,10 @@ fn decide_facts(active: &Active, facts: &ObjectFacts) -> (Verdict2, Verdict) {
         session: None,
         expires_before: None,
     };
-    let verdict = active.evaluate(&request, &SystemClock::new());
+    // A clock that never advances: these tests check which policy decides,
+    // not the evaluation budget, and a slow or busy CI runner (several
+    // threads at once) must not turn a decision into `TimedOut`.
+    let verdict = active.evaluate(&request, &FrozenClock);
     let Outcome::Decided(Some(d)) = &verdict.outcome else {
         panic!("not decided: {:?}", verdict.outcome);
     };
@@ -1647,7 +1660,7 @@ fn bridged_facts_decide_through_the_active_policy() {
                 &state,
                 TraceId([2; 16]),
             ),
-            &SystemClock::new(),
+            &FrozenClock,
         )
     };
     let Outcome::Decided(Some(d)) = ask(&bridged) else {
