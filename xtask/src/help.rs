@@ -259,23 +259,34 @@ mod tests {
         );
         assert!(dist(&["dist"]).is_empty());
         let sign = |words: &[&str]| match parse(words) {
-            Ok(C::Sign(a)) => a.to_words(),
+            Ok(C::Sign(a)) => a.to_args().unwrap(),
             other => panic!("{words:?}: {other:?}"),
         };
+        let a = sign(&[
+            "sign",
+            "--signer",
+            "none",
+            "--verify",
+            "--no-timestamp",
+            "a.exe",
+        ]);
+        assert!(a.verify_only && a.no_timestamp);
+        assert_eq!(a.files, [std::path::PathBuf::from("a.exe")]);
+        let a = sign(&["sign", "a.exe", "--signer", "pfx", "b.msi"]);
+        assert!(!a.verify_only);
+        assert_eq!(a.files, [std::path::PathBuf::from("a.exe"), "b.msi".into()]);
+        // An unknown signer is refused when the arguments are built.
+        match parse(&["sign", "--signer", "x", "a.exe"]) {
+            Ok(C::Sign(a)) => assert!(a.to_args().is_err()),
+            other => panic!("{other:?}"),
+        }
+        // A file operand after `--` stays a file, even one that looks like a
+        // flag: it must never switch the run to verify-only.
+        let a = sign(&["sign", "--signer", "pfx", "--", "--verify", "a.exe"]);
+        assert!(!a.verify_only, "{a:?}");
         assert_eq!(
-            sign(&[
-                "sign",
-                "--signer",
-                "none",
-                "--verify",
-                "--no-timestamp",
-                "a.exe"
-            ]),
-            ["--signer", "none", "--verify", "--no-timestamp", "a.exe"]
-        );
-        assert_eq!(
-            sign(&["sign", "a.exe", "--signer", "pfx", "b.msi"]),
-            ["--signer", "pfx", "a.exe", "b.msi"]
+            a.files,
+            [std::path::PathBuf::from("--verify"), "a.exe".into()]
         );
         let fuzz = |words: &[&str]| match parse(words) {
             Ok(C::Fuzz(a)) => a.to_words(),

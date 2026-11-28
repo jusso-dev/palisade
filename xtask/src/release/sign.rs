@@ -470,34 +470,6 @@ pub struct Args {
     pub files: Vec<PathBuf>,
 }
 
-pub fn parse_args(args: &[String]) -> Result<Args, String> {
-    let mut kind = None;
-    let mut verify_only = false;
-    let mut no_timestamp = false;
-    let mut files = Vec::new();
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "--signer" => {
-                kind = Some(Kind::parse(it.next().ok_or("--signer needs a value")?)?);
-            }
-            "--verify" => verify_only = true,
-            "--no-timestamp" => no_timestamp = true,
-            flag if flag.starts_with("--") => return Err(format!("unexpected argument `{flag}`")),
-            file => files.push(PathBuf::from(file)),
-        }
-    }
-    if files.is_empty() {
-        return Err("no files given".to_owned());
-    }
-    Ok(Args {
-        kind: kind.ok_or("--signer is required")?,
-        verify_only,
-        no_timestamp,
-        files,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -782,39 +754,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_command_line() {
-        let args =
-            |list: &[&str]| parse_args(&list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
-        assert_eq!(
-            args(&["--signer", "test-ca", "a.exe", "b.msi"]),
-            Ok(Args {
-                kind: Kind::TestCa,
-                verify_only: false,
-                no_timestamp: false,
-                files: vec![PathBuf::from("a.exe"), PathBuf::from("b.msi")],
-            })
-        );
-        assert!(
-            args(&["--signer", "pfx", "--verify", "a.exe"])
-                .unwrap()
-                .verify_only
-        );
-        assert!(
-            args(&["--signer", "pfx", "--no-timestamp", "a.exe"])
-                .unwrap()
-                .no_timestamp
-        );
-        for bad in [
-            &["a.exe"][..],
-            &["--signer", "x", "a.exe"],
-            &["--signer", "none"],
-            &["--signer"],
-            &["--signer", "none", "--bogus", "a"],
-        ] {
-            assert!(args(bad).is_err(), "{bad:?}");
-        }
+    fn signer_names_parse() {
         for kind in Kind::ALL {
             assert_eq!(Kind::parse(kind.name()), Ok(kind));
         }
+        assert!(Kind::parse("x").is_err());
     }
 }

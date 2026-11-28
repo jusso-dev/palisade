@@ -75,7 +75,7 @@ fn main() -> ExitCode {
             }
             None => run_dist(&args.to_words()),
         },
-        C::Sign(args) => run_sign(&args.to_words()),
+        C::Sign(args) => run_sign(args.to_args()),
         C::Release(command) => run_release(command),
         C::Docs(command) => run_docs(command),
         C::DepsReport { base } => deps_report(base.as_deref()),
@@ -330,10 +330,10 @@ fn run_fuzz(args: &[String]) -> ExitCode {
 }
 
 /// `cargo xtask sign`: see `src/release/sign.rs`.
-fn run_sign(args: &[String]) -> ExitCode {
+fn run_sign(args: Result<release::sign::Args, String>) -> ExitCode {
     use release::sign;
     let result = (|| -> Result<usize, String> {
-        let args = sign::parse_args(args)?;
+        let args = args?;
         tools::require_installed("sign", &sign::tools(args.kind, args.verify_only))?;
         let root = workspace_root();
         let mut config = sign::Config::from_process(args.kind, &root);

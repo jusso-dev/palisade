@@ -251,17 +251,16 @@ pub struct SignArgs {
 }
 
 impl SignArgs {
-    /// The arguments as `release::sign::parse_args` reads them.
-    pub fn to_words(&self) -> Vec<String> {
-        let mut out = vec!["--signer".to_owned(), self.signer.clone()];
-        if self.verify {
-            out.push("--verify".to_owned());
-        }
-        if self.no_timestamp {
-            out.push("--no-timestamp".to_owned());
-        }
-        out.extend(self.files.iter().map(|f| f.display().to_string()));
-        out
+    /// The parsed `sign` arguments. Built from the typed fields rather than
+    /// re-parsed from words, so a file operand after `--` (even one named
+    /// `--verify`) stays a file and never becomes a flag.
+    pub fn to_args(&self) -> Result<crate::release::sign::Args, String> {
+        Ok(crate::release::sign::Args {
+            kind: crate::release::sign::Kind::parse(&self.signer)?,
+            verify_only: self.verify,
+            no_timestamp: self.no_timestamp,
+            files: self.files.clone(),
+        })
     }
 }
 
