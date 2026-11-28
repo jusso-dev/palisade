@@ -64,12 +64,17 @@ fn doc(
     PolicyDocument::from_json(&json.to_string()).unwrap()
 }
 
+/// Every finding but `catch_all_missing`, which `validate::catch_all`
+/// tests: these documents have no catch-all.
 fn findings(doc: PolicyDocument) -> Vec<(ErrorCode, String)> {
     let all: Vec<ValidationError> = match doc.validate() {
         Ok(v) => v.warnings().to_vec(),
         Err(e) => e,
     };
-    all.into_iter().map(|e| (e.code, e.path)).collect()
+    all.into_iter()
+        .filter(|e| e.code != ErrorCode::CatchAllMissing)
+        .map(|e| (e.code, e.path))
+        .collect()
 }
 
 fn at(code: ErrorCode, path: &str) -> (ErrorCode, String) {

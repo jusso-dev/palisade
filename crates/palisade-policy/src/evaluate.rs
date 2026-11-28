@@ -17,7 +17,10 @@
 //!    mode of stages 4 and 6 ([`crate::mode`]). It never affects stage 1.
 //! 4. **Policy.** The policy's precedence model ([`crate::precedence`])
 //!    chooses among the matching `allow`, `allow_contained`,
-//!    `allow_elevated` and `deny` rules.
+//!    `allow_elevated` and `deny` rules. Two kinds of rule are floors,
+//!    decided over only when nothing above them matched: the managed
+//!    `system_baseline` (#39), and below it the policy's `catch_all` rules
+//!    (#329), its default for every object no other rule matched.
 //! 5. **Attribute.** Not yet: post-allow attribute rules are #33.
 //! 6. **Unknown.** If nothing decided, the policy's unknown-application
 //!    policy decides ([`crate::unknown`], #39). Its default blocks
@@ -302,8 +305,11 @@ struct Compiled<'p> {
     scopes: Vec<(ScopeLevel, Arc<CompiledScope>)>,
     bias: Bias,
     /// A rule of the managed `system_baseline` (#39): a floor that only
-    /// decides when no other stage-4 rule matched.
+    /// decides when no tenant stage-4 rule matched.
     floor: bool,
+    /// A `catch_all` rule (#329): the lowest floor, which decides only when
+    /// neither a tenant rule nor the `system_baseline` matched.
+    catch_all: bool,
     /// The rule has an activity window, so its activity depends on the
     /// clock (#40).
     timed: bool,
@@ -579,6 +585,7 @@ impl<'p> Evaluator<'p> {
                     scopes,
                     bias: Bias::of(rule.action.kind()),
                     floor: crate::unknown::baseline::is_system_baseline(set),
+                    catch_all: rule.catch_all,
                     timed,
                     twin: false,
                 };
@@ -600,6 +607,7 @@ impl<'p> Evaluator<'p> {
                         scopes: compiled.scopes.clone(),
                         bias: Bias::of(crate::model::ActionKind::Audit),
                         floor: false,
+                        catch_all: false,
                         timed: true,
                         twin: true,
                     });
@@ -1145,13 +1153,17 @@ impl<'p> Evaluator<'p> {
             }
         }
 
-        // Stage 4: the precedence model. The managed `system_baseline` is a
-        // floor: its rules are decided over only when no other rule matched,
-        // so under no model does it override a tenant's rule.
-        let tenant = policy.iter().any(|(r, _)| !r.floor);
+        // Stage 4: the precedence model, over the highest tier that has a
+        // candidate. The managed `system_baseline` is a floor: its rules are
+        // decided over only when no tenant rule matched, so under no model
+        // does it override a tenant's rule. A `catch_all` rule is the
+        // lowest floor, the policy's own default for what nothing else
+        // matched (#329), so it never overrides the baseline either.
+        let tier = |r: &Compiled<'_>| u8::from(r.floor) + 2 * u8::from(r.catch_all);
+        let top = policy.iter().map(|(r, _)| tier(r)).min();
         let deciding: smallvec::SmallVec<[(&Compiled<'p>, Verdict); 16]> = policy
             .iter()
-            .filter(|(r, _)| !tenant || !r.floor)
+            .filter(|(r, _)| Some(tier(r)) == top)
             .copied()
             .collect();
         let set: Candidates = deciding.iter().map(|(r, v)| r.candidate(*v)).collect();

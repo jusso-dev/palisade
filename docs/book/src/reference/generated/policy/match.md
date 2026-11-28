@@ -7,13 +7,15 @@ A condition tree (#33).
 Each node is an object with exactly one key: `all`, `any`, `not`,
 `criterion` or `ref`.
 
-Appears at: `/rule_sets/rules/match`, `/rule_sets/rules/match/all`, `/rule_sets/rules/match/all/all`, `/rule_sets/rules/match/all/all/all`, `/rule_sets/rules/match/all/all/all/not`, `/rule_sets/rules/match/all/all/any`, and more.
+Appears at: `/rule_sets/rules/match`, `/rule_sets/rules/match/all`, `/rule_sets/rules/match/all/all`, `/rule_sets/rules/match/all/all/all`, `/rule_sets/rules/match/all/all/any`, `/rule_sets/rules/match/all/all/not`, and more.
 
 ## Variants
 
 ### `all`
 
-Matches when every child matches. Needs at least one child.
+Matches when every child matches. Needs at least one child, except
+as the whole match of a `catch_all` rule, where an empty `all`
+matches every object (#329).
 
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|

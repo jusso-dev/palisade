@@ -10,6 +10,7 @@ Appears at: `/policy`.
 
 | Field | Type | Required | Default | Constraints | Since | Description |
 |---|---|---|---|---|---|---|
+| `confirm_permit_all` | string | no |  | 1 to 128 characters | 1.0.0 | The confirmation a catch-all rule that lets objects run needs (#35, #329): exactly `CONFIRM_PERMIT_ALL`. Without it, such a rule is rejected (`permit_all_unconfirmed`). |
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
 | `governance` | [`GovernanceSettings`](governance-settings.md) | no |  |  | 1.0.0 | Governance settings: justification, review and expiry rules, the policy assistant's severities and counter reporting (#40). |
 | `id` | [`PolicyId`](types.md#policyid) | yes |  |  | 1.0.0 | Stable ID. Renaming the policy never changes it. |

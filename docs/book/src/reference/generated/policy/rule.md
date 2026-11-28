@@ -12,6 +12,7 @@ Appears at: `/rule_sets/rules`.
 |---|---|---|---|---|---|---|
 | `action` | [`Action`](action.md) | yes |  |  | 1.0.0 | What happens when it matches (#34). |
 | `activates_at` | [`Timestamp`](types.md#timestamp) | no |  |  | 1.0.0 | The rule is absent before this instant (#40). |
+| `catch_all` | boolean | no |  |  | 1.0.0 | A catch-all rule (#33, #35, #329): the default of its rule set, which decides only when no other rule of stage 4 matched, under every precedence model. It is the only rule that may have no identity anchor, and the only one whose `match` may be an empty `all`, which matches every object. At most one per rule set; its name starts with `Default` or contains `Catch-all`; it allows, denies or audits; and it is never in a mandatory rule set. Unset means `false`. |
 | `description` | string | no |  | at most 4096 characters | 1.0.0 | Free-text description, at most 4096 characters. |
 | `display_id` | string | no |  | matches `^R-[0-9]{6,12}$` | 1.0.0 | Human short ID from the tenant's sequence, `R-` and 6 to 12 digits. |
 | `effects` | [`Effects`](effects.md) | no |  |  | 1.0.0 | Logging, upload, notification, severity and tags (#34). Unset fields take the action's defaults. |
@@ -19,7 +20,7 @@ Appears at: `/rule_sets/rules`.
 | `enforcement_override` | [`EnforcementOverride`](types.md#enforcementoverride) | no | `"inherit"` |  | 1.0.0 | Per-rule enforcement override (#36). Only for `deny` rules. |
 | `expires_at` | [`Timestamp`](types.md#timestamp) | no |  |  | 1.0.0 | The rule is absent from this instant on (#40). An expired allow never revives, even if the clock is set back (`crate::lifecycle`). |
 | `id` | [`RuleId`](types.md#ruleid) | yes |  |  | 1.0.0 | Stable ID, never reused. |
-| `match` | [`Match`](match.md) | yes |  |  | 1.0.0 | When the rule matches (#33). |
+| `match` | [`Match`](match.md) or object | yes |  |  | 1.0.0 |  |
 | `metadata` | [`Metadata`](metadata.md) | no |  |  | 1.0.0 | Governance metadata (#40). |
 | `name` | string | yes |  | 1 to 128 characters | 1.0.0 | Display name, with the same rules as a policy name. |
 | `object_types` | array of [`ObjectType`](types.md#objecttype) | no |  |  | 1.0.0 | The object classes the rule applies to. Empty means every class. |

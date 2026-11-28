@@ -8,7 +8,7 @@ values`.
 Values are combined with OR for positive operators and with AND for
 negative ones (#32): `not_contains [a, b]` means neither `a` nor `b`.
 
-Appears at: `/rule_sets/rules/match/all/all/all/criterion`, `/rule_sets/rules/match/all/all/any/criterion`, `/rule_sets/rules/match/all/all/not/criterion`, `/rule_sets/rules/match/all/all/criterion`, `/rule_sets/rules/match/all/any/all/criterion`, `/rule_sets/rules/match/all/any/any/criterion`, and more.
+Appears at: `/rule_sets/rules/match/all/all/not/criterion`, `/rule_sets/rules/match/all/all/criterion`, `/rule_sets/rules/match/all/any/not/criterion`, `/rule_sets/rules/match/all/any/criterion`, `/rule_sets/rules/match/all/not/all/criterion`, `/rule_sets/rules/match/all/not/any/criterion`, and more.
 
 ## Fields
 

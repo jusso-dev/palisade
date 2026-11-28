@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 mod actions;
+mod catch_all;
 mod lifecycle;
 pub(crate) use lifecycle::{governance_mode, governance_problems};
 mod mode;
@@ -253,6 +254,17 @@ pub enum ErrorCode {
     /// `system_baseline`'s well-known ID, which only the engine adds, after
     /// validation (#39, #40).
     ReservedRuleSetId,
+    /// A `catch_all` rule is malformed: its name neither starts with
+    /// `Default` nor contains `Catch-all`, its action is not `allow`,
+    /// `allow_contained`, `allow_elevated` or `deny`, it is in a mandatory
+    /// rule set, or its rule set already has one (#33, #329).
+    InvalidCatchAll,
+    /// A `catch_all` rule lets objects run, and the policy does not set
+    /// `confirm_permit_all: "I UNDERSTAND"` (#35, #329).
+    PermitAllUnconfirmed,
+    /// A `first_match` policy has no enabled `catch_all` rule, so objects
+    /// no rule matches fall to the unknown policy (#35, #329). A warning.
+    CatchAllMissing,
 }
 
 impl ErrorCode {
@@ -335,6 +347,9 @@ impl ErrorCode {
             Self::ExceptionIncomplete => "exception_incomplete",
             Self::OnExpireNotApplicable => "on_expire_not_applicable",
             Self::ReservedRuleSetId => "reserved_rule_set_id",
+            Self::InvalidCatchAll => "invalid_catch_all",
+            Self::PermitAllUnconfirmed => "permit_all_unconfirmed",
+            Self::CatchAllMissing => "catch_all_missing",
         }
     }
 
@@ -350,7 +365,8 @@ impl ErrorCode {
             | Self::UnknownAllow
             | Self::ComplianceWeakened
             | Self::SignatureStatusRelaxed
-            | Self::UnindexedRules => Severity::Warning,
+            | Self::UnindexedRules
+            | Self::CatchAllMissing => Severity::Warning,
             _ => Severity::Error,
         }
     }
@@ -558,6 +574,7 @@ impl Validator {
             );
         }
         self.precedence(doc);
+        self.catch_alls(doc);
         let profiles = self.policy_scopes(doc);
 
         // Rule set IDs must be unique, and every reference must resolve.
@@ -773,7 +790,10 @@ impl Validator {
                     } else {
                         "any"
                     };
-                    if children.is_empty() {
+                    // A catch-all's whole match may be an empty `all`, which
+                    // matches every object (#329).
+                    let catch_all_root = rule.catch_all && path == tree && key == "all";
+                    if children.is_empty() && !catch_all_root {
                         self.push(
                             ErrorCode::EmptyGroup,
                             &format!("{path}/{key}"),
@@ -814,8 +834,10 @@ impl Validator {
         // The recursive analysis is bounded by the depth limit, so it only
         // runs on trees that passed it.
         // Every action that lets an object run, trusts it or excludes it
-        // needs an identity, as an allow does (#34).
-        if depth <= MAX_TREE_DEPTH {
+        // needs an identity, as an allow does (#34). A catch-all is the one
+        // rule that needs none (#33): it is a floor that only decides when
+        // no other rule did, and its own checks are in `catch_all`.
+        if depth <= MAX_TREE_DEPTH && !rule.catch_all {
             // The analysis is structural: it does not decide whether the
             // criteria on a path can all hold at once, so the messages name
             // a path through the tree, not a way the rule is known to match.

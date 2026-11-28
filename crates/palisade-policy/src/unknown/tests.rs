@@ -4595,3 +4595,39 @@ fn an_expired_deny_does_not_make_an_object_blocklisted() {
     assert_eq!(d.annotations().len(), 1);
     assert_eq!(d.outcome(), Outcome::PendingUser, "{d:#?}");
 }
+
+#[test]
+fn a_catch_all_never_overrides_the_baseline() {
+    // A default deny sits below the managed baseline: OS binaries the
+    // baseline allows still run, and everything else gets the default.
+    let mut rule = serde_json::json!({
+        "id": rule_id(1), "name": "Default deny", "catch_all": true,
+        "match": {"all": []}, "action": {"type": "deny"},
+        "order": 999_990, "priority": 10,
+    });
+    rule["object_types"] = serde_json::json!(["executable"]);
+    let v = doc_with(serde_json::json!({}), &[(SET, "mixed", false, vec![rule])])
+        .validate()
+        .unwrap()
+        .with_system_baseline(&SystemBaseline {
+            publishers: vec![OS_PUBLISHER.into()],
+            writable_dirs: vec![],
+        })
+        .unwrap();
+    let d = decide_os(
+        &v,
+        ObjectType::Executable,
+        &os_signed("C:\\Windows\\System32\\a.exe", false),
+    );
+    assert_eq!(
+        d.matched_rule().unwrap().rule_id.to_string(),
+        baseline::SYSTEM_BASELINE_RULE_ID
+    );
+    assert_eq!(d.overridden()[0].rule_id.to_string(), rule_id(1));
+    let d = decide_os(
+        &v,
+        ObjectType::Executable,
+        &os_signed("C:\\Users\\a\\b.exe", false),
+    );
+    assert_eq!(d.matched_rule().unwrap().rule_id.to_string(), rule_id(1));
+}

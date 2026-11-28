@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Match {
-    /// Matches when every child matches. Needs at least one child.
+    /// Matches when every child matches. Needs at least one child, except
+    /// as the whole match of a `catch_all` rule, where an empty `all`
+    /// matches every object (#329).
     All(#[schemars(length(min = 1))] Vec<Match>),
     /// Matches when any child matches. Needs at least one child.
     Any(#[schemars(length(min = 1))] Vec<Match>),

@@ -920,3 +920,105 @@ proptest! {
 
 mod modes;
 mod scopes;
+
+/// A catch-all with ID `n`: matches every object, with `action`.
+fn catch_all(n: u32, action: serde_json::Value) -> serde_json::Value {
+    let r = rule(n, serde_json::json!({"all": []}), action);
+    let r = with(r, "catch_all", true.into());
+    let r = with(r, "name", "Default".into());
+    let r = with(r, "order", 999_990.into());
+    with(r, "priority", i32::MAX.into())
+}
+
+#[test]
+fn a_catch_all_decides_only_what_no_other_rule_matched_under_every_model() {
+    for model in MODELS {
+        let options = serde_json::json!({});
+        let confirm = |mut doc: PolicyDocument| {
+            doc.policy.confirm_permit_all = Some(crate::model::CONFIRM_PERMIT_ALL.to_owned());
+            doc
+        };
+        // Alone, the default decides.
+        let doc = confirm(document(
+            model,
+            options.clone(),
+            vec![(1, "mixed", false, false, vec![catch_all(9, allow())])],
+        ));
+        let d = decide(&validated(doc));
+        assert_eq!(winner(&d), Some(9), "{model}");
+        assert_eq!(d.outcome(), Outcome::Allowed, "{model}");
+
+        // A deny that matches wins over a default allow, and the other way
+        // round, whatever their order or priority.
+        for (rule_action, default, outcome) in [
+            (deny(), allow(), Outcome::Blocked),
+            (allow(), deny(), Outcome::Allowed),
+        ] {
+            let rules = vec![
+                with(
+                    with(
+                        rule(1, hash_a(), rule_action.clone()),
+                        "order",
+                        999_989.into(),
+                    ),
+                    "priority",
+                    1_000.into(),
+                ),
+                with(
+                    with(catch_all(9, default), "order", 100_001.into()),
+                    "priority",
+                    (-5).into(),
+                ),
+            ];
+            let doc = confirm(document(
+                model,
+                options.clone(),
+                vec![(1, "mixed", false, false, rules)],
+            ));
+            let d = decide(&validated(doc));
+            assert_eq!(winner(&d), Some(1), "{model}");
+            assert_eq!(d.outcome(), outcome, "{model}");
+            // The default would have decided without the rule.
+            assert_eq!(numbers(d.overridden()), vec![9], "{model}");
+        }
+
+        // A mandatory deny still decides first.
+        let doc = confirm(document(
+            model,
+            options.clone(),
+            vec![
+                (1, "mixed", false, false, vec![catch_all(9, allow())]),
+                (2, "blocklist", true, true, vec![rule(5, hash_a(), deny())]),
+            ],
+        ));
+        let d = decide(&validated(doc));
+        assert_eq!(winner(&d), Some(5), "{model}");
+        assert_eq!(d.reason_code(), ReasonCode::MandatoryDeny, "{model}");
+    }
+}
+
+#[test]
+fn a_disabled_or_unmatched_catch_all_leaves_the_unknown_policy() {
+    let disabled = with(catch_all(9, deny()), "enabled", false.into());
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(1, "mixed", false, false, vec![disabled])],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), None);
+    assert_eq!(d.reason_code(), ReasonCode::ImplicitDenyUnknown);
+    // A catch-all narrowed by context: an unknown fact never lets it apply.
+    let narrowed = with(
+        catch_all(9, deny()),
+        "match",
+        crit("device.hostname", "equals", "build-01"),
+    );
+    let doc = document(
+        "deny_wins",
+        serde_json::json!({}),
+        vec![(1, "mixed", false, false, vec![narrowed])],
+    );
+    let d = decide(&validated(doc));
+    assert_eq!(winner(&d), None);
+}

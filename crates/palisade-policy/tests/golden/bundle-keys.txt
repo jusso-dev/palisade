@@ -516,6 +516,8 @@
 512 msi.manufacturer 1
 513 msi.product_version 1
 514 msi.package_code 1
+515 catch_all 1
+516 confirm_permit_all 1
 -1 description 1
 -2 hidden 1
 -3 category_path 1

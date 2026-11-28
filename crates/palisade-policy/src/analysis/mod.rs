@@ -1027,6 +1027,12 @@ impl Analyser<'_> {
             if cover.scopes(self.doc) != victim.scopes(self.doc) {
                 return;
             }
+            // A catch-all is a floor (#329): when the victim matches, the
+            // catch-all never decides over it, so it neither shadows nor
+            // contradicts it.
+            if cover.rule.catch_all && !victim.rule.catch_all {
+                return;
+            }
             if !always_matches(cover, victim) {
                 return;
             }
@@ -1306,9 +1312,13 @@ fn first_match_before(doc: &PolicyDocument, a: &Entry<'_>, b: &Entry<'_>) -> boo
             core::cmp::Reverse(e.rule.id),
         )
     };
-    // The managed baseline is a floor (#39): it never comes first.
-    !crate::unknown::baseline::is_system_baseline(a.set)
-        && (crate::unknown::baseline::is_system_baseline(b.set) || key(a) < key(b))
+    // The managed baseline (#39) and then catch-alls (#329) are floors:
+    // a rule of a lower floor never comes first.
+    let floor = |e: &Entry<'_>| {
+        u8::from(crate::unknown::baseline::is_system_baseline(e.set))
+            + 2 * u8::from(e.rule.catch_all)
+    };
+    (floor(a), key(a)) < (floor(b), key(b))
 }
 
 /// The index keys a required criterion of a cover is filed under: one per
