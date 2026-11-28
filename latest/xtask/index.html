@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-d15c7af5.js";
+            window.path_to_searchindex_js = "../searchindex-e237a329.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-de2a680a.js"></script>
@@ -234,7 +234,12 @@ snapshot the list and every command's help (<code>src/snapshots/</code>, checked
 <p>Commands that need an external tool check for it first through
 <code>src/tools.rs</code>, which reads the version from the tool's version command:
 a missing tool stops the command with the install line for CI's version,
-and another version is a warning. Tests run the checks against a fake
+and another version is a warning. <code>ci</code> and <code>docs build</code> check every tool
+their steps run; <code>coverage-gate</code> checks git, cargo-llvm-cov and
+cargo-nextest; <code>bench-compare</code> git; <code>dist --msi</code> the .NET runtime that runs
+WiX; and <code>sign</code> (and <code>dist --sign</code>) PowerShell 7 for the signing script,
+except for the <code>none</code> dry run. Each fails with every missing tool named
+before it builds or runs anything. Tests run the checks against a fake
 probe for each case: present, missing and at another version. The workspace rules themselves are described in
 <a href="../docs/workspace.html"><code>docs/workspace.md</code></a>.</p>
 <p>More commands are planned in #29; <code>sbom</code> is filled in by #226.</p>

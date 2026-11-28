@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["effective_view"],"struct":["EffectiveRule","EffectiveSetting","EffectiveView","TypeMode"]};
+window.SIDEBAR_ITEMS = {"fn":["effective_view","effective_view_with_groups"],"struct":["EffectiveRule","EffectiveSetting","EffectiveView","TypeMode"]};
