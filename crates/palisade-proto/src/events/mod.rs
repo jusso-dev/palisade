@@ -55,6 +55,9 @@
 //!   `policy.target_mismatch`, `policy.stale`, `policy.lkg_loaded`,
 //!   `policy.emergency_loaded`, `policy.schema_unsupported` and
 //!   `tamper.policy.rollback_suspected`). No fields change.
+//! - **1.3.0**: `policy.kid`, the key that signed the policy bundle (#325),
+//!   so `policy.applied` names its signing key. It comes after every older
+//!   `policy` field, so the canonical form of an older event is unchanged.
 //!
 //! Readers are strict. They reject unknown fields and unknown enum values,
 //! because events are hash-chained (`seq`, `prev_hash`) and a reader that
@@ -118,7 +121,7 @@ pub use value::{
 };
 
 /// The event schema version this crate writes, and the newest it reads.
-pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 2, 0);
+pub const CURRENT: SchemaVersion = SchemaVersion::new(1, 3, 0);
 
 /// The first version of the current major: every part of the schema that
 /// has no later `since` version is in it.
@@ -132,6 +135,9 @@ pub const V1_1: SchemaVersion = SchemaVersion::new(1, 1, 0);
 /// Schema version 1.2: the policy integrity event types registered with
 /// `since: 1.2.0` (#225).
 pub const V1_2: SchemaVersion = SchemaVersion::new(1, 2, 0);
+
+/// Schema version 1.3: `policy.kid` (#325).
+pub const V1_3: SchemaVersion = SchemaVersion::new(1, 3, 0);
 
 /// Most signatures recorded for one file or process image.
 pub const MAX_SIGNERS: usize = 64;
@@ -414,6 +420,7 @@ pub const ADDED: &[(&str, SchemaVersion)] = &[
     ("/restriction", V1_1),
     ("/probe", V1_1),
     ("/fim", V1_1),
+    ("/policy/kid", V1_3),
 ];
 
 /// The schema version that added the field at `pointer`: the newest entry
@@ -906,6 +913,15 @@ pub struct PolicyRef {
         deserialize_with = "present"
     )]
     pub profile_id: Option<Uuid7>,
+    /// The key that signed the policy bundle: its key ID, the first 16
+    /// bytes of the SHA-256 of its `SubjectPublicKeyInfo`, in 32 lowercase
+    /// hex digits (#325). Since 1.3.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub kid: Option<Hex<16>>,
 }
 
 /// The log an event was translated from.
@@ -2206,6 +2222,9 @@ impl Event {
         }
         if self.script.as_ref().is_some_and(|s| s.text.is_some()) {
             need(pointer_since("/script/text"));
+        }
+        if self.policy.as_ref().is_some_and(|p| p.kid.is_some()) {
+            need(pointer_since("/policy/kid"));
         }
         version
     }

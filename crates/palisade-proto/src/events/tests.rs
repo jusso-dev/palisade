@@ -358,10 +358,10 @@ fn versions_are_checked_before_fields() {
         Err(LoadError::UnsupportedSchemaVersion(_))
     ));
     assert!(matches!(
-        read("1.3.0"),
+        read("1.4.0"),
         Err(LoadError::NewerMinorVersion(_))
     ));
-    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7", "1.2.0"] {
+    for older_or_same in ["1.0.0", "1.0.1", "1.1.0", "1.1.7", "1.2.0", "1.3.0"] {
         assert!(
             matches!(read(older_or_same), Err(LoadError::Json(_))),
             "{older_or_same}: read, and the extra field fails"
@@ -777,6 +777,39 @@ fn the_1_2_policy_integrity_types_need_a_1_2_label() {
 }
 
 #[test]
+fn policy_kid_needs_a_1_3_label() {
+    // #325: the signing key of a policy bundle is the only 1.3 addition.
+    let added: Vec<&str> = ADDED
+        .iter()
+        .filter(|(_, v)| *v == V1_3)
+        .map(|(p, _)| *p)
+        .collect();
+    assert_eq!(added, ["/policy/kid"]);
+    assert!(EventType::ALL.iter().all(|t| t.since() < V1_3));
+    let mut event = Event::from_json(
+        &with(serde_json::json!({
+            "schema_version": "1.3.0",
+            "event_type": "policy.applied",
+            "category": "policy",
+            "policy": { "version": 4, "kid": "06e3fd8fda29bb60ab59557de61edb0a" },
+        }))
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(event.min_version(), V1_3);
+    assert_eq!(event.validate(), Ok(()));
+    let kid = event.policy.as_ref().and_then(|p| p.kid).unwrap();
+    assert_eq!(kid.to_string(), "06e3fd8fda29bb60ab59557de61edb0a");
+    event.schema_version = V1_2;
+    assert_eq!(codes(&event), [EventErrorCode::NewerThanVersion]);
+    // Without the key ID, the same event is a 1.0 event again.
+    if let Some(p) = event.policy.as_mut() {
+        p.kid = None;
+    }
+    assert_eq!(event.min_version(), V1_0);
+}
+
+#[test]
 fn every_1_1_field_set_and_type_is_newer_than_1_0() {
     for set in FieldSet::ALL {
         assert_eq!(set.since() == V1_1, pointer_since(set.pointer()) == V1_1);
@@ -897,6 +930,10 @@ fn every_added_pointer_raises_the_minimum_version() {
             ["script", "text"] => {
                 value["script"] = serde_json::json!({ "inline": true, "text": "x" });
                 "text"
+            }
+            ["policy", "kid"] => {
+                value["policy"] = serde_json::json!({ "kid": "06e3fd8fda29bb60ab59557de61edb0a" });
+                "kid"
             }
             other => panic!("add a case for {other:?}"),
         };

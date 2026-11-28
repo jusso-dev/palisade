@@ -151,7 +151,7 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     let mut v = base();
     v["user"] = serde_json::json!({ "sid": "s-1-5-18" });
     cases.push(("lowercase sid", v));
-    for version in ["0.9.0", "1.3.0", "2.0.0"] {
+    for version in ["0.9.0", "1.4.0", "2.0.0"] {
         let mut v = base();
         v["schema_version"] = version.into();
         cases.push(("unreadable version", v));
@@ -159,6 +159,46 @@ fn schema_and_validate_agree_on_cross_field_rules() {
     for (name, value) in cases {
         assert_eq!(check(&value), (false, false), "{name}");
     }
+}
+
+/// `policy.kid` (1.3): both sides need a 1.3 label for it, and refuse a
+/// key ID that is not 32 lowercase hex digits.
+#[test]
+fn schema_and_validate_agree_on_policy_kid() {
+    let (schemas, index) = compiled();
+    let check = |value: &serde_json::Value| {
+        let by_schema = schemas.validate(value, index).is_ok();
+        let by_rust = serde_json::from_value::<Event>(value.clone())
+            .map(|e| e.validate().is_ok())
+            .unwrap_or(false);
+        (by_schema, by_rust)
+    };
+    let with = |label: &str, kid: &str| {
+        let mut v = base();
+        v["schema_version"] = label.into();
+        v["policy"] = serde_json::json!({ "version": 3, "kid": kid });
+        v
+    };
+    let kid = "06e3fd8fda29bb60ab59557de61edb0a";
+    for label in ["1.3.0", "1.3.4"] {
+        assert_eq!(check(&with(label, kid)), (true, true), "{label}");
+    }
+    for label in ["1.0.0", "1.1.0", "1.2.0", "1.2.9"] {
+        assert_eq!(check(&with(label, kid)), (false, false), "{label}");
+    }
+    for bad in [
+        "",
+        "06E3FD8FDA29BB60AB59557DE61EDB0A",
+        "06e3fd8fda29bb60ab59557de61edb0",
+        "06e3fd8fda29bb60ab59557de61edb0a00",
+        "06e3fd8fda29bb60ab59557de61edb0g",
+    ] {
+        assert_eq!(check(&with("1.3.0", bad)), (false, false), "{bad:?}");
+    }
+    // Without `kid`, a policy is fine under any readable label.
+    let mut v = base();
+    v["policy"] = serde_json::json!({ "version": 3 });
+    assert_eq!(check(&v), (true, true));
 }
 
 fn base_11() -> serde_json::Value {
