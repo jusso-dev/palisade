@@ -240,6 +240,7 @@ fn self_set(pins: &[SelfPin]) -> RuleSet {
                 )),
             ]),
             catch_all: false,
+            attribute: false,
             action: Action::Allow {},
             effects: Default::default(),
             order: None,
