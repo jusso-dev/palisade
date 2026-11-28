@@ -97,6 +97,14 @@ Still to come, tracked on #59: identity resolution and audit evaluation of each 
 
 Still to come, tracked on #58: the `EvtSubscribe` subscription with bookmarks persisted in the agent local store (ADR 0007), the first-start backfill, channel name resolution, the verbose channel and channel-size management, and the periodic policy store query.
 
+## Event spool (#63, #197)
+
+`pipeline` holds the durable part of the event pipeline. The agent local store (ADR 0007) is still a proposal, so the spool is a small, auditable segment log behind the `pipeline::spool::Spool` trait:
+
+- `pipeline::segment` is the file format: a magic, then records of `len`, CRC-32C and a body (`seq`, class, time, the event's chain value, the canonical event). The reader is written for untrusted bytes and fuzzed (target `spool_segment`). It returns every record up to the first incomplete or bad one, and the valid length, so recovery truncates there.
+- `pipeline::storage` keeps segments as files (`FileStorage`, one directory, `<class>-<first seq>.seg`, and a `spool.state` file replaced atomically) or in memory (`MemoryStorage`, which also simulates crashes and full disks for tests).
+- `pipeline::spool::SegmentSpool` keeps one chain of segments per class (diagnostic, summary, allowed, info, audit, blocked, security). Segments are 4 MiB and the spool is capped at 512 MiB by default. Unprotected classes may fill 95% of it; to make room the spool deletes whole segments, oldest first, of the lowest class, and blocked and security events go only when the spool is physically full of them. Events older than 30 days are deleted, except blocked and security events. Every deletion and refused record is returned as a `Dropped` with its class, reason and sequence numbers, for an `agent.dropped` event; nothing is lost silently. The uploader reads a class in order (`pending`) and acknowledges up to a sequence number (`ack`), and wholly acknowledged segments are deleted. Recovery cuts torn or damaged tails and reports them. The state file (acknowledgements and the chain head) has its own CRC and is written only after the segments are synced, so a sequence number is never issued twice.
+
 ## Platform layer
 
 The agent reads the OS only through the `palisade_core::platform` traits (#29), so its logic can be

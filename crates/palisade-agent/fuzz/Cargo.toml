@@ -5,6 +5,7 @@
 #
 #   cargo +nightly fuzz run kernel_records      # from crates/palisade-agent
 #   cargo +nightly fuzz run eventlog_records
+#   cargo +nightly fuzz run spool_segment
 [package]
 name = "palisade-agent-fuzz"
 version = "0.0.0"
@@ -33,6 +34,13 @@ bench = false
 [[bin]]
 name = "eventlog_records"
 path = "fuzz_targets/eventlog_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spool_segment"
+path = "fuzz_targets/spool_segment.rs"
 test = false
 doc = false
 bench = false

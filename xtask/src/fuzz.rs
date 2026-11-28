@@ -174,6 +174,10 @@ const EVENTLOG_SEEDS: Seed = Seed {
     test: "eventlog",
     name: "write_eventlog_fuzz_seeds",
 };
+const SPOOL_SEEDS: Seed = Seed {
+    test: "pipeline",
+    name: "write_spool_fuzz_seeds",
+};
 
 /// Seeds from the generated fixture corpus (#25): PEs, their signatures and
 /// the test PKI's certificates.
@@ -278,6 +282,11 @@ pub const PROJECTS: &[Project] = &[
                 name: "eventlog_records",
                 dict: None,
                 seeds: &[EVENTLOG_SEEDS],
+            },
+            Target {
+                name: "spool_segment",
+                dict: None,
+                seeds: &[SPOOL_SEEDS],
             },
         ],
     },
