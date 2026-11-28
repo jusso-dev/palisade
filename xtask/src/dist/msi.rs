@@ -165,6 +165,10 @@ pub fn check_sources(wxs: &str) -> Vec<String> {
     problems
 }
 
+/// The tools the package build runs: the .NET runtime that runs WiX (the
+/// pinned WiX itself is downloaded and checked by [`build`]).
+pub const TOOLS: &[crate::tools::Tool] = &[crate::tools::DOTNET];
+
 /// Builds and validates the package. Returns its path.
 pub fn build(root: &Path, inputs: &Inputs<'_>) -> Result<PathBuf, String> {
     let wxs = std::fs::read_to_string(root.join(SOURCES[0]))

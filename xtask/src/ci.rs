@@ -9,7 +9,7 @@
 
 use std::process::Command;
 
-use crate::tools::{self, Probe, ProcessProbe, Status};
+use crate::tools::{self, DOTNET, LLVM_COV, NEXTEST, Probe, ProcessProbe, Status, Tool};
 
 /// One local step: a CI command and the external tool it needs, if any.
 #[derive(Debug)]
@@ -38,21 +38,6 @@ pub struct Step {
 /// connection.
 pub const POSTGRES_URL: &str = "PALISADE_TEST_DATABASE_ADMIN_URL";
 
-/// An external tool: the command that proves it is installed, the version
-/// CI uses (when its version command prints one to compare), and the
-/// install command for that version.
-#[derive(Debug, Clone, Copy)]
-pub struct Tool {
-    pub check: &'static [&'static str],
-    pub version: Option<&'static str>,
-    pub install: &'static str,
-}
-
-const NEXTEST: Tool = Tool {
-    check: &["cargo", "nextest", "--version"],
-    version: Some("0.9.152"),
-    install: "cargo install --locked cargo-nextest@0.9.152",
-};
 const DENY: Tool = Tool {
     check: &["cargo", "deny", "--version"],
     version: Some("0.22.0"),
@@ -72,11 +57,6 @@ const HACK: Tool = Tool {
     check: &["cargo", "hack", "--version"],
     version: Some("0.6.46"),
     install: "cargo install --locked cargo-hack@0.6.46",
-};
-const LLVM_COV: Tool = Tool {
-    check: &["cargo", "llvm-cov", "--version"],
-    version: Some("0.9.2"),
-    install: "cargo install --locked cargo-llvm-cov@0.9.2",
 };
 const INSTA: Tool = Tool {
     check: &["cargo", "insta", "--version"],
@@ -132,11 +112,6 @@ const PODMAN: Tool = Tool {
     check: &["podman", "--version"],
     version: None,
     install: "install podman (CI uses the one on the ubuntu-latest image)",
-};
-const DOTNET: Tool = Tool {
-    check: &["dotnet", "--list-runtimes"],
-    version: None,
-    install: "install the .NET runtime (CI uses the one on the hosted Windows images); WiX itself is fetched and checked by `cargo xtask dist`",
 };
 
 /// Every local step, in CI job order. The MSRV check is added by [`run`],

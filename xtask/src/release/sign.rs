@@ -242,6 +242,17 @@ impl Config {
     }
 }
 
+/// The tools signing with `kind` needs: PowerShell 7 for the signing
+/// script (`test-ca` and `pfx`) and for verification, which every signer
+/// but `none` runs. `none` only prints what it would do. The `cloud-hsm`
+/// command itself is the operator's, checked when it runs.
+pub fn tools(kind: Kind, verify_only: bool) -> Vec<crate::tools::Tool> {
+    match kind {
+        Kind::None if !verify_only => Vec::new(),
+        _ => vec![crate::tools::PWSH],
+    }
+}
+
 /// The signer for `config`, running commands through `runner`.
 pub fn signer<'a>(
     config: &'a Config,
@@ -751,6 +762,23 @@ mod tests {
                 .any(|a| a == "-Signer" || a == "cloud-hsm")
         );
         assert_eq!(rec.calls[1].args.last().unwrap(), "-RequireTimestamp");
+    }
+
+    #[test]
+    fn signers_require_powershell_except_a_dry_run() {
+        let names = |kind, verify| -> Vec<String> {
+            tools(kind, verify)
+                .iter()
+                .map(crate::tools::Tool::name)
+                .collect()
+        };
+        assert!(names(Kind::None, false).is_empty());
+        // Verification runs the OS tool through the script, whatever signed.
+        assert_eq!(names(Kind::None, true), ["pwsh"]);
+        for kind in [Kind::TestCa, Kind::Pfx, Kind::CloudHsm] {
+            assert_eq!(names(kind, false), ["pwsh"], "{kind:?}");
+            assert_eq!(names(kind, true), ["pwsh"], "{kind:?}");
+        }
     }
 
     #[test]

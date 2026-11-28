@@ -323,6 +323,9 @@ pub fn run_benches(
     read_results(home)
 }
 
+/// The tools the comparison runs beyond cargo: git, for the base worktree.
+pub const TOOLS: &[crate::tools::Tool] = &[crate::tools::GIT];
+
 /// Where the comparison keeps its files: `target/bench-compare/`.
 pub fn work_dir(root: &Path) -> PathBuf {
     root.join("target").join("bench-compare")
@@ -331,6 +334,15 @@ pub fn work_dir(root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_comparison_requires_git() {
+        let probe = &mut crate::tools::tests::FakeProbe::default();
+        assert_eq!(
+            crate::tools::require("bench-compare", TOOLS, probe).unwrap_err(),
+            "bench-compare needs tools that are missing:\n  git is not installed: install git (CI uses the one on the hosted images)"
+        );
+    }
 
     fn m(point: f64, spread: f64) -> Median {
         Median {
