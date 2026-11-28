@@ -2,7 +2,7 @@
 <p>Policy decides whether command lines are captured (<code>capture_cmdline</code>,
 on by default). A captured command line is redacted first, with the same
 linear-time engine as decision traces
-(<a href="../../../palisade_policy/trace/privacy/struct.Redactor.html" title="struct palisade_policy::trace::privacy::Redactor"><code>palisade_policy::trace::privacy::Redactor</code></a>), and then cut to
+([<code>palisade_policy::trace::privacy::Redactor</code>]), and then cut to
 <a href="constant.MAX_CMDLINE_CHARS.html" title="constant palisade_agent::telemetry::cmdline::MAX_CMDLINE_CHARS"><code>MAX_CMDLINE_CHARS</code></a>. Redacting before cutting means a secret that
 straddles the cut is removed whole, never left half-visible.</p>
 <p>The default patterns remove common secret-bearing arguments: a value

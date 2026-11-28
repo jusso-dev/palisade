@@ -3,7 +3,7 @@
 the emergency policy decides, so nothing is decided more loosely
 than the cache allows.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.unenrolled" class="method"><a class="src rightside" href="../../src/palisade_agent/policy_cache/mod.rs.html#368-376">Source</a><h4 class="code-header">pub fn <a href="#method.unenrolled" class="fn">unenrolled</a>(
-    engine: <a class="struct" href="../../palisade_policy/engine/struct.EngineConfig.html" title="struct palisade_policy::engine::EngineConfig">EngineConfig</a>,
+    engine: EngineConfig,
     events: <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/sync/struct.Arc.html" title="struct alloc::sync::Arc">Arc</a>&lt;dyn <a class="trait" href="events/trait.PolicyEventSink.html" title="trait palisade_agent::policy_cache::events::PolicyEventSink">PolicyEventSink</a>&gt;,
 ) -&gt; Self</h4></section></summary><div class="docblock"><p>A cache for a device that is not enrolled: it runs the first-install
 policy and refuses every bundle. Enrolment (#62) replaces it with
